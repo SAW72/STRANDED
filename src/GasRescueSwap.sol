@@ -355,9 +355,7 @@ contract GasRescueSwap is IGasRescueSwap, Ownable, Pausable, ReentrancyGuard, EI
         (bool sent,) = payable(order.nativeTo).call{value: nativeOut}("");
         if (!sent) revert NativeTransferFailed();
 
-        if (
-            token.balanceOf(address(this)) != 0 || weth.balanceOf(address(this)) != 0 || address(this).balance != 0
-        ) {
+        if (token.balanceOf(address(this)) != 0 || weth.balanceOf(address(this)) != 0 || address(this).balance != 0) {
             revert DustRemaining();
         }
     }
