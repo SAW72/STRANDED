@@ -119,15 +119,17 @@ export function App() {
   const quote = quoteQuery.data?.ok ? quoteQuery.data.quote : null;
   const quoteBlockReason = !relayer
     ? "RELAYER_BASE_URL is not set. The sign path is blocked until the Relayer quote exists."
-    : quoteQuery.isError
-      ? "Relayer GET /quotes failed. Signing is blocked."
-      : quoteQuery.data && !quoteQuery.data.ok
-        ? quoteQuery.data.reason
-        : quoteQuery.isFetching
-          ? null
-          : requestedAmount && requestedAmount > 0n && onBaseSepolia && address
-            ? "Waiting for Relayer GET /quotes."
-            : null;
+    : !address || !onBaseSepolia
+      ? "Connect on Base Sepolia and enter an amount so the app can call Relayer GET /quotes."
+      : !requestedAmount || requestedAmount === 0n
+        ? "Enter a rescue amount above zero to request Relayer GET /quotes."
+        : quoteQuery.isError
+          ? "Relayer GET /quotes failed. Signing is blocked."
+          : quoteQuery.data && !quoteQuery.data.ok
+            ? quoteQuery.data.reason
+            : quoteQuery.isFetching
+              ? "Requesting Relayer GET /quotes…"
+              : "Waiting for Relayer GET /quotes.";
 
   const phase = rescuePhase({
     quote,
@@ -300,22 +302,31 @@ export function App() {
         <p className="muted">{FEE_HELPER_COPY}</p>
         <p className="muted">Values come from Relayer GET /quotes (feeAmount clamp in rescued token units).</p>
 
-        {quote ? (
-          <dl className="kv">
-            <dt>amount</dt>
-            <dd>
-              {formatTokenAmount(quote.amount, reviewDecimals)}{" "}
-              <span className="muted">({quote.amount.toString()} raw · {reviewDecimals} decimals)</span>
-            </dd>
-            <dt>feeAmount</dt>
-            <dd>
-              {formatTokenAmount(quote.feeAmount, reviewDecimals)}{" "}
-              <span className="muted">({quote.feeAmount.toString()} raw)</span>
-            </dd>
-            <dt>feeTo</dt>
-            <dd className="mono">{quote.feeTo}</dd>
-          </dl>
-        ) : (
+        <dl className="kv">
+          <dt>amount</dt>
+          <dd>
+            {quote
+              ? <>
+                  {formatTokenAmount(quote.amount, reviewDecimals)}{" "}
+                  <span className="muted">({quote.amount.toString()} raw · {reviewDecimals} decimals)</span>
+                </>
+              : <span className="muted">— from Relayer GET /quotes</span>}
+          </dd>
+          <dt>feeAmount</dt>
+          <dd>
+            {quote
+              ? <>
+                  {formatTokenAmount(quote.feeAmount, reviewDecimals)}{" "}
+                  <span className="muted">({quote.feeAmount.toString()} raw)</span>
+                </>
+              : <span className="muted">— from Relayer GET /quotes</span>}
+          </dd>
+          <dt>feeTo</dt>
+          <dd className="mono">
+            {quote ? quote.feeTo : <span className="muted">— from Relayer GET /quotes</span>}
+          </dd>
+        </dl>
+        {!quote && (
           <div className="banner banner-block">
             Quote missing. Signing is blocked.
             {quoteBlockReason ? ` ${quoteBlockReason}` : ""}
