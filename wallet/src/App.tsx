@@ -12,14 +12,31 @@ import {
 } from "wagmi";
 import { erc20PermitAbi, gasRescueAbi } from "./abi";
 import {
+  AMOUNT_HELPER,
+  AMOUNT_LABEL,
+  CANCEL_LABEL,
+  CONFIRM_HINT,
+  CONFIRMED_HINT,
+  FEE_HELPER,
+  FEE_LABEL,
+  FEE_TO_HELPER,
+  FEE_TO_LABEL,
+  REVIEW_SUBTITLE,
+  REVIEW_TITLE,
+  REVIEW_TRUST_LINE,
+  SIGN_LOCKED,
+  TRY_AGAIN_LABEL,
+} from "./copy";
+import { CopyAddress } from "./CopyAddress";
+import {
   BASE_SEPOLIA_CHAIN_ID,
-  FEE_HELPER_COPY,
   gasRescueAddress,
   isBaseSepolia,
   relayerBaseUrl,
   tokenAddress,
 } from "./config";
 import { formatTokenAmount, parseHumanAmount, shortenAddress } from "./lib/format";
+import { quoteUiStatus } from "./lib/quoteStatus";
 import {
   buildOrder,
   gasRescueDomain,
@@ -117,19 +134,16 @@ export function App() {
   });
 
   const quote = quoteQuery.data?.ok ? quoteQuery.data.quote : null;
-  const quoteBlockReason = !relayer
-    ? "RELAYER_BASE_URL is not set. The sign path is blocked until the Relayer quote exists."
-    : !address || !onBaseSepolia
-      ? "Connect on Base Sepolia and enter an amount so the app can call Relayer GET /quotes."
-      : !requestedAmount || requestedAmount === 0n
-        ? "Enter a rescue amount above zero to request Relayer GET /quotes."
-        : quoteQuery.isError
-          ? "Relayer GET /quotes failed. Signing is blocked."
-          : quoteQuery.data && !quoteQuery.data.ok
-            ? quoteQuery.data.reason
-            : quoteQuery.isFetching
-              ? "Requesting Relayer GET /quotes…"
-              : "Waiting for Relayer GET /quotes.";
+  const quoteStatus = quoteUiStatus({
+    hasRelayer: Boolean(relayer),
+    connectedOnNetwork: Boolean(address && onBaseSepolia),
+    hasAmount: Boolean(requestedAmount && requestedAmount > 0n),
+    fetching: quoteQuery.isFetching,
+    quoteReady: Boolean(quote),
+    fetchFailed: Boolean(
+      quoteQuery.isError || (quoteQuery.data !== undefined && !quoteQuery.data.ok),
+    ),
+  });
 
   const phase = rescuePhase({
     quote,
@@ -160,6 +174,16 @@ export function App() {
     if (balance === undefined) return;
     setHumanAmount(formatUnits(balance, displayDecimals));
   }, [balance, displayDecimals]);
+
+  function onCancel() {
+    setSignError(null);
+    if (detailsConfirmed || signed) {
+      setDetailsConfirmed(false);
+      setSigned(null);
+      return;
+    }
+    setHumanAmount("");
+  }
 
   async function onSign() {
     if (!canPromptSignatures(phase) || !quote || !address || !token || !rescue) return;
@@ -225,8 +249,8 @@ export function App() {
       <p className="eyebrow">Scout #1 · testnet only</p>
       <h1>GasRescue wallet</h1>
       <p className="lede">
-        Base Sepolia (84532). Review the Relayer quote, confirm the details, then sign one EIP-712
-        Order and one EIP-2612 permit. No mainnet config.
+        Base Sepolia testnet. Review the fee, confirm the details, then sign in your wallet. Mainnet
+        is not available.
       </p>
 
       <section className="card">
@@ -271,20 +295,18 @@ export function App() {
         <h2>2. Stranded token</h2>
         <dl className="kv">
           <dt>Token</dt>
-          <dd className="mono">{token ? `${tokenSymbol ?? "ERC-20"} · ${token}` : "not configured"}</dd>
+          <dd>{token ? `${tokenSymbol ?? "Token"} · ${shortenAddress(token)}` : "not configured"}</dd>
           <dt>Balance</dt>
           <dd>
             {balance !== undefined
-              ? `${formatTokenAmount(balance, displayDecimals)} (${displayDecimals} decimals)`
+              ? formatTokenAmount(balance, displayDecimals)
               : isConnected && onBaseSepolia
                 ? "Reading…"
                 : "Connect on Base Sepolia to read balance."}
           </dd>
-          <dt>GasRescue</dt>
-          <dd className="mono">{rescue ?? "not configured"}</dd>
         </dl>
         <label className="field">
-          Amount to rescue
+          {AMOUNT_LABEL}
           <input
             inputMode="decimal"
             placeholder="0.0"
@@ -298,40 +320,51 @@ export function App() {
       </section>
 
       <section className="card">
-        <h2>3. Review rescue</h2>
-        <p className="muted">{FEE_HELPER_COPY}</p>
-        <p className="muted">Values come from Relayer GET /quotes (feeAmount clamp in rescued token units).</p>
+        <h2>3. {REVIEW_TITLE}</h2>
+        <p className="subtitle">{REVIEW_SUBTITLE}</p>
 
-        <dl className="kv">
-          <dt>amount</dt>
-          <dd>
-            {quote
-              ? <>
-                  {formatTokenAmount(quote.amount, reviewDecimals)}{" "}
-                  <span className="muted">({quote.amount.toString()} raw · {reviewDecimals} decimals)</span>
-                </>
-              : <span className="muted">— from Relayer GET /quotes</span>}
-          </dd>
-          <dt>feeAmount</dt>
-          <dd>
-            {quote
-              ? <>
-                  {formatTokenAmount(quote.feeAmount, reviewDecimals)}{" "}
-                  <span className="muted">({quote.feeAmount.toString()} raw)</span>
-                </>
-              : <span className="muted">— from Relayer GET /quotes</span>}
-          </dd>
-          <dt>feeTo</dt>
-          <dd className="mono">
-            {quote ? quote.feeTo : <span className="muted">— from Relayer GET /quotes</span>}
-          </dd>
-        </dl>
-        {!quote && (
-          <div className="banner banner-block">
-            Quote missing. Signing is blocked.
-            {quoteBlockReason ? ` ${quoteBlockReason}` : ""}
+        <div className="review-list">
+          <div className="review-row">
+            <div className="review-label">{AMOUNT_LABEL}</div>
+            <div className="review-value">
+              {quote ? formatTokenAmount(quote.amount, reviewDecimals) : "—"}
+            </div>
+            <p className="review-help">{AMOUNT_HELPER}</p>
+          </div>
+          <div className="review-row">
+            <div className="review-label">{FEE_LABEL}</div>
+            <div className="review-value">
+              {quote ? formatTokenAmount(quote.feeAmount, reviewDecimals) : "—"}
+            </div>
+            <p className="review-help">{FEE_HELPER}</p>
+          </div>
+          <div className="review-row">
+            <div className="review-label">{FEE_TO_LABEL}</div>
+            <div className="review-value">
+              {quote ? <CopyAddress address={quote.feeTo} /> : "—"}
+            </div>
+            <p className="review-help">{FEE_TO_HELPER}</p>
+          </div>
+        </div>
+
+        {quoteStatus.kind === "loading" && (
+          <div className="banner" role="status">
+            {quoteStatus.message}
           </div>
         )}
+        {quoteStatus.kind === "error" && (
+          <div className="banner banner-block" role="alert">
+            <div className="row">
+              <span>{quoteStatus.message}</span>
+              <button className="btn btn-compact" type="button" onClick={() => quoteQuery.refetch()}>
+                {TRY_AGAIN_LABEL}
+              </button>
+            </div>
+          </div>
+        )}
+        {quoteStatus.kind === "idle" && <p className="muted">{quoteStatus.message}</p>}
+
+        <p className="trust-line">{REVIEW_TRUST_LINE}</p>
 
         <div className="row">
           <button
@@ -342,19 +375,26 @@ export function App() {
           >
             Confirm details
           </button>
+          <button
+            className="btn"
+            type="button"
+            disabled={signing || (!humanAmount && !detailsConfirmed && !signed)}
+            onClick={onCancel}
+          >
+            {CANCEL_LABEL}
+          </button>
           {phase === "confirmed" || phase === "signing" || phase === "signed" ? (
-            <span className="ok">Details confirmed. Signature prompts may proceed.</span>
+            <span className="ok">{CONFIRMED_HINT}</span>
           ) : (
-            <span className="muted">Confirm the quote before any wallet signature.</span>
+            <span className="muted">{CONFIRM_HINT}</span>
           )}
         </div>
       </section>
 
       <section className="card">
-        <h2>4. Sign Order + permit</h2>
+        <h2>4. Sign</h2>
         <p className="muted">
-          One path only: EIP-712 <code>Order</code>, then EIP-2612 <code>Permit</code>. The permit
-          spender is GasRescue; value equals the quoted amount; deadline is shared.
+          Your wallet will ask you to sign twice: once for the rescue, once to allow the token move.
         </p>
         <button
           className="btn btn-primary"
@@ -366,7 +406,7 @@ export function App() {
         </button>
         {!canPromptSignatures(phase) && (
           <div className="banner banner-block">
-            Sign path locked until a Relayer quote exists and you tap Confirm details.
+            {SIGN_LOCKED}
           </div>
         )}
         {signError && <p className="danger">{signError}</p>}

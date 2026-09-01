@@ -3,9 +3,6 @@ import { baseSepolia } from "viem/chains";
 
 export const BASE_SEPOLIA_CHAIN_ID = 84_532 as const;
 
-export const FEE_HELPER_COPY =
-  "About 1% of the amount you rescue (testnet floor/ceiling apply in token units).";
-
 const DEFAULT_RPC = "https://sepolia.base.org";
 
 function readEnv(name: keyof ImportMetaEnv): string {

@@ -6,8 +6,8 @@ Flow:
 
 1. Connect an injected wallet (MetaMask / Rabby / Coinbase). Wrong networks are prompted to switch to Base Sepolia.
 2. Read the stranded token balance (`VITE_TOKEN_ADDRESS`, typically the deployed `MockERC20Permit`).
-3. Fetch **Relayer `GET /quotes`**. Review `amount`, `feeAmount`, and `feeTo` in human decimals (`tokenDecimals` from the quote; expect 18).
-4. Tap **Confirm details**. Only then does the app prompt the wallet.
+3. Fetch Relayer `GET /quotes` (operator). The UI reviews **Amount to rescue**, **Rescue fee**, and **Fee goes to** in human decimals (`tokenDecimals` from the quote; expect 18). Fee recipient is shortened with a Copy button.
+4. Tap **Confirm details**. Only then does the app prompt the wallet. **Cancel** steps back without signing.
 5. One signature path: EIP-712 `Order`, then EIP-2612 `permit`.
 
 This app does **not** invent a quotes endpoint, does **not** compute a fallback 1% fee, and does **not** default to mainnet. If `RELAYER_BASE_URL` is unset or `GET /quotes` fails / omits required fields, the sign path stays locked.

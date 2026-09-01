@@ -11,7 +11,7 @@ export type GateInput = {
 
 /**
  * Process gate: signatures are prompted only after the user confirms the
- * review screen (feeAmount, amount, feeTo). A missing quote never unlocks sign.
+ * review screen (amount, fee, fee recipient). A missing quote never unlocks sign.
  */
 export function rescuePhase(input: GateInput): RescuePhase {
   if (!input.quote) return "needs_quote";
