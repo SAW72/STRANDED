@@ -13,9 +13,10 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {IGasRescue} from "./interfaces/IGasRescue.sol";
 
 /// @title GasRescue
-/// @notice Base Sepolia thin-slice: destination-only rescue when a user holds an
-///         allowlisted EIP-2612 ERC-20 but has zero native ETH for gas.
-///         Fee is routed to `order.feeTo`; remainder always returns to `order.user`.
+/// @notice PLACEHOLDER / regression harness: in-token fee skim on Base Sepolia.
+///         Not the product. Real rescue is `GasRescueSwap` (swap-for-gas + same-chain move-out).
+///         Relayer permit-pulls an allowlisted EIP-2612 ERC-20, pays `feeAmount` to `feeTo`,
+///         and returns the remainder to `order.user`. Kept compiling for harness tests.
 contract GasRescue is IGasRescue, Ownable, Pausable, ReentrancyGuard, EIP712 {
     using SafeERC20 for IERC20;
 
