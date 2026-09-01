@@ -1,0 +1,21 @@
+# Foundry build artifacts
+cache/
+out/
+
+# Broadcast logs (can include local keys if misconfigured)
+broadcast/
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Coverage
+lcov.info
+coverage/
+
+# Editors / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
