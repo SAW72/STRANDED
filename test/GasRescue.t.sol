@@ -57,9 +57,9 @@ contract GasRescueTest is Test {
         vm.prank(relayer);
         rescue.rescueWithPermit(order, orderSig, v, r, s);
 
-        assertEq(token.balanceOf(user), 900 ether, "user remainder of unspent tokens");
+        // recipient == user: 1000 pulled-from 100, then 97 remainder returned; net is fee only.
+        assertEq(token.balanceOf(user), 997 ether, "user keeps unspent + rescued remainder");
         assertEq(token.balanceOf(relayer), 3 ether, "relayer in-token fee");
-        assertEq(token.balanceOf(order.recipient), 97 ether, "rescued remainder");
         assertEq(token.balanceOf(address(rescue)), 0, "contract does not retain tokens");
         assertTrue(rescue.usedNonces(user, order.nonce));
         assertEq(user.balance, 0, "user still has zero native ETH");
@@ -161,16 +161,19 @@ contract GasRescueTest is Test {
         MockFeeOnTransferToken fot = new MockFeeOnTransferToken("Fee Token", "FOT", 1_000); // 10%
         fot.mint(user, 1_000 ether);
 
+        address recipient = makeAddr("fotRecipient");
         IGasRescue.Order memory order = _defaultOrder(address(fot), 100 ether, 5 ether, 3);
+        order.recipient = recipient;
         (bytes memory orderSig, uint8 v, bytes32 r, bytes32 s) = _signOrderAndPermit(order, address(fot), USER_PK);
 
         vm.prank(relayer);
         rescue.rescueWithPermit(order, orderSig, v, r, s);
 
-        // Pull 100, FoT burns 10, received = 90. Fee 5 to relayer, remainder 85 to recipient.
+        // Pull 100, inbound FoT burns 10, received = 90. Fee 5 / remainder 85 leave this contract.
         // Outbound transfers also burn 10%, so relayer gets 4.5 and recipient 76.5.
+        assertEq(fot.balanceOf(user), 900 ether, "user debited full amount including inbound FoT");
         assertEq(fot.balanceOf(relayer), 4.5 ether);
-        assertEq(fot.balanceOf(order.recipient), 76.5 ether);
+        assertEq(fot.balanceOf(recipient), 76.5 ether);
         assertEq(fot.balanceOf(address(rescue)), 0);
     }
 
