@@ -15,8 +15,9 @@ A user who holds an allowlisted ERC-20 but has **zero native ETH** signs an EIP-
 1. Pre-skims `feeAmount` of `tokenIn` to `feeTo`
 2. Requires `amountSwap + feeAmount <= amountIn` (overflow-safe)
 3. Sends remainder ERC-20 to `to` (same-chain move-out)
-4. Calls the signed allowlisted `router` with calldata whose `keccak256` equals `pathHash`
-5. Unwraps WETH if needed and credits **native** to `nativeTo` (≥ `minAmountOut`, fail closed)
+4. Calls the signed allowlisted `router` with calldata whose `keccak256` equals `pathHash`. The swap leg must consume **exactly** `amountSwap` (leftover `tokenIn` reverts; it is never forwarded to `to`)
+5. Unwraps **this job's** WETH delta and credits **this job's** native delta to `nativeTo` (≥ `minAmountOut`, fail closed). Never sweeps `address(this).balance`
+6. End-of-tx zeros: `tokenIn`, WETH, and ETH on the contract must be `0`
 
 Never treats `msg.sender` as a user / fee / remainder / native substitute. Atomic all-or-nothing; no on-chain partial fills. Owner ≠ relayer hot key. Non-proxy, `nonReentrant`, owner-only pause + allowlists.
 
@@ -33,7 +34,7 @@ Native recipient field is **`nativeTo`** (not `safeRecipient`).
 ### Auth
 
 - EIP-2612 tokens must be owner-allowlisted (`setEip2612Token`).
-- Permit2 is **gated** (`setPermit2`); default off. `rescueWithPermit2` reverts `NoGaslessAuth` unless enabled.
+- Permit2 is **gated** (`setPermit2`); default off. `rescueWithPermit2` reverts `NoGaslessAuth` unless enabled. The pull uses `permitWitnessTransferFrom` with the Order struct hash as witness.
 - Non-permit tokens with Permit2 disabled fail closed. There is no “just transferFrom” path.
 
 ### Sequence (`rescueWithPermit` / `rescueWithPermit2`)
@@ -46,7 +47,7 @@ Modifiers: `nonReentrant`, `whenNotPaused`, `onlyRelayer`.
 4. Gasless-auth gate (`eip2612Tokens` or enabled Permit2) else `NoGaslessAuth` — **still no nonce write**.
 5. `usedNonces[user][nonce] = true`.
 6. Permit / Permit2 pull; exact balance delta (`FoTOrBalanceMismatch`).
-7. Fee → `feeTo`; remainder → `to`; router call; unwrap; native → `nativeTo` ≥ `minAmountOut`.
+7. Appendix A: fee → `feeTo`; remainder ERC-20 → `to` (before swap); router must consume exactly `amountSwap`; this job's native delta → `nativeTo` ≥ `minAmountOut`; contract `tokenIn` / WETH / ETH == 0.
 
 User errors (bad sig, underfunded, wrong domain, path mismatch) do not consume the nonce. Later execution reverts roll the nonce write back.
 
@@ -65,7 +66,7 @@ forge test -vv
 forge test -vv
 ```
 
-`GasRescueSwap` coverage: happy-path mock swap (native + WETH unwrap, both testnets), slippage, underfunded / path / domain / sig without nonce burn, replay, wrong `chainId` / mainnet blocked, `feeAmount + amountSwap` overflow, FoT, reentrancy (permit / transferFrom / router), non-permit and disabled Permit2 fail-closed, owner ≠ relayer, pause.
+`GasRescueSwap` coverage: happy-path mock swap (native + WETH unwrap, both testnets), exact `amountSwap` consume (leftover tokenIn reverts), job-only native credit (donated ETH/WETH not swept), end-of-tx tokenIn/WETH/ETH zeros, Permit2 Order witness binding, slippage, underfunded / path / domain / sig without nonce burn, replay, wrong `chainId` / mainnet blocked, `feeAmount + amountSwap` overflow, FoT, reentrancy (permit / transferFrom / router), non-permit and disabled Permit2 fail-closed, owner ≠ relayer, pause.
 
 Harness tests in `test/GasRescue.t.sol` stay green.
 

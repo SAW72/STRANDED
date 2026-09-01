@@ -28,6 +28,11 @@ contract GasRescueSwap is IGasRescueSwap, Ownable, Pausable, ReentrancyGuard, EI
         "Order(address user,address tokenIn,uint256 amountIn,uint256 feeAmount,address feeTo,uint256 amountSwap,uint256 minAmountOut,address to,address nativeTo,address router,bytes32 pathHash,uint256 chainId,uint256 deadline,uint256 nonce)"
     );
 
+    /// @dev Permit2 witness type stub: binds the signed Order as `witness`.
+    ///      Full typehash is Permit2's PermitWitnessTransferFrom prefix + this string.
+    string public constant PERMIT2_ORDER_WITNESS_TYPE_STRING =
+        "Order witness)Order(address user,address tokenIn,uint256 amountIn,uint256 feeAmount,address feeTo,uint256 amountSwap,uint256 minAmountOut,address to,address nativeTo,address router,bytes32 pathHash,uint256 chainId,uint256 deadline,uint256 nonce)TokenPermissions(address token,uint256 amount)";
+
     IWETH public immutable weth;
     IPermit2 public permit2;
     bool public permit2Enabled;
@@ -72,6 +77,8 @@ contract GasRescueSwap is IGasRescueSwap, Ownable, Pausable, ReentrancyGuard, EI
     error NoGaslessAuth();
     error Slippage();
     error SwapFailed();
+    error SwapInputNotConsumed();
+    error DustRemaining();
     error NativeTransferFailed();
 
     modifier onlyRelayer() {
@@ -191,10 +198,11 @@ contract GasRescueSwap is IGasRescueSwap, Ownable, Pausable, ReentrancyGuard, EI
         );
     }
 
-    /// @dev Sequence is fixed: view-only checks + EIP-712 recover + funding/slippage
-    ///      preflight (no nonce write) → consume nonce → permit → pull → feeTo skim →
-    ///      remainder ERC-20 to `to` → allowlisted router (`pathHash`) → unwrap →
-    ///      native to `nativeTo` ≥ `minAmountOut` (fail closed). Atomic; no partial fills.
+    /// @dev Appendix A sequence: view-only checks + EIP-712 recover + funding
+    ///      preflight (no nonce write) → consume nonce → permit → pull → feeAmount
+    ///      pre-skim → remainder ERC-20 to `to` (before swap) → router consumes
+    ///      exactly `amountSwap` → this job's native delta to `nativeTo` ≥ `minAmountOut`.
+    ///      End-of-tx tokenIn / WETH / ETH on this contract must be 0. Atomic; no partial fills.
     function rescueWithPermit(
         Order calldata order,
         bytes calldata orderSignature,
@@ -225,7 +233,8 @@ contract GasRescueSwap is IGasRescueSwap, Ownable, Pausable, ReentrancyGuard, EI
 
         IERC20 token = IERC20(order.tokenIn);
         uint256 balanceBefore = token.balanceOf(address(this));
-        permit2.permitTransferFrom(
+        bytes32 witness = keccak256(_encodeOrder(order));
+        permit2.permitWitnessTransferFrom(
             IPermit2.PermitTransferFrom({
                 permitted: IPermit2.TokenPermissions({token: order.tokenIn, amount: order.amountIn}),
                 nonce: permit2Nonce,
@@ -233,6 +242,8 @@ contract GasRescueSwap is IGasRescueSwap, Ownable, Pausable, ReentrancyGuard, EI
             }),
             IPermit2.SignatureTransferDetails({to: address(this), requestedAmount: order.amountIn}),
             order.user,
+            witness,
+            PERMIT2_ORDER_WITNESS_TYPE_STRING,
             permit2Signature
         );
         if (token.balanceOf(address(this)) - balanceBefore != order.amountIn) revert FoTOrBalanceMismatch();
@@ -308,6 +319,7 @@ contract GasRescueSwap is IGasRescueSwap, Ownable, Pausable, ReentrancyGuard, EI
     ) internal returns (uint256 nativeOut) {
         IERC20 token = IERC20(order.tokenIn);
 
+        // Appendix A: feeAmount pre-skim, then remainder ERC-20 → `to` (before swap).
         if (order.feeAmount > 0) {
             token.safeTransfer(order.feeTo, order.feeAmount);
         }
@@ -317,32 +329,37 @@ contract GasRescueSwap is IGasRescueSwap, Ownable, Pausable, ReentrancyGuard, EI
             token.safeTransfer(order.to, remainder);
         }
 
-        uint256 nativeBefore = order.nativeTo.balance;
+        // Swap leg must hold exactly `amountSwap`. Leftover tokenIn is never sent to `to`.
+        if (token.balanceOf(address(this)) != order.amountSwap) revert SwapInputNotConsumed();
+
+        uint256 ethBefore = address(this).balance;
+        uint256 wethBefore = weth.balanceOf(address(this));
 
         token.forceApprove(order.router, order.amountSwap);
         (bool ok,) = order.router.call(swapData);
         if (!ok) revert SwapFailed();
         token.forceApprove(order.router, 0);
 
-        uint256 leftover = token.balanceOf(address(this));
-        if (leftover > 0) {
-            token.safeTransfer(order.to, leftover);
+        if (token.balanceOf(address(this)) != 0) revert SwapInputNotConsumed();
+
+        uint256 wethAfter = weth.balanceOf(address(this));
+        uint256 wethGot = wethAfter > wethBefore ? wethAfter - wethBefore : 0;
+        if (wethGot > 0) {
+            weth.withdraw(wethGot);
         }
 
-        uint256 wethBal = weth.balanceOf(address(this));
-        if (wethBal > 0) {
-            weth.withdraw(wethBal);
-        }
+        uint256 ethAfter = address(this).balance;
+        nativeOut = ethAfter > ethBefore ? ethAfter - ethBefore : 0;
+        if (nativeOut < order.minAmountOut) revert Slippage();
 
-        uint256 credit = address(this).balance;
-        if (credit > 0) {
-            (bool sent,) = payable(order.nativeTo).call{value: credit}("");
-            if (!sent) revert NativeTransferFailed();
-        }
+        (bool sent,) = payable(order.nativeTo).call{value: nativeOut}("");
+        if (!sent) revert NativeTransferFailed();
 
-        uint256 nativeAfter = order.nativeTo.balance;
-        if (nativeAfter < nativeBefore || nativeAfter - nativeBefore < order.minAmountOut) revert Slippage();
-        nativeOut = nativeAfter - nativeBefore;
+        if (
+            token.balanceOf(address(this)) != 0 || weth.balanceOf(address(this)) != 0 || address(this).balance != 0
+        ) {
+            revert DustRemaining();
+        }
     }
 
     function _emitRescued(

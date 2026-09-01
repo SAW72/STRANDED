@@ -11,6 +11,8 @@ contract MockSwapRouter {
     uint256 public payAmount;
     bool public payAsWeth;
     IWETH public weth;
+    bool public customPull;
+    uint256 public pullAmount;
 
     bool public reenter;
     address public attackTarget;
@@ -41,6 +43,13 @@ contract MockSwapRouter {
         attackCalldata = data;
     }
 
+    function setPullAmount(
+        uint256 amount
+    ) external {
+        customPull = true;
+        pullAmount = amount;
+    }
+
     function swapExact(
         address tokenIn,
         uint256 amountIn,
@@ -52,7 +61,10 @@ contract MockSwapRouter {
             require(ok, "reenter failed");
         }
 
-        require(IERC20(tokenIn).transferFrom(msg.sender, address(this), amountIn), "pull failed");
+        uint256 take = customPull ? pullAmount : amountIn;
+        if (take > 0) {
+            require(IERC20(tokenIn).transferFrom(msg.sender, address(this), take), "pull failed");
+        }
 
         uint256 amount = payAmount;
         if (payAsWeth) {

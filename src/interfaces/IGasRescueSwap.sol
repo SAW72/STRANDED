@@ -35,6 +35,7 @@ interface IGasRescueSwap {
     ) external;
 
     /// @notice Permit2 path. Reverts `NoGaslessAuth` unless Permit2 is owner-enabled (fail closed).
+    ///         Pulls via `permitWitnessTransferFrom` with the Order struct hash as witness.
     function rescueWithPermit2(
         Order calldata order,
         bytes calldata orderSignature,

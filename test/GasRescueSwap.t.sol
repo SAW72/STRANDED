@@ -88,6 +88,8 @@ contract GasRescueSwapTest is Test {
         assertEq(token.balanceOf(user), 900 ether, "unspent stays with user");
         assertEq(token.balanceOf(relayer), relayerTokenBefore, "never pay msg.sender tokens");
         assertEq(token.balanceOf(address(rescue)), 0);
+        assertEq(weth.balanceOf(address(rescue)), 0);
+        assertEq(address(rescue).balance, 0);
         assertEq(nativeTo.balance, 0.05 ether, "native credited to nativeTo");
         assertEq(user.balance, 0, "user is not an implicit native sink");
         assertEq(relayer.balance, relayerEthBefore, "relayer is not a native sink");
@@ -104,6 +106,8 @@ contract GasRescueSwapTest is Test {
 
         assertEq(nativeTo.balance, 0.05 ether);
         assertEq(weth.balanceOf(address(rescue)), 0);
+        assertEq(address(rescue).balance, 0);
+        assertEq(token.balanceOf(address(rescue)), 0);
         assertEq(token.balanceOf(moveOut), 87 ether);
     }
 
@@ -117,6 +121,9 @@ contract GasRescueSwapTest is Test {
 
         assertEq(nativeTo.balance, 0.05 ether);
         assertEq(token.balanceOf(moveOut), 87 ether);
+        assertEq(token.balanceOf(address(rescue)), 0);
+        assertEq(weth.balanceOf(address(rescue)), 0);
+        assertEq(address(rescue).balance, 0);
         assertTrue(rescue.usedNonces(user, 3));
     }
 
@@ -330,7 +337,94 @@ contract GasRescueSwapTest is Test {
         assertEq(token.balanceOf(feeTo), 3 ether);
         assertEq(token.balanceOf(moveOut), 87 ether);
         assertEq(nativeTo.balance, 0.05 ether);
+        assertEq(token.balanceOf(address(rescue)), 0);
+        assertEq(weth.balanceOf(address(rescue)), 0);
+        assertEq(address(rescue).balance, 0);
         assertTrue(rescue.usedNonces(user, 4));
+        assertEq(permit2.lastWitness(), _hashOrderStruct(order), "Permit2 witness is Order struct hash");
+        assertEq(permit2.lastWitnessTypeString(), rescue.PERMIT2_ORDER_WITNESS_TYPE_STRING());
+    }
+
+    function test_leftoverTokenIn_afterPartialSwap_reverts() public {
+        router.setPullAmount(5 ether);
+        (IGasRescueSwap.Order memory order, bytes memory swapData) = _defaultOrderAndPath(1);
+        (bytes memory orderSig, uint8 v, bytes32 r, bytes32 s) = _signOrderAndPermit(order, address(token), USER_PK);
+
+        uint256 moveOutBefore = token.balanceOf(moveOut);
+
+        vm.expectRevert(GasRescueSwap.SwapInputNotConsumed.selector);
+        vm.prank(relayer);
+        rescue.rescueWithPermit(order, orderSig, v, r, s, swapData);
+
+        assertEq(token.balanceOf(moveOut), moveOutBefore, "leftover tokenIn must not land on `to`");
+        assertEq(token.balanceOf(address(rescue)), 0);
+        assertFalse(rescue.usedNonces(user, 1));
+    }
+
+    function test_donatedEth_notSweptToNativeTo() public {
+        vm.deal(address(rescue), 1 ether);
+        (IGasRescueSwap.Order memory order, bytes memory swapData) = _defaultOrderAndPath(1);
+        (bytes memory orderSig, uint8 v, bytes32 r, bytes32 s) = _signOrderAndPermit(order, address(token), USER_PK);
+
+        vm.expectRevert(GasRescueSwap.DustRemaining.selector);
+        vm.prank(relayer);
+        rescue.rescueWithPermit(order, orderSig, v, r, s, swapData);
+
+        assertEq(address(rescue).balance, 1 ether, "pre-existing ETH stays on the contract");
+        assertEq(nativeTo.balance, 0, "nativeTo must not receive swept address(this).balance");
+        assertFalse(rescue.usedNonces(user, 1));
+    }
+
+    function test_donatedWeth_notUnwrappedIntoNativeTo() public {
+        vm.deal(address(rescue), 1 ether);
+        vm.prank(address(rescue));
+        weth.deposit{value: 1 ether}();
+        assertEq(weth.balanceOf(address(rescue)), 1 ether);
+
+        (IGasRescueSwap.Order memory order, bytes memory swapData) = _defaultOrderAndPath(1);
+        (bytes memory orderSig, uint8 v, bytes32 r, bytes32 s) = _signOrderAndPermit(order, address(token), USER_PK);
+
+        vm.expectRevert(GasRescueSwap.DustRemaining.selector);
+        vm.prank(relayer);
+        rescue.rescueWithPermit(order, orderSig, v, r, s, swapData);
+
+        assertEq(weth.balanceOf(address(rescue)), 1 ether, "pre-existing WETH is not unwrapped");
+        assertEq(nativeTo.balance, 0, "nativeTo must not receive donated WETH as native");
+        assertFalse(rescue.usedNonces(user, 1));
+    }
+
+    function test_endOfTx_zeroAsserts_tokenInWethEth() public {
+        (IGasRescueSwap.Order memory order, bytes memory swapData) = _defaultOrderAndPath(12);
+        (bytes memory orderSig, uint8 v, bytes32 r, bytes32 s) = _signOrderAndPermit(order, address(token), USER_PK);
+
+        vm.prank(relayer);
+        rescue.rescueWithPermit(order, orderSig, v, r, s, swapData);
+
+        assertEq(token.balanceOf(address(rescue)), 0, "tokenIn dust == 0");
+        assertEq(weth.balanceOf(address(rescue)), 0, "WETH dust == 0");
+        assertEq(address(rescue).balance, 0, "ETH dust == 0");
+    }
+
+    function test_permit2_bindsOrderAsWitness() public {
+        MockPermit2 permit2 = new MockPermit2();
+        vm.prank(owner);
+        rescue.setPermit2(address(permit2), true);
+
+        vm.prank(user);
+        token.approve(address(permit2), type(uint256).max);
+
+        (IGasRescueSwap.Order memory order, bytes memory swapData) = _defaultOrderAndPath(5);
+        bytes memory orderSig = _signOrder(order, USER_PK);
+
+        vm.prank(relayer);
+        rescue.rescueWithPermit2(order, orderSig, 0, hex"00", swapData);
+
+        assertEq(permit2.lastWitness(), _hashOrderStruct(order));
+        assertEq(
+            permit2.lastWitnessTypeString(),
+            "Order witness)Order(address user,address tokenIn,uint256 amountIn,uint256 feeAmount,address feeTo,uint256 amountSwap,uint256 minAmountOut,address to,address nativeTo,address router,bytes32 pathHash,uint256 chainId,uint256 deadline,uint256 nonce)TokenPermissions(address token,uint256 amount)"
+        );
+        assertTrue(permit2.lastWitness() != bytes32(0));
     }
 
     function test_wrongRelayer_reverts() public {
@@ -500,6 +594,30 @@ contract GasRescueSwapTest is Test {
     ) internal view returns (bytes memory orderSig, uint8 v, bytes32 r, bytes32 s) {
         orderSig = _signOrder(order, pk);
         (v, r, s) = _signPermit(token_, order.user, order.amountIn, order.deadline, pk);
+    }
+
+    function _hashOrderStruct(
+        IGasRescueSwap.Order memory order
+    ) internal pure returns (bytes32) {
+        return keccak256(
+            abi.encode(
+                FROZEN_ORDER_TYPEHASH,
+                order.user,
+                order.tokenIn,
+                order.amountIn,
+                order.feeAmount,
+                order.feeTo,
+                order.amountSwap,
+                order.minAmountOut,
+                order.to,
+                order.nativeTo,
+                order.router,
+                order.pathHash,
+                order.chainId,
+                order.deadline,
+                order.nonce
+            )
+        );
     }
 
     function _signOrder(
