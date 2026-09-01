@@ -63,7 +63,14 @@ src/mocks/ReentrantToken.sol
 test/GasRescue.t.sol
 script/Deploy.s.sol
 script/Rescue.s.sol
+wallet/                                # Base Sepolia Wallet UX (wagmi/viem)
 ```
+
+## Wallet UX
+
+Thin-slice frontend for a gas-dead user on **Base Sepolia only**. Connect a wallet, read the stranded EIP-2612 token balance, review Relayer `GET /quotes` values, then (only after **Confirm details**) sign one EIP-712 `Order` plus one EIP-2612 permit.
+
+See [wallet/README.md](wallet/README.md) for how to run against Base Sepolia and a Relayer URL. Signing is blocked when the quote is missing — the app does not invent fee values.
 
 ## Prerequisites
 
