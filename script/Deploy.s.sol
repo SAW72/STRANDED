@@ -10,7 +10,8 @@ import {GasRescue} from "../src/GasRescue.sol";
 /// Required env:
 ///   PRIVATE_KEY          deployer / owner key (do not commit)
 ///   RELAYER_ADDRESS      first allowlisted relayer
-///   BASE_SEPOLIA_RPC_URL used by `forge script --rpc-url`
+/// Optional:
+///   TOKEN_ADDRESS        allowlisted immediately after deploy
 contract DeployGasRescue is Script {
     uint256 internal constant BASE_SEPOLIA_CHAIN_ID = 84_532;
 
@@ -24,10 +25,15 @@ contract DeployGasRescue is Script {
 
         vm.startBroadcast(deployerKey);
         GasRescue rescue = new GasRescue(deployer, relayer);
+        address token = vm.envOr("TOKEN_ADDRESS", address(0));
+        if (token != address(0)) {
+            rescue.setTokenAllowed(token, true);
+        }
         vm.stopBroadcast();
 
         console2.log("GasRescue", address(rescue));
         console2.log("owner   ", deployer);
         console2.log("relayer ", relayer);
+        if (token != address(0)) console2.log("token   ", token);
     }
 }

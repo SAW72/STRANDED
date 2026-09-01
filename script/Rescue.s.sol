@@ -9,17 +9,14 @@ import {IGasRescue} from "../src/interfaces/IGasRescue.sol";
 
 /// @notice Demo / operator script: sign Order + EIP-2612 permit as USER, submit as RELAYER.
 ///
-/// Production wallets should produce the two signatures in-app (eth_signTypedData_v4).
-/// This script is for Base Sepolia dry-runs when you control a test user key.
-///
 /// Env (never commit real values):
 ///   PRIVATE_KEY           relayer key (pays gas; must be allowlisted)
 ///   USER_PRIVATE_KEY      stuck user's test key (signs only; not broadcast)
 ///   GAS_RESCUE_ADDRESS    deployed GasRescue
-///   TOKEN_ADDRESS         EIP-2612 ERC-20
+///   TOKEN_ADDRESS         allowlisted EIP-2612 ERC-20
 ///   ORDER_AMOUNT          raw token units to permit-pull
-///   ORDER_FEE             in-token fee paid to the relayer
-///   ORDER_RECIPIENT       remainder recipient (usually the user)
+///   ORDER_FEE_AMOUNT      in-token fee paid to feeTo
+///   ORDER_FEE_TO          fee sink
 ///   ORDER_DEADLINE        unix seconds
 ///   ORDER_NONCE           unused GasRescue nonce for this user
 contract RescueWithPermit is Script {
@@ -38,8 +35,8 @@ contract RescueWithPermit is Script {
             user: user,
             token: token,
             amount: vm.envUint("ORDER_AMOUNT"),
-            fee: vm.envUint("ORDER_FEE"),
-            recipient: vm.envAddress("ORDER_RECIPIENT"),
+            feeAmount: vm.envUint("ORDER_FEE_AMOUNT"),
+            feeTo: vm.envAddress("ORDER_FEE_TO"),
             deadline: vm.envUint("ORDER_DEADLINE"),
             nonce: vm.envUint("ORDER_NONCE")
         });
@@ -53,6 +50,7 @@ contract RescueWithPermit is Script {
 
         console2.log("rescued for", user);
         console2.log("token      ", token);
+        console2.log("feeTo      ", order.feeTo);
         console2.log("nonce      ", order.nonce);
     }
 

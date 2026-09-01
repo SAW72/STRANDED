@@ -13,40 +13,32 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {IGasRescue} from "./interfaces/IGasRescue.sol";
 
 /// @title GasRescue
-/// @notice Base Sepolia thin-slice: destination-only rescue when a user holds ERC-20
-///         but has zero native ETH to pay gas. Not a bridge, not a mainnet product,
-///         not an ETH top-up fee model.
-///
-/// Security properties required by the locked design / prior auditor rejects:
-/// - Relayer allowlist + pause / onlyOwner
-/// - `nonReentrant`
-/// - Order nonce marked used *before* signature recovery and any external call
-/// - EIP-2612 permit parameters derived from the Order (token, amount, deadline, user)
-/// - Fee-on-transfer handled by measuring this contract's balance delta
-/// - Fail closed
+/// @notice Base Sepolia thin-slice: destination-only rescue when a user holds an
+///         allowlisted EIP-2612 ERC-20 but has zero native ETH for gas.
+///         Fee is routed to `order.feeTo`; remainder always returns to `order.user`.
 contract GasRescue is IGasRescue, Ownable, Pausable, ReentrancyGuard, EIP712 {
     using SafeERC20 for IERC20;
 
-    /// @dev Base Sepolia. Enforced on every rescue so this deployment cannot be
-    ///      replayed or reused as a multi-chain / mainnet product.
     uint256 public constant BASE_SEPOLIA_CHAIN_ID = 84_532;
 
     bytes32 public constant ORDER_TYPEHASH = keccak256(
-        "Order(address user,address token,uint256 amount,uint256 fee,address recipient,uint256 deadline,uint256 nonce)"
+        "Order(address user,address token,uint256 amount,uint256 feeAmount,address feeTo,uint256 deadline,uint256 nonce)"
     );
 
     mapping(address relayer => bool allowed) public relayers;
+    mapping(address token => bool allowed) public allowedTokens;
     mapping(address user => mapping(uint256 nonce => bool used)) public usedNonces;
 
     event RelayerUpdated(address indexed relayer, bool allowed);
+    event TokenAllowed(address indexed token, bool allowed);
     event Rescued(
         address indexed user,
         address indexed token,
-        address indexed recipient,
-        address relayer,
-        uint256 received,
-        uint256 fee,
-        uint256 nonce
+        uint256 amount,
+        uint256 feeAmount,
+        address indexed feeTo,
+        uint256 nonce,
+        address relayer
     );
 
     error NotRelayer();
@@ -54,9 +46,11 @@ contract GasRescue is IGasRescue, Ownable, Pausable, ReentrancyGuard, EIP712 {
     error ZeroAddress();
     error InvalidOrder();
     error ExpiredDeadline();
+    error TokenNotAllowed();
     error UsedNonce();
     error InvalidSignature();
-    error InsufficientReceived();
+    error Underfunded();
+    error FoTOrBalanceMismatch();
 
     modifier onlyRelayer() {
         if (!relayers[msg.sender]) revert NotRelayer();
@@ -77,6 +71,12 @@ contract GasRescue is IGasRescue, Ownable, Pausable, ReentrancyGuard, EIP712 {
         emit RelayerUpdated(relayer, allowed);
     }
 
+    function setTokenAllowed(address token, bool allowed) external onlyOwner {
+        if (token == address(0)) revert ZeroAddress();
+        allowedTokens[token] = allowed;
+        emit TokenAllowed(token, allowed);
+    }
+
     function pause() external onlyOwner {
         _pause();
     }
@@ -85,81 +85,70 @@ contract GasRescue is IGasRescue, Ownable, Pausable, ReentrancyGuard, EIP712 {
         _unpause();
     }
 
-    /// @notice EIP-712 domain separator for off-chain Order signing.
     function DOMAIN_SEPARATOR() external view returns (bytes32) {
         return _domainSeparatorV4();
     }
 
-    /// @notice Digest a relayer (or wallet) should have `order.user` sign.
     function hashOrder(Order calldata order) public view returns (bytes32) {
-        return _hashTypedDataV4(_orderStructHash(order));
+        return _hashTypedDataV4(
+            keccak256(
+                abi.encode(
+                    ORDER_TYPEHASH,
+                    order.user,
+                    order.token,
+                    order.amount,
+                    order.feeAmount,
+                    order.feeTo,
+                    order.deadline,
+                    order.nonce
+                )
+            )
+        );
     }
 
-    /// @inheritdoc IGasRescue
+    /// @dev Sequence is fixed: view-only checks (including unused nonce) → EIP-712
+    ///      recover → underfunded check (still no nonce write) → then mark nonce used
+    ///      → permit → transferFrom → exact balance delta → pay feeTo / user.
     function rescueWithPermit(Order calldata order, bytes calldata orderSignature, uint8 v, bytes32 r, bytes32 s)
         external
         nonReentrant
         whenNotPaused
         onlyRelayer
     {
-        if (block.chainid != BASE_SEPOLIA_CHAIN_ID) revert WrongChain();
-        _validateOrder(order);
+        _checkOrder(order);
 
-        // Auditor requirement: consume nonce before signature recovery and before
-        // any external call (permit / transferFrom). Revert undoes the write if
-        // the signature is later found invalid — a successful reentrant call cannot
-        // reuse this nonce.
-        if (usedNonces[order.user][order.nonce]) revert UsedNonce();
+        address signer = ECDSA.recover(hashOrder(order), orderSignature);
+        if (signer != order.user) revert InvalidSignature();
+
+        if (IERC20(order.token).balanceOf(order.user) < order.amount) revert Underfunded();
+
         usedNonces[order.user][order.nonce] = true;
 
-        _verifyOrderSignature(order, orderSignature);
+        IERC20Permit(order.token).permit(order.user, address(this), order.amount, order.deadline, v, r, s);
+        _pullAndSettle(order);
 
-        uint256 received = _pullAndSettle(order, v, r, s);
-        emit Rescued(order.user, order.token, order.recipient, msg.sender, received, order.fee, order.nonce);
+        emit Rescued(order.user, order.token, order.amount, order.feeAmount, order.feeTo, order.nonce, msg.sender);
     }
 
-    /// @dev Permit + pull + fee skim. Isolated so the outer frame can emit without
-    ///      blowing the Solidity stack (calldata Order + many locals).
-    function _pullAndSettle(Order calldata order, uint8 v, bytes32 r, bytes32 s) internal returns (uint256 received) {
-        // Permit is bound to this Order: owner/token/amount/deadline come from it.
-        // Fee, recipient, and the GasRescue nonce are bound by the Order signature.
-        IERC20Permit(order.token).permit(order.user, address(this), order.amount, order.deadline, v, r, s);
+    function _checkOrder(Order calldata order) internal view {
+        if (block.chainid != BASE_SEPOLIA_CHAIN_ID) revert WrongChain();
+        if (order.user == address(0) || order.token == address(0) || order.feeTo == address(0)) {
+            revert ZeroAddress();
+        }
+        if (order.amount == 0 || order.feeAmount >= order.amount) revert InvalidOrder();
+        if (block.timestamp > order.deadline) revert ExpiredDeadline();
+        if (!allowedTokens[order.token]) revert TokenNotAllowed();
+        if (usedNonces[order.user][order.nonce]) revert UsedNonce();
+    }
 
+    function _pullAndSettle(Order calldata order) internal {
         IERC20 token = IERC20(order.token);
         uint256 balanceBefore = token.balanceOf(address(this));
         token.safeTransferFrom(order.user, address(this), order.amount);
-        received = token.balanceOf(address(this)) - balanceBefore;
-        if (received <= order.fee) revert InsufficientReceived();
+        uint256 received = token.balanceOf(address(this)) - balanceBefore;
+        if (received != order.amount) revert FoTOrBalanceMismatch();
 
-        token.safeTransfer(msg.sender, order.fee);
-        token.safeTransfer(order.recipient, received - order.fee);
-    }
-
-    function _validateOrder(Order calldata order) internal view {
-        if (order.user == address(0) || order.token == address(0) || order.recipient == address(0)) {
-            revert ZeroAddress();
-        }
-        if (order.amount == 0 || order.fee >= order.amount) revert InvalidOrder();
-        if (block.timestamp > order.deadline) revert ExpiredDeadline();
-    }
-
-    function _verifyOrderSignature(Order calldata order, bytes calldata orderSignature) internal view {
-        address signer = ECDSA.recover(hashOrder(order), orderSignature);
-        if (signer != order.user) revert InvalidSignature();
-    }
-
-    function _orderStructHash(Order calldata order) internal pure returns (bytes32) {
-        return keccak256(
-            abi.encode(
-                ORDER_TYPEHASH,
-                order.user,
-                order.token,
-                order.amount,
-                order.fee,
-                order.recipient,
-                order.deadline,
-                order.nonce
-            )
-        );
+        token.safeTransfer(order.feeTo, order.feeAmount);
+        token.safeTransfer(order.user, order.amount - order.feeAmount);
     }
 }

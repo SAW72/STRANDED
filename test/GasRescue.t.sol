@@ -28,6 +28,7 @@ contract GasRescueTest is Test {
     address internal relayer;
     address internal user;
     address internal stranger;
+    address internal feeTo;
 
     function setUp() public {
         vm.chainId(BASE_SEPOLIA_CHAIN_ID);
@@ -36,38 +37,34 @@ contract GasRescueTest is Test {
         relayer = vm.addr(RELAYER_PK);
         user = vm.addr(USER_PK);
         stranger = vm.addr(STRANGER_PK);
+        feeTo = makeAddr("feeTo");
 
         vm.deal(user, 0);
         vm.deal(relayer, 10 ether);
 
         rescue = new GasRescue(owner, relayer);
         token = new MockERC20Permit("Mock USD", "mUSD");
+        assertEq(token.decimals(), 18);
         token.mint(user, 1_000 ether);
-    }
 
-    // -------------------------------------------------------------------------
-    // Happy path
-    // -------------------------------------------------------------------------
+        vm.prank(owner);
+        rescue.setTokenAllowed(address(token), true);
+    }
 
     function test_happyPath_rescueWithPermit() public {
         IGasRescue.Order memory order = _defaultOrder(address(token), 100 ether, 3 ether, 1);
-
         (bytes memory orderSig, uint8 v, bytes32 r, bytes32 s) = _signOrderAndPermit(order, address(token), USER_PK);
 
         vm.prank(relayer);
         rescue.rescueWithPermit(order, orderSig, v, r, s);
 
-        // recipient == user: 1000 pulled-from 100, then 97 remainder returned; net is fee only.
-        assertEq(token.balanceOf(user), 997 ether, "user keeps unspent + rescued remainder");
-        assertEq(token.balanceOf(relayer), 3 ether, "relayer in-token fee");
-        assertEq(token.balanceOf(address(rescue)), 0, "contract does not retain tokens");
+        assertEq(token.balanceOf(user), 997 ether, "unspent + remainder return to user");
+        assertEq(token.balanceOf(feeTo), 3 ether, "feeAmount to feeTo");
+        assertEq(token.balanceOf(relayer), 0, "relayer is not the fee sink");
+        assertEq(token.balanceOf(address(rescue)), 0);
         assertTrue(rescue.usedNonces(user, order.nonce));
-        assertEq(user.balance, 0, "user still has zero native ETH");
+        assertEq(user.balance, 0);
     }
-
-    // -------------------------------------------------------------------------
-    // Replay
-    // -------------------------------------------------------------------------
 
     function test_replay_sameOrderReverts() public {
         IGasRescue.Order memory order = _defaultOrder(address(token), 100 ether, 3 ether, 1);
@@ -89,25 +86,54 @@ contract GasRescueTest is Test {
         rescue.rescueWithPermit(order, orderSig, v, r, s);
 
         IGasRescue.Order memory mutated = order;
-        mutated.fee = 4 ether;
-        (bytes memory orderSig2, uint8 v2, bytes32 r2, bytes32 s2) = _signOrderAndPermit(mutated, address(token), USER_PK);
+        mutated.feeAmount = 4 ether;
+        (bytes memory orderSig2, uint8 v2, bytes32 r2, bytes32 s2) =
+            _signOrderAndPermit(mutated, address(token), USER_PK);
 
         vm.expectRevert(GasRescue.UsedNonce.selector);
         vm.prank(relayer);
         rescue.rescueWithPermit(mutated, orderSig2, v2, r2, s2);
     }
 
-    // -------------------------------------------------------------------------
-    // Allowlist
-    // -------------------------------------------------------------------------
-
-    function test_wrongAllowlist_reverts() public {
+    function test_wrongRelayer_reverts() public {
         IGasRescue.Order memory order = _defaultOrder(address(token), 100 ether, 3 ether, 1);
         (bytes memory orderSig, uint8 v, bytes32 r, bytes32 s) = _signOrderAndPermit(order, address(token), USER_PK);
 
         vm.expectRevert(GasRescue.NotRelayer.selector);
         vm.prank(stranger);
         rescue.rescueWithPermit(order, orderSig, v, r, s);
+    }
+
+    function test_tokenNotAllowed_reverts() public {
+        MockERC20Permit other = new MockERC20Permit("Other", "OTH");
+        other.mint(user, 100 ether);
+        IGasRescue.Order memory order = _defaultOrder(address(other), 100 ether, 3 ether, 1);
+        (bytes memory orderSig, uint8 v, bytes32 r, bytes32 s) = _signOrderAndPermit(order, address(other), USER_PK);
+
+        vm.expectRevert(GasRescue.TokenNotAllowed.selector);
+        vm.prank(relayer);
+        rescue.rescueWithPermit(order, orderSig, v, r, s);
+        assertFalse(rescue.usedNonces(user, 1));
+    }
+
+    function test_setTokenAllowed_onlyOwner() public {
+        MockERC20Permit other = new MockERC20Permit("Other", "OTH");
+        other.mint(user, 100 ether);
+
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, stranger));
+        vm.prank(stranger);
+        rescue.setTokenAllowed(address(other), true);
+
+        vm.prank(owner);
+        rescue.setTokenAllowed(address(other), true);
+        assertTrue(rescue.allowedTokens(address(other)));
+
+        IGasRescue.Order memory order = _defaultOrder(address(other), 100 ether, 3 ether, 2);
+        (bytes memory orderSig, uint8 v, bytes32 r, bytes32 s) = _signOrderAndPermit(order, address(other), USER_PK);
+        vm.prank(relayer);
+        rescue.rescueWithPermit(order, orderSig, v, r, s);
+        assertEq(other.balanceOf(feeTo), 3 ether);
+        assertEq(other.balanceOf(user), 97 ether);
     }
 
     function test_setRelayer_onlyOwner() public {
@@ -123,12 +149,9 @@ contract GasRescueTest is Test {
         (bytes memory orderSig, uint8 v, bytes32 r, bytes32 s) = _signOrderAndPermit(order, address(token), USER_PK);
         vm.prank(stranger);
         rescue.rescueWithPermit(order, orderSig, v, r, s);
-        assertEq(token.balanceOf(stranger), 3 ether);
+        assertEq(token.balanceOf(feeTo), 3 ether);
+        assertEq(token.balanceOf(stranger), 0);
     }
-
-    // -------------------------------------------------------------------------
-    // Pause
-    // -------------------------------------------------------------------------
 
     function test_pause_blocksRescueAndOnlyOwnerCanToggle() public {
         vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, stranger));
@@ -144,6 +167,7 @@ contract GasRescueTest is Test {
         vm.expectRevert(Pausable.EnforcedPause.selector);
         vm.prank(relayer);
         rescue.rescueWithPermit(order, orderSig, v, r, s);
+        assertFalse(rescue.usedNonces(user, 1));
 
         vm.prank(owner);
         rescue.unpause();
@@ -153,48 +177,20 @@ contract GasRescueTest is Test {
         assertTrue(rescue.usedNonces(user, 1));
     }
 
-    // -------------------------------------------------------------------------
-    // Fee-on-transfer
-    // -------------------------------------------------------------------------
-
-    function test_feeOnTransfer_usesBalanceDelta() public {
-        MockFeeOnTransferToken fot = new MockFeeOnTransferToken("Fee Token", "FOT", 1_000); // 10%
-        fot.mint(user, 1_000 ether);
-
-        address recipient = makeAddr("fotRecipient");
-        IGasRescue.Order memory order = _defaultOrder(address(fot), 100 ether, 5 ether, 3);
-        order.recipient = recipient;
-        (bytes memory orderSig, uint8 v, bytes32 r, bytes32 s) = _signOrderAndPermit(order, address(fot), USER_PK);
-
-        vm.prank(relayer);
-        rescue.rescueWithPermit(order, orderSig, v, r, s);
-
-        // Pull 100, inbound FoT burns 10, received = 90. Fee 5 / remainder 85 leave this contract.
-        // Outbound transfers also burn 10%, so relayer gets 4.5 and recipient 76.5.
-        assertEq(fot.balanceOf(user), 900 ether, "user debited full amount including inbound FoT");
-        assertEq(fot.balanceOf(relayer), 4.5 ether);
-        assertEq(fot.balanceOf(recipient), 76.5 ether);
-        assertEq(fot.balanceOf(address(rescue)), 0);
-    }
-
-    function test_feeOnTransfer_insufficientReceivedReverts() public {
+    function test_feeOnTransfer_revertsMismatch() public {
         MockFeeOnTransferToken fot = new MockFeeOnTransferToken("Fee Token", "FOT", 1_000);
         fot.mint(user, 1_000 ether);
+        vm.prank(owner);
+        rescue.setTokenAllowed(address(fot), true);
 
-        // amount 100, 10% FoT => received 90, fee 90 => remainder 0 => fail closed
-        IGasRescue.Order memory order = _defaultOrder(address(fot), 100 ether, 90 ether, 4);
+        IGasRescue.Order memory order = _defaultOrder(address(fot), 100 ether, 5 ether, 3);
         (bytes memory orderSig, uint8 v, bytes32 r, bytes32 s) = _signOrderAndPermit(order, address(fot), USER_PK);
 
-        vm.expectRevert(GasRescue.InsufficientReceived.selector);
+        vm.expectRevert(GasRescue.FoTOrBalanceMismatch.selector);
         vm.prank(relayer);
         rescue.rescueWithPermit(order, orderSig, v, r, s);
-
-        assertFalse(rescue.usedNonces(user, 4), "full revert restores nonce");
+        assertFalse(rescue.usedNonces(user, 3), "full revert restores nonce");
     }
-
-    // -------------------------------------------------------------------------
-    // Reentrancy
-    // -------------------------------------------------------------------------
 
     function test_reentrancy_onPermitReverts() public {
         _assertReentrantAttack(true, false);
@@ -204,22 +200,18 @@ contract GasRescueTest is Test {
         _assertReentrantAttack(false, true);
     }
 
-    // -------------------------------------------------------------------------
-    // Permit binding + fail-closed controls
-    // -------------------------------------------------------------------------
-
     function test_permitBoundToOrder_wrongPermitValueReverts() public {
         IGasRescue.Order memory order = _defaultOrder(address(token), 100 ether, 3 ether, 1);
         bytes memory orderSig = _signOrder(order, USER_PK);
-        // Permit signed for a different value than order.amount — must not succeed.
         (uint8 v, bytes32 r, bytes32 s) = _signPermit(address(token), user, 50 ether, order.deadline, USER_PK);
 
         vm.expectRevert();
         vm.prank(relayer);
         rescue.rescueWithPermit(order, orderSig, v, r, s);
+        assertFalse(rescue.usedNonces(user, 1), "permit failure reverts nonce write");
     }
 
-    function test_invalidOrderSignatureReverts() public {
+    function test_invalidOrderSignature_doesNotBurnNonce() public {
         IGasRescue.Order memory order = _defaultOrder(address(token), 100 ether, 3 ether, 1);
         bytes memory orderSig = _signOrder(order, STRANGER_PK);
         (uint8 v, bytes32 r, bytes32 s) = _signPermit(address(token), user, order.amount, order.deadline, USER_PK);
@@ -227,6 +219,17 @@ contract GasRescueTest is Test {
         vm.expectRevert(GasRescue.InvalidSignature.selector);
         vm.prank(relayer);
         rescue.rescueWithPermit(order, orderSig, v, r, s);
+        assertFalse(rescue.usedNonces(user, 1), "nonce write is after a valid sig");
+    }
+
+    function test_underfunded_doesNotBurnNonce() public {
+        IGasRescue.Order memory order = _defaultOrder(address(token), 2_000 ether, 3 ether, 1);
+        (bytes memory orderSig, uint8 v, bytes32 r, bytes32 s) = _signOrderAndPermit(order, address(token), USER_PK);
+
+        vm.expectRevert(GasRescue.Underfunded.selector);
+        vm.prank(relayer);
+        rescue.rescueWithPermit(order, orderSig, v, r, s);
+        assertFalse(rescue.usedNonces(user, 1));
     }
 
     function test_expiredDeadlineReverts() public {
@@ -237,6 +240,7 @@ contract GasRescueTest is Test {
         vm.expectRevert(GasRescue.ExpiredDeadline.selector);
         vm.prank(relayer);
         rescue.rescueWithPermit(order, orderSig, v, r, s);
+        assertFalse(rescue.usedNonces(user, 1));
     }
 
     function test_wrongChainReverts() public {
@@ -256,6 +260,7 @@ contract GasRescueTest is Test {
         vm.expectRevert(GasRescue.InvalidOrder.selector);
         vm.prank(relayer);
         rescue.rescueWithPermit(order, orderSig, v, r, s);
+        assertFalse(rescue.usedNonces(user, 1));
     }
 
     function test_pause_onlyOwnerUnpause() public {
@@ -267,13 +272,20 @@ contract GasRescueTest is Test {
         rescue.unpause();
     }
 
-    // -------------------------------------------------------------------------
-    // Helpers
-    // -------------------------------------------------------------------------
+    function test_orderTypehashMatchesApprovedString() public {
+        assertEq(
+            rescue.ORDER_TYPEHASH(),
+            keccak256(
+                "Order(address user,address token,uint256 amount,uint256 feeAmount,address feeTo,uint256 deadline,uint256 nonce)"
+            )
+        );
+    }
 
     function _assertReentrantAttack(bool onPermit, bool onTransfer) internal {
         ReentrantToken evil = new ReentrantToken();
         evil.mint(user, 1_000 ether);
+        vm.prank(owner);
+        rescue.setTokenAllowed(address(evil), true);
 
         IGasRescue.Order memory order = _defaultOrder(address(evil), 100 ether, 3 ether, 9);
         (bytes memory orderSig, uint8 v, bytes32 r, bytes32 s) = _signOrderAndPermit(order, address(evil), USER_PK);
@@ -285,7 +297,7 @@ contract GasRescueTest is Test {
         rescue.rescueWithPermit(order, orderSig, v, r, s);
     }
 
-    function _defaultOrder(address token_, uint256 amount, uint256 fee, uint256 nonce)
+    function _defaultOrder(address token_, uint256 amount, uint256 feeAmount, uint256 nonce)
         internal
         view
         returns (IGasRescue.Order memory)
@@ -294,8 +306,8 @@ contract GasRescueTest is Test {
             user: user,
             token: token_,
             amount: amount,
-            fee: fee,
-            recipient: user,
+            feeAmount: feeAmount,
+            feeTo: feeTo,
             deadline: block.timestamp + 1 days,
             nonce: nonce
         });
