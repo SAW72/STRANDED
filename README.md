@@ -1,75 +1,56 @@
-# GasRescue (Scout #1, Base Sepolia)
+# GasRescue (Scout #1)
 
-Destination-only gas-deadlock rescue for **Base Sepolia**. A user who holds an allowlisted EIP-2612 ERC-20 but has **zero native ETH** signs an EIP-712 `Order` plus an EIP-2612 `permit`. An allowlisted relayer pays gas. The contract permit-pulls tokens, sends `feeAmount` to `feeTo`, and returns the remainder to `user`. Fail closed.
+**Product:** `GasRescueSwap` — stranded token → swap a slice for native gas → same-chain move-out of the remainder.
 
-This is a Foundry thin slice. It is **not** multi-chain, **not** Solana, **not** a bridge-out, **not** mainnet, and **not** an ETH top-up fee model.
+**Harness:** `GasRescue.sol` is an in-token fee skim kept for regression. It is **not** the product.
 
-## Locked interface
+Testnet only: **Base Sepolia (84532)** and **Arb Sepolia (421614)**. No mainnet code path. No bridge adapter in v1. Auditor-bot design APPROVE unblocks this implementation; a third-party firm audit is still required before mainnet.
 
-```solidity
-function rescueWithPermit(
-    Order calldata order,
-    bytes calldata orderSignature,
-    uint8 v,
-    bytes32 r,
-    bytes32 s
-) external;
+See [docs/AUDITOR.md](docs/AUDITOR.md). Issues: [#3](https://github.com/SAW72/gas-rescue/issues/3), [#4](https://github.com/SAW72/gas-rescue/issues/4).
+
+## Product: `GasRescueSwap`
+
+A user who holds an allowlisted ERC-20 but has **zero native ETH** signs an EIP-712 `Order` plus gasless auth (EIP-2612 permit, or Permit2 if owner-enabled). An allowlisted relayer pays gas. The contract:
+
+1. Pre-skims `feeAmount` of `tokenIn` to `feeTo`
+2. Requires `amountSwap + feeAmount <= amountIn` (overflow-safe)
+3. Sends remainder ERC-20 to `to` (same-chain move-out)
+4. Calls the signed allowlisted `router` with calldata whose `keccak256` equals `pathHash`
+5. Unwraps WETH if needed and credits **native** to `nativeTo` (≥ `minAmountOut`, fail closed)
+
+Never treats `msg.sender` as a user / fee / remainder / native substitute. Atomic all-or-nothing; no on-chain partial fills. Owner ≠ relayer hot key. Non-proxy, `nonReentrant`, owner-only pause + allowlists.
+
+### Locked EIP-712
+
+Domain: `name = StewardGasRescue`, `version = 1`, `chainId`, `verifyingContract`.
+
+```
+Order(address user,address tokenIn,uint256 amountIn,uint256 feeAmount,address feeTo,uint256 amountSwap,uint256 minAmountOut,address to,address nativeTo,address router,bytes32 pathHash,uint256 chainId,uint256 deadline,uint256 nonce)
 ```
 
-`IGasRescue.Order` / EIP-712 typehash:
+Native recipient field is **`nativeTo`** (not `safeRecipient`).
 
-```
-Order(address user,address token,uint256 amount,uint256 feeAmount,address feeTo,uint256 deadline,uint256 nonce)
-```
+### Auth
 
-| Field | Role |
-| --- | --- |
-| `user` | Token owner, Order signer, remainder destination |
-| `token` | Allowlisted EIP-2612 ERC-20 |
-| `amount` | Exact units pulled via `transferFrom` (no FoT slack) |
-| `feeAmount` | In-token fee (`feeAmount < amount`) |
-| `feeTo` | Fee sink (signed; not implied `msg.sender`) |
-| `deadline` | Shared Order + permit expiry |
-| `nonce` | GasRescue replay key (not the token permit nonce) |
+- EIP-2612 tokens must be owner-allowlisted (`setEip2612Token`).
+- Permit2 is **gated** (`setPermit2`); default off. `rescueWithPermit2` reverts `NoGaslessAuth` unless enabled.
+- Non-permit tokens with Permit2 disabled fail closed. There is no “just transferFrom” path.
 
-Permit parameters are derived from the Order (`owner = user`, `spender = GasRescue`, `value = amount`, `deadline = deadline`).
-
-## `rescueWithPermit` sequence
+### Sequence (`rescueWithPermit` / `rescueWithPermit2`)
 
 Modifiers: `nonReentrant`, `whenNotPaused`, `onlyRelayer`.
 
-1. View-only checks — **no nonce write**: nonzero `user` / `token` / `feeTo`; `amount > 0`; `feeAmount < amount`; deadline; `allowedTokens[token]`; `!usedNonces[user][nonce]`; Base Sepolia (`84532`).
+1. View-only checks — **no nonce write**: testnet + `order.chainId == block.chainid`; nonzero addresses; `amountSwap + feeAmount <= amountIn`; `minAmountOut > 0`; deadline; token + router allowlists; unused nonce; `keccak256(swapData) == pathHash`.
 2. Recover EIP-712 signer; require `== order.user`.
-3. `balanceOf(user) >= amount` else `Underfunded` — **still no nonce write**.
-4. `usedNonces[user][nonce] = true`.
-5. `permit(user, this, amount, deadline, v, r, s)`.
-6. `transferFrom(user, this, amount)`.
-7. Require `(balanceAfter - balanceBefore) == amount` else `FoTOrBalanceMismatch`.
-8. `transfer(feeTo, feeAmount)` then `transfer(user, amount - feeAmount)`.
-9. `emit Rescued(user, token, amount, feeAmount, feeTo, nonce, msg.sender)`.
+3. `balanceOf(user) >= amountIn` else `Underfunded` — **still no nonce write**.
+4. Gasless-auth gate (`eip2612Tokens` or enabled Permit2) else `NoGaslessAuth` — **still no nonce write**.
+5. `usedNonces[user][nonce] = true`.
+6. Permit / Permit2 pull; exact balance delta (`FoTOrBalanceMismatch`).
+7. Fee → `feeTo`; remainder → `to`; router call; unwrap; native → `nativeTo` ≥ `minAmountOut`.
 
-A failed signature or underfunded user does **not** consume the nonce (the write has not happened yet). A later revert (permit / FoT / transfer) rolls the whole transaction back, including the nonce write.
-
-Owner controls: `setRelayer`, `setTokenAllowed`, `pause` / `unpause`.
-
-## Layout
-
-```
-src/GasRescue.sol
-src/interfaces/IGasRescue.sol
-src/mocks/MockERC20Permit.sol          # 18 decimals
-src/mocks/MockFeeOnTransferToken.sol
-src/mocks/ReentrantToken.sol
-test/GasRescue.t.sol
-script/Deploy.s.sol
-script/Rescue.s.sol
-```
+User errors (bad sig, underfunded, wrong domain, path mismatch) do not consume the nonce. Later execution reverts roll the nonce write back.
 
 ## Prerequisites
-
-- [Foundry](https://book.getfoundry.sh/getting-started/installation) (`forge`, `cast`)
-- A Base Sepolia deployer key funded with ETH (for deploy only)
-- An allowlisted relayer address funded with ETH (pays user gas)
 
 ```bash
 curl -L https://foundry.paradigm.xyz | bash
@@ -84,97 +65,74 @@ forge test -vv
 forge test -vv
 ```
 
-Covered paths:
+`GasRescueSwap` coverage: happy-path mock swap (native + WETH unwrap, both testnets), slippage, underfunded / path / domain / sig without nonce burn, replay, wrong `chainId` / mainnet blocked, `feeAmount + amountSwap` overflow, FoT, reentrancy (permit / transferFrom / router), non-permit and disabled Permit2 fail-closed, owner ≠ relayer, pause.
 
-- Happy path (`feeTo` receives the fee; remainder returns to `user`; relayer is not the fee sink)
-- Replay (same Order / same nonce)
-- Wrong relayer / token not allowlisted / `setTokenAllowed` onlyOwner
-- Pause / onlyOwner
-- Fee-on-transfer rejected (`FoTOrBalanceMismatch`)
-- Reentrancy via `permit` and via `transferFrom`
-- Invalid signature and underfunded do **not** burn the nonce
-- Permit not bound to Order `amount`
-- Expiry, wrong chain, `feeAmount >= amount`
+Harness tests in `test/GasRescue.t.sol` stay green.
 
-## Environment variables
+## Environment
 
 Copy `.env.example` to `.env`. **Do not commit `.env` or any private key.**
 
-| Variable | Used by | Purpose |
-| --- | --- | --- |
-| `PRIVATE_KEY` | `Deploy.s.sol`, `Rescue.s.sol` | Deployer (owner) or relayer key |
-| `RELAYER_ADDRESS` | `Deploy.s.sol` | First allowlisted relayer |
-| `TOKEN_ADDRESS` | `Deploy.s.sol` (optional allow), `Rescue.s.sol` | EIP-2612 ERC-20 |
-| `BASE_SEPOLIA_RPC_URL` | `forge script --rpc-url` | Base Sepolia HTTP endpoint |
-| `ETHERSCAN_API_KEY` | optional `--verify` | Basescan API key |
-| `USER_PRIVATE_KEY` | `Rescue.s.sol` demo | Test user signer only |
-| `GAS_RESCUE_ADDRESS` | `Rescue.s.sol` | Deployed `GasRescue` |
-| `ORDER_AMOUNT` | `Rescue.s.sol` | Raw units to pull |
-| `ORDER_FEE_AMOUNT` | `Rescue.s.sol` | In-token fee (`feeAmount < amount`) |
-| `ORDER_FEE_TO` | `Rescue.s.sol` | Fee sink |
-| `ORDER_DEADLINE` | `Rescue.s.sol` | Unix seconds |
-| `ORDER_NONCE` | `Rescue.s.sol` | Unused GasRescue nonce for `user` |
+| Variable | Purpose |
+| --- | --- |
+| `PRIVATE_KEY` | Deployer (owner). Must not equal `RELAYER_ADDRESS`. |
+| `RELAYER_ADDRESS` | First allowlisted relayer hot key. |
+| `WETH_ADDRESS` | Required. Set per testnet; no mainnet fallback. |
+| `ROUTER_ADDRESS` | Optional post-deploy router allowlist. |
+| `TOKEN_ADDRESS` | Optional EIP-2612 allowlist. |
+| `PERMIT2_ADDRESS` / `PERMIT2_ENABLED` | Gated; default `false`. |
+| `BASE_SEPOLIA_RPC_URL` | Default `https://sepolia.base.org` |
+| `ARB_SEPOLIA_RPC_URL` | Default `https://sepolia-rollup.arbitrum.io/rpc` |
 
-Public RPC default: `https://sepolia.base.org` (chain id `84532`). Explorer: https://sepolia.basescan.org
+WETH references (set `WETH_ADDRESS`; not script defaults):
 
-## Deploy (Base Sepolia)
+- Base Sepolia: `0x4200000000000000000000000000000000000006`
+- Arb Sepolia: `0x980B62Da83eFf3D4576C647993b0c1D7faf17c73`
+
+## Deploy (testnet only)
 
 ```bash
-cp .env.example .env
-# edit .env — never paste keys into the repo
-
 source .env
-forge script script/Deploy.s.sol:DeployGasRescue \
+# Base Sepolia
+forge script script/DeployGasRescueSwap.s.sol:DeployGasRescueSwap \
   --rpc-url "$BASE_SEPOLIA_RPC_URL" \
-  --broadcast \
-  --verify \
-  --etherscan-api-key "$ETHERSCAN_API_KEY" \
-  --chain-id 84532
+  --broadcast --chain-id 84532
+
+# Arb Sepolia
+forge script script/DeployGasRescueSwap.s.sol:DeployGasRescueSwap \
+  --rpc-url "$ARB_SEPOLIA_RPC_URL" \
+  --broadcast --chain-id 421614
 ```
 
-The script refuses any chain other than Base Sepolia. Constructor: `initialOwner = deployer`, `initialRelayer = RELAYER_ADDRESS`. If `TOKEN_ADDRESS` is set, the script also calls `setTokenAllowed`.
+The script reverts on any chain other than 84532 / 421614. Constructor: `initialOwner = deployer`, `initialRelayer = RELAYER_ADDRESS`, `weth = WETH_ADDRESS`.
 
-Owner follow-ups:
+Demo execute (test user key only): `script/RescueSwap.s.sol`.
 
-```bash
-cast send "$GAS_RESCUE_ADDRESS" "setRelayer(address,bool)" 0xAnotherRelayer true \
-  --rpc-url "$BASE_SEPOLIA_RPC_URL" --private-key "$PRIVATE_KEY"
+## Layout
 
-cast send "$GAS_RESCUE_ADDRESS" "setTokenAllowed(address,bool)" "$TOKEN_ADDRESS" true \
-  --rpc-url "$BASE_SEPOLIA_RPC_URL" --private-key "$PRIVATE_KEY"
-
-cast send "$GAS_RESCUE_ADDRESS" "pause()" \
-  --rpc-url "$BASE_SEPOLIA_RPC_URL" --private-key "$PRIVATE_KEY"
+```
+src/GasRescueSwap.sol              # product
+src/interfaces/IGasRescueSwap.sol
+src/interfaces/IPermit2.sol
+src/interfaces/IWETH.sol
+src/GasRescue.sol                  # fee-skim harness
+src/interfaces/IGasRescue.sol
+src/mocks/…
+test/GasRescueSwap.t.sol
+test/GasRescue.t.sol
+script/DeployGasRescueSwap.s.sol
+script/RescueSwap.s.sol
+script/Deploy.s.sol                # harness
+script/Rescue.s.sol                # harness
 ```
 
-## How the relayer calls it
+## Out of scope (this slice)
 
-1. Confirm the user has the allowlisted ERC-20 and not enough ETH to self-send.
-2. Read `DOMAIN_SEPARATOR()`, `ORDER_TYPEHASH`, `usedNonces(user, nonce)`, and `allowedTokens(token)`.
-3. Read the token's `nonces(user)` and `DOMAIN_SEPARATOR()` for the EIP-2612 permit.
-4. Build `Order { user, token, amount, feeAmount, feeTo, deadline, nonce }`.
-5. User signs two typed-data messages:
-   - **EIP-712 Order** — domain `name = "GasRescue"`, `version = "1"`, `chainId = 84532`, `verifyingContract = GasRescue`.
-   - **EIP-2612 Permit** — `owner = user`, `spender = GasRescue`, `value = amount`, `nonce = token.nonces(user)`, `deadline = order.deadline`.
-6. Allowlisted relayer submits, paying Base Sepolia gas:
+- Wallet UX / frontend (separate PR)
+- Relayer TypeScript service
+- Bridge / cross-chain move-out
+- Mainnet, token launch, paid firm-audit packaging
 
-```bash
-cast send "$GAS_RESCUE_ADDRESS" \
-  "rescueWithPermit((address,address,uint256,uint256,address,uint256,uint256),bytes,uint8,bytes32,bytes32)" \
-  "(${USER},${TOKEN},${AMOUNT},${FEE_AMOUNT},${FEE_TO},${DEADLINE},${NONCE})" \
-  "$ORDER_SIGNATURE" \
-  "$PERMIT_V" "$PERMIT_R" "$PERMIT_S" \
-  --rpc-url "$BASE_SEPOLIA_RPC_URL" \
-  --private-key "$RELAYER_PRIVATE_KEY"
-```
+## Appendix: fee-skim harness (`GasRescue`)
 
-Demo script (test user key only): `script/Rescue.s.sol`. In production the user key stays in the wallet.
-
-## Out of scope
-
-- Other chains, mainnet, Solana
-- Bridge-out or remainder destination other than `order.user`
-- Native ETH top-up as the fee
-- Accepting fee-on-transfer tokens (they revert `FoTOrBalanceMismatch`)
-- Generic Permit2 / non-2612 tokens
-- Production relayer infrastructure
+Kept compiling so existing tests remain a regression gate. Destination-only skim on **Base Sepolia**: permit-pull `amount`, send `feeAmount` to `feeTo`, return remainder to `user`. Domain name `GasRescue` / version `1`. See `test/GasRescue.t.sol` and `script/Deploy.s.sol`.

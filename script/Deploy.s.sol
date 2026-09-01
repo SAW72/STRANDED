@@ -5,7 +5,8 @@ import {Script, console2} from "forge-std/Script.sol";
 
 import {GasRescue} from "../src/GasRescue.sol";
 
-/// @notice Deploy GasRescue to Base Sepolia and seed the first allowlisted relayer.
+/// @notice Deploy the fee-skim harness (GasRescue) to Base Sepolia.
+///         Not the product — see DeployGasRescueSwap.s.sol.
 ///
 /// Required env:
 ///   PRIVATE_KEY          deployer / owner key (do not commit)
