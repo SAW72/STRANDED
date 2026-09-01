@@ -256,6 +256,10 @@ export function App() {
   });
 
   useEffect(() => {
+    document.title = `GasRescue · ${chainLabel(selectedChainId)}`;
+  }, [selectedChainId]);
+
+  useEffect(() => {
     setDetailsConfirmed(false);
     setSigned(null);
     setSignError(null);
