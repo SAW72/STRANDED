@@ -1,4 +1,4 @@
-import type { RescueQuote } from "./quotes";
+import { hasRequiredQuoteFields, type RescueQuote } from "./quotes";
 
 export type RescuePhase = "needs_quote" | "review" | "confirmed" | "signing" | "signed";
 
@@ -10,11 +10,11 @@ export type GateInput = {
 };
 
 /**
- * Process gate: signatures are prompted only after the user confirms the
- * review screen (amount, fee, fee recipient). A missing quote never unlocks sign.
+ * Process gate: signatures are prompted only after the user confirms a
+ * complete swap-for-gas quote. A missing quote never unlocks sign.
  */
 export function rescuePhase(input: GateInput): RescuePhase {
-  if (!input.quote) return "needs_quote";
+  if (!hasRequiredQuoteFields(input.quote)) return "needs_quote";
   if (input.signed) return "signed";
   if (input.signing) return "signing";
   if (input.detailsConfirmed) return "confirmed";

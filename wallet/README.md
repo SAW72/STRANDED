@@ -1,26 +1,29 @@
-# GasRescue Wallet UX (Base Sepolia)
+# GasRescue Wallet UX (Base Sepolia + Arb Sepolia)
 
-Thin-slice frontend for a user who holds an allowlisted EIP-2612 ERC-20 on **Base Sepolia** (chain id `84532`) but has no ETH for gas.
+Vite + React + wagmi/viem frontend for a user who holds an allowlisted EIP-2612 ERC-20 on **Base Sepolia** (`84532`) or **Arb Sepolia** (`421614`) but has no native gas.
+
+The product is **swap-for-gas + move-out**, not a fee-skim. A slice of the stranded token is swapped for native gas; the remainder is sent to `to`; native gas is delivered to `nativeTo` (not `safeRecipient`).
 
 Flow:
 
-1. Connect an injected wallet (MetaMask / Rabby / Coinbase). Wrong networks are prompted to switch to Base Sepolia.
-2. Read the stranded token balance (`VITE_TOKEN_ADDRESS`, typically the deployed `MockERC20Permit`).
-3. Fetch Relayer `GET /quotes` (operator). The UI reviews **Amount to rescue**, **Rescue fee**, and **Fee goes to** in human decimals (`tokenDecimals` from the quote; expect 18). Fee recipient is shortened with a Copy button.
-4. Tap **Confirm details**. Only then does the app prompt the wallet. **Cancel** steps back without signing.
-5. One signature path: EIP-712 `Order`, then EIP-2612 `permit`.
+1. Pick **Base Sepolia** or **Arb Sepolia**. Mainnet is not available.
+2. Connect an injected wallet (MetaMask / Rabby / Coinbase). Wrong networks are prompted to switch to the selected testnet.
+3. Read the stranded token balance when the wallet is on that testnet. The UI never invents a live balance.
+4. Bind a quote:
+   - **Live:** `GET {VITE_RELAYER_URL}/quotes` when `VITE_RELAYER_URL` is set.
+   - **Sample:** if the Relayer URL is unset or the live quote fails, **Use sample quote** loads the checked-in fixture. It is labeled **Sample · not live**.
+5. Review **every** EIP-712 Order field plus the display-before-confirm set. Tap **Confirm details**. Only then does the app prompt the wallet. **Cancel** steps back without signing.
+6. One signature path: EIP-712 `Order` (domain `StewardGasRescue` / `1`), then EIP-2612 `permit`.
 
-This app does **not** invent a quotes endpoint, does **not** compute a fallback 1% fee, and does **not** default to mainnet. If `RELAYER_BASE_URL` is unset or `GET /quotes` fails / omits required fields, the sign path stays locked.
+## Canonical Order (EIP-712)
 
-Fee helper copy (the quote still supplies the numbers):
+```
+Order(address user,address tokenIn,uint256 amountIn,uint256 feeAmount,address feeTo,uint256 amountSwap,uint256 minAmountOut,address to,address nativeTo,address router,bytes32 pathHash,uint256 chainId,uint256 deadline,uint256 nonce)
+```
 
-> About 1% of the amount you rescue (testnet floor/ceiling apply in token units).
+Domain: `name = StewardGasRescue`, `version = 1`, `chainId` = selected testnet, `verifyingContract` = configured rescue address.
 
-## Prerequisites
-
-- Node 20+
-- A Relayer that implements `GET /quotes` (this repo does not ship one)
-- Deployed `GasRescue` + allowlisted token on Base Sepolia (see the root README)
+The review screen shows human labels (Amount to rescue, Amount swapped for gas, Remainder goes to, Rescue fee, Fee goes to, Native gas to, Min native out, …) and shortened addresses with Copy.
 
 ## Configure
 
@@ -31,43 +34,65 @@ cp .env.example .env
 
 | Variable | Required | Purpose |
 | --- | --- | --- |
-| `RELAYER_BASE_URL` | yes | Public Relayer origin. The app calls `{RELAYER_BASE_URL}/quotes`. |
-| `VITE_GAS_RESCUE_ADDRESS` | yes | Deployed `GasRescue` on Base Sepolia |
-| `VITE_TOKEN_ADDRESS` | yes | Allowlisted EIP-2612 ERC-20 (Scout mock is 18 decimals) |
+| `VITE_RELAYER_URL` | for live quotes | Public Relayer origin. The app calls `{VITE_RELAYER_URL}/quotes`. |
+| `VITE_GAS_RESCUE_ADDRESS` | to sign | Deployed rescue contract on Base Sepolia (also used as Arb fallback). |
+| `VITE_TOKEN_ADDRESS` | to read/sign | Allowlisted EIP-2612 ERC-20 on Base Sepolia (also used as Arb fallback). |
+| `VITE_GAS_RESCUE_ADDRESS_ARB_SEPOLIA` | no | Arb Sepolia rescue override. |
+| `VITE_TOKEN_ADDRESS_ARB_SEPOLIA` | no | Arb Sepolia token override. |
 | `VITE_BASE_SEPOLIA_RPC_URL` | no | Defaults to `https://sepolia.base.org` |
+| `VITE_ARB_SEPOLIA_RPC_URL` | no | Defaults to `https://sepolia-rollup.arbitrum.io/rpc` |
 
-`RELAYER_BASE_URL` is a public origin, not a secret. **Do not** put private keys, Relayer keys, or mainnet RPC credentials in `.env`. Vite also accepts `VITE_RELAYER_BASE_URL` if you prefer the `VITE_` prefix.
+`VITE_RELAYER_URL` is a public origin, not a secret. Aliases `RELAYER_BASE_URL` and `VITE_RELAYER_BASE_URL` still work. **Do not** put private keys, Relayer keys, or mainnet RPC credentials in `.env`.
 
-## Run against Base Sepolia + Relayer
+If `VITE_RELAYER_URL` is unset, the wallet starts in **sample quote** mode so you can walk the review screen. Sample numbers are a fixture, not a live price.
+
+## Run
 
 ```bash
 cd wallet
 npm install
+npm test
 npm run dev
 ```
 
-Open the printed local URL (default `http://localhost:5173`). Connect a wallet that is on Base Sepolia and holds the configured token. The Relayer must allow the wallet origin for CORS.
+Open the printed local URL (default `http://localhost:5173`). Connect a wallet on Base Sepolia or Arb Sepolia. For a live quote the Relayer must allow the wallet origin for CORS.
 
 Quote request:
 
 ```
-GET {RELAYER_BASE_URL}/quotes?chainId=84532&token=<token>&amount=<raw>&user=<address>
+GET {VITE_RELAYER_URL}/quotes?chainId=84532|421614&token=<token>&amount=<raw>&user=<address>
 ```
 
-Required JSON fields (string or number integers are accepted):
+Required JSON fields (string or number integers are accepted). Field names must match:
 
 ```json
 {
-  "amount": "100000000000000000000",
+  "quoteId": "…",
+  "chainId": 84532,
+  "tokenIn": "0x…",
+  "tokenSymbol": "MOCK",
+  "tokenDecimals": 18,
+  "user": "0x…",
+  "amountIn": "100000000000000000000",
+  "amountSwap": "10000000000000000000",
   "feeAmount": "1000000000000000000",
   "feeTo": "0x…",
-  "tokenDecimals": 18
+  "to": "0x…",
+  "nativeTo": "0x…",
+  "minAmountOut": "2500000000000000",
+  "amountRemainder": "89000000000000000000",
+  "router": "0x…",
+  "pathHash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "deadline": "1893456000",
+  "nonce": "1"
 }
 ```
 
-Optional: `deadline`, `nonce`, `token`, or a wrapper `{ "quote": { … } }` / `{ "quotes": [ … ] }`. `feeAmount` must be less than `amount` (same units the contract uses).
+`amountSwap + feeAmount + amountRemainder` must equal `amountIn`. `safeRecipient` is not accepted. The old fee-skim shape (`amount` / `token` only) fails closed.
 
-The wallet signs; it does not submit `rescueWithPermit`. Hand the Order + permit to your Relayer.
+`displayBeforeConfirm`: `amountIn`, `amountSwap`, `amountRemainder`, `feeAmount`, `feeTo`, `to`, `nativeTo`, `minAmountOut`, `tokenSymbol`, `tokenDecimals`, `chainId`.
+
+The wallet signs; it does not submit the rescue transaction. Hand the Order + permit to your Relayer.
 
 ## Tests
 
@@ -76,8 +101,8 @@ cd wallet
 npm test
 ```
 
-Covers quote parsing (fail closed), the Confirm-details process gate, and Order field sourcing from the quote.
+Covers quote parsing (fail closed, including fee-skim bodies), fixture shape, Confirm-details process gate, Order field sourcing, domain name, and end-user copy.
 
 ## Out of scope
 
-Mainnet, Solana, spend flows, SaaS, and inventing `/quotes` responses.
+Mainnet, Solidity / contracts, inventing live balances or live quotes, broadcasting the rescue.

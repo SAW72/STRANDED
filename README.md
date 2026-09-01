@@ -68,9 +68,9 @@ wallet/                                # Base Sepolia Wallet UX (wagmi/viem)
 
 ## Wallet UX
 
-Thin-slice frontend for a gas-dead user on **Base Sepolia only**. Connect a wallet, read the stranded EIP-2612 token balance, review Relayer `GET /quotes` values, then (only after **Confirm details**) sign one EIP-712 `Order` plus one EIP-2612 permit.
+Frontend for a gas-dead user on **Base Sepolia** or **Arb Sepolia**. Connect a wallet, read the stranded EIP-2612 token balance (never invented), review a Relayer `GET /quotes` swap-for-gas quote — or a labeled sample fixture if the Relayer is unavailable — then (only after **Confirm details**) sign one EIP-712 `Order` (`StewardGasRescue` / `1`) plus one EIP-2612 permit.
 
-See [wallet/README.md](wallet/README.md) for how to run against Base Sepolia and a Relayer URL. Signing is blocked when the quote is missing — the app does not invent fee values.
+See [wallet/README.md](wallet/README.md). Signing is blocked when required quote fields are missing. The UI does not invent live balances or live quotes. Contracts in this repo are still the fee-skim harness; wallet Order fields follow the design-freeze swap-for-gas + move-out shape (`nativeTo`, not `safeRecipient`).
 
 ## Prerequisites
 

@@ -1,16 +1,11 @@
 import { describe, expect, it } from "vitest";
+import { sampleFixtureQuote } from "./fixture";
 import { canPromptSignatures, confirmDetailsEnabled, rescuePhase } from "./processGate";
-import type { RescueQuote } from "./quotes";
 
-const quote: RescueQuote = {
-  amount: 100n,
-  feeAmount: 1n,
-  feeTo: "0x3333333333333333333333333333333333333333",
-  tokenDecimals: 18,
-};
+const quote = sampleFixtureQuote();
 
 describe("process gate", () => {
-  it("stays on needs_quote when the Relayer quote is missing", () => {
+  it("stays on needs_quote when the quote is missing", () => {
     expect(
       rescuePhase({ quote: null, detailsConfirmed: true, signing: false, signed: false }),
     ).toBe("needs_quote");
@@ -31,11 +26,15 @@ describe("process gate", () => {
   });
 
   it("does not skip the gate into signing", () => {
-    expect(canPromptSignatures(rescuePhase({
-      quote,
-      detailsConfirmed: false,
-      signing: false,
-      signed: false,
-    }))).toBe(false);
+    expect(
+      canPromptSignatures(
+        rescuePhase({
+          quote,
+          detailsConfirmed: false,
+          signing: false,
+          signed: false,
+        }),
+      ),
+    ).toBe(false);
   });
 });

@@ -1,12 +1,13 @@
 import { http, createConfig } from "wagmi";
-import { baseSepolia } from "wagmi/chains";
+import { arbitrumSepolia, baseSepolia } from "wagmi/chains";
 import { injected } from "wagmi/connectors";
-import { baseSepoliaRpcUrl } from "./config";
+import { ARB_SEPOLIA_CHAIN_ID, BASE_SEPOLIA_CHAIN_ID, rpcUrl } from "./config";
 
 export const wagmiConfig = createConfig({
-  chains: [baseSepolia],
+  chains: [baseSepolia, arbitrumSepolia],
   connectors: [injected({ shimDisconnect: true })],
   transports: {
-    [baseSepolia.id]: http(baseSepoliaRpcUrl()),
+    [baseSepolia.id]: http(rpcUrl(BASE_SEPOLIA_CHAIN_ID)),
+    [arbitrumSepolia.id]: http(rpcUrl(ARB_SEPOLIA_CHAIN_ID)),
   },
 });

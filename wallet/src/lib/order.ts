@@ -1,13 +1,23 @@
 import { type Address, type Hex, parseSignature } from "viem";
 import type { RescueQuote } from "./quotes";
 
+export const EIP712_DOMAIN_NAME = "StewardGasRescue";
+export const EIP712_DOMAIN_VERSION = "1";
+
 export const ORDER_TYPES = {
   Order: [
     { name: "user", type: "address" },
-    { name: "token", type: "address" },
-    { name: "amount", type: "uint256" },
+    { name: "tokenIn", type: "address" },
+    { name: "amountIn", type: "uint256" },
     { name: "feeAmount", type: "uint256" },
     { name: "feeTo", type: "address" },
+    { name: "amountSwap", type: "uint256" },
+    { name: "minAmountOut", type: "uint256" },
+    { name: "to", type: "address" },
+    { name: "nativeTo", type: "address" },
+    { name: "router", type: "address" },
+    { name: "pathHash", type: "bytes32" },
+    { name: "chainId", type: "uint256" },
     { name: "deadline", type: "uint256" },
     { name: "nonce", type: "uint256" },
   ],
@@ -25,18 +35,25 @@ export const PERMIT_TYPES = {
 
 export type RescueOrder = {
   user: Address;
-  token: Address;
-  amount: bigint;
+  tokenIn: Address;
+  amountIn: bigint;
   feeAmount: bigint;
   feeTo: Address;
+  amountSwap: bigint;
+  minAmountOut: bigint;
+  to: Address;
+  nativeTo: Address;
+  router: Address;
+  pathHash: Hex;
+  chainId: bigint;
   deadline: bigint;
   nonce: bigint;
 };
 
 export function gasRescueDomain(verifyingContract: Address, chainId: number) {
   return {
-    name: "GasRescue",
-    version: "1",
+    name: EIP712_DOMAIN_NAME,
+    version: EIP712_DOMAIN_VERSION,
     chainId,
     verifyingContract,
   } as const;
@@ -51,21 +68,24 @@ export function permitDomain(tokenName: string, verifyingContract: Address, chai
   } as const;
 }
 
-export function buildOrder(params: {
-  user: Address;
-  token: Address;
-  quote: RescueQuote;
-  deadline: bigint;
-  nonce: bigint;
-}): RescueOrder {
+/** Build the EIP-712 Order from a complete quote. Does not invent missing legs. */
+export function buildOrder(params: { quote: RescueQuote }): RescueOrder {
+  const { quote } = params;
   return {
-    user: params.user,
-    token: params.quote.token ?? params.token,
-    amount: params.quote.amount,
-    feeAmount: params.quote.feeAmount,
-    feeTo: params.quote.feeTo,
-    deadline: params.deadline,
-    nonce: params.nonce,
+    user: quote.user,
+    tokenIn: quote.tokenIn,
+    amountIn: quote.amountIn,
+    feeAmount: quote.feeAmount,
+    feeTo: quote.feeTo,
+    amountSwap: quote.amountSwap,
+    minAmountOut: quote.minAmountOut,
+    to: quote.to,
+    nativeTo: quote.nativeTo,
+    router: quote.router,
+    pathHash: quote.pathHash,
+    chainId: BigInt(quote.chainId),
+    deadline: quote.deadline,
+    nonce: quote.nonce,
   };
 }
 

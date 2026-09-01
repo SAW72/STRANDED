@@ -249,3 +249,27 @@ h1 {
   font-size: 0.85rem;
   line-height: 1.4;
 }
+
+.chain-switch {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0 0 0.75rem;
+}
+
+.review-heading {
+  margin: 1.15rem 0 0.15rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.banner-sample {
+  background: #3a3018;
+  border: 1px solid #8a7030;
+  color: var(--warn);
+}
+
+.banner-sample p {
+  margin: 0.35rem 0 0;
+  color: var(--text);
+}

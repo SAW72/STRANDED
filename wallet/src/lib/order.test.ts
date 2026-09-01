@@ -1,24 +1,67 @@
 import { describe, expect, it } from "vitest";
-import { buildOrder, splitPermitSignature } from "./order";
+import { sampleFixtureQuote } from "./fixture";
+import {
+  buildOrder,
+  EIP712_DOMAIN_NAME,
+  EIP712_DOMAIN_VERSION,
+  gasRescueDomain,
+  ORDER_TYPES,
+  splitPermitSignature,
+} from "./order";
+
+describe("ORDER_TYPES", () => {
+  it("lists the canonical EIP-712 Order fields in freeze order", () => {
+    expect(ORDER_TYPES.Order.map((field) => field.name)).toEqual([
+      "user",
+      "tokenIn",
+      "amountIn",
+      "feeAmount",
+      "feeTo",
+      "amountSwap",
+      "minAmountOut",
+      "to",
+      "nativeTo",
+      "router",
+      "pathHash",
+      "chainId",
+      "deadline",
+      "nonce",
+    ]);
+    expect(ORDER_TYPES.Order.map((field) => field.name)).not.toContain("safeRecipient");
+    expect(ORDER_TYPES.Order.map((field) => field.name)).not.toContain("amount");
+    expect(ORDER_TYPES.Order.map((field) => field.name)).not.toContain("token");
+  });
+});
+
+describe("gasRescueDomain", () => {
+  it("uses StewardGasRescue / 1", () => {
+    const domain = gasRescueDomain("0x7777777777777777777777777777777777777777", 84532);
+    expect(domain.name).toBe(EIP712_DOMAIN_NAME);
+    expect(domain.name).toBe("StewardGasRescue");
+    expect(domain.version).toBe(EIP712_DOMAIN_VERSION);
+    expect(domain.chainId).toBe(84532);
+  });
+});
 
 describe("buildOrder", () => {
-  it("copies amount, feeAmount, and feeTo from the quote only", () => {
-    const order = buildOrder({
-      user: "0x1111111111111111111111111111111111111111",
-      token: "0x2222222222222222222222222222222222222222",
-      quote: {
-        amount: 99n,
-        feeAmount: 3n,
-        feeTo: "0x3333333333333333333333333333333333333333",
-        tokenDecimals: 18,
-      },
-      deadline: 1n,
-      nonce: 7n,
-    });
-    expect(order.amount).toBe(99n);
-    expect(order.feeAmount).toBe(3n);
-    expect(order.feeTo).toBe("0x3333333333333333333333333333333333333333");
-    expect(order.nonce).toBe(7n);
+  it("copies every Order field from the quote only", () => {
+    const quote = sampleFixtureQuote();
+    const order = buildOrder({ quote });
+    expect(order.user).toBe(quote.user);
+    expect(order.tokenIn).toBe(quote.tokenIn);
+    expect(order.amountIn).toBe(quote.amountIn);
+    expect(order.feeAmount).toBe(quote.feeAmount);
+    expect(order.feeTo).toBe(quote.feeTo);
+    expect(order.amountSwap).toBe(quote.amountSwap);
+    expect(order.minAmountOut).toBe(quote.minAmountOut);
+    expect(order.to).toBe(quote.to);
+    expect(order.nativeTo).toBe(quote.nativeTo);
+    expect(order.router).toBe(quote.router);
+    expect(order.pathHash).toBe(quote.pathHash);
+    expect(order.chainId).toBe(BigInt(quote.chainId));
+    expect(order.deadline).toBe(quote.deadline);
+    expect(order.nonce).toBe(quote.nonce);
+    expect(order).not.toHaveProperty("safeRecipient");
   });
 });
 
