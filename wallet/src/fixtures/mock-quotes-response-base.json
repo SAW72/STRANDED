@@ -22,7 +22,7 @@
       "name": "StewardGasRescue",
       "version": "1",
       "chainId": 84532,
-      "verifyingContract": "0x9975DEeC3C39c661fCc38bc84aaFF5D4861d910a"
+      "verifyingContract": "0x14cf5De1B9fAEa03c059E3e5C8A2B45d97D1EfA5"
     },
     "primaryType": "Order",
     "types": {
