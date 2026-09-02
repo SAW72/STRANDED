@@ -78,7 +78,7 @@ Modifiers: `nonReentrant`, `whenNotPaused`, `onlyRelayer`.
 1. **View-only preflight** (no nonce write): testnet + matching chainId; nonzero addresses; amount bounds; deadline; token + router allowlists; unused nonce; `keccak256(swapData) == pathHash`; recover signer == `order.user`; `balanceOf(user) >= amountIn`.
 2. **Gasless-auth gate** — else `NoGaslessAuth` (still no nonce write).
 3. **Consume nonce** — `usedNonces[user][nonce] = true`.
-4. **Sweep pre-existing dust** — any ETH or WETH sitting on the contract from prior donations is sent to the owner *before* the pull, so a donation cannot DoS rescues via `DustRemaining`. Sweep runs in both `rescueWithPermit` and `rescueWithPermit2` entrypoints, before `permit`/`permitWitnessTransferFrom`. Because the sweep is pre-pull, any WETH present is a donation — never the user's just-pulled `amountIn` — so WETH is always swept, including when `tokenIn == WETH`. ETH is **wrapped to WETH** (`weth.deposit{value: ethDust}()`) and transferred to owner via `IERC20.safeTransfer` (option B). This keeps the strict end-of-tx zero invariant, kills owner-receive grief (ERC-20 transfers do not depend on a receive hook), and avoids stranded credits on ownership transfer.
+4. **Sweep pre-existing dust** — any ETH, WETH, or (when `tokenIn != WETH`) `tokenIn` sitting on the contract from prior donations is sent to the owner *before* the pull, so a donation cannot DoS rescues via `DustRemaining` or `SwapInputNotConsumed`. Sweep runs in both `rescueWithPermit` and `rescueWithPermit2` entrypoints, before `permit`/`permitWitnessTransferFrom`. Because the sweep is pre-pull, any WETH present is a donation — never the user's just-pulled `amountIn` — so WETH is always swept, including when `tokenIn == WETH`. ETH is **wrapped to WETH** (`weth.deposit{value: ethDust}()`) and transferred to owner via `IERC20.safeTransfer` (option B). This keeps the strict end-of-tx zero invariant, kills owner-receive grief (ERC-20 transfers do not depend on a receive hook), and avoids stranded credits on ownership transfer. When `tokenIn != WETH`, leftover `tokenIn` is transferred to owner the same way (`IERC20(tokenIn).safeTransfer`); do **not** sweep `tokenIn` when it is WETH (that path is already handled).
 5. **Pull** — permit or Permit2. Exact balance delta required (`FoTOrBalanceMismatch` on fee-on-transfer).
 6. **Settle (Appendix A):**
    - skim `feeAmount` → `feeTo`,
@@ -95,7 +95,7 @@ Any revert rolls back the nonce write. Bad signatures, underfunded, path mismatc
 ## 6. Security invariants (locked)
 
 - Fail closed: no mainnet path, no unallowlisted token/router, no disabled Permit2, no non-permit fallback.
-- Job-only native credit: donated ETH/WETH on the contract is **wrapped/swept to the owner before the pull**, never to `nativeTo`. `nativeTo` receives only this job's earned native.
+- Job-only native credit: donated ETH/WETH on the contract is **wrapped/swept to the owner before the pull**, never to `nativeTo`. `nativeTo` receives only this job's earned native. Donated `tokenIn` (when not WETH) is likewise swept to the owner before the pull so it cannot brick rescues via `SwapInputNotConsumed`.
 - Exact `amountSwap` consumption: partial fills revert; leftovers never reach `to`.
 - Owner ≠ relayer hot key.
 - Non-proxy, `ReentrancyGuard`, owner-only pause + allowlists.
@@ -134,7 +134,7 @@ Option A (owner allowlists a trusted forwarder with a `rescueWithTransfer` path)
 
 1. This design doc signed off by CEO. **Done 2026-09-02.**
 2. Auditor bot traces it + `GasRescueSwap.sol` → severity-ranked findings (docs/AUDITOR.md). **Done: APPROVE, docs/AUDIT-FINDINGS.md.**
-3. Residual Medium: ETH/WETH `DustRemaining` donation DoS (issue #6) **fixed and closed.** Remaining Medium: `tokenIn` dust → `SwapInputNotConsumed` (issue #8) — firm-audit / mainnet gate, not a Sepolia blocker.
+3. Residual Medium: ETH/WETH `DustRemaining` donation DoS (issue #6) **fixed and closed.** `tokenIn` dust → `SwapInputNotConsumed` (issue #8) **fixed** — pre-pull sweep to owner when `tokenIn != WETH`.
 4. Full E2E rescue on Arb Sepolia with a real stranded token.
 5. Human firm audit (Trail of Bits / OpenZeppelin / equivalent) signs off.
 6. Relayer service + wallet UX built and tested. Wallet UX PR #2 stays **held** until Spencer says merge.

@@ -217,11 +217,12 @@ contract GasRescueSwap is IGasRescueSwap, Ownable, Pausable, ReentrancyGuard, EI
         if (!eip2612Tokens[order.tokenIn]) revert NoGaslessAuth();
         _consumeNonce(order);
 
-        // Sweep pre-existing ETH/WETH donations to owner BEFORE the pull so a
-        // donation cannot DoS rescues via DustRemaining. Always sweep WETH too:
-        // at this point the user's funds have not been pulled yet, so any WETH
-        // here is a donation, never the user's just-pulled amountIn.
-        _sweepDust();
+        // Sweep pre-existing ETH/WETH/tokenIn donations to owner BEFORE the pull
+        // so a donation cannot DoS rescues via DustRemaining or SwapInputNotConsumed.
+        // Always sweep WETH: at this point the user's funds have not been pulled
+        // yet, so any WETH here is a donation, never the user's just-pulled amountIn.
+        // tokenIn is swept only when it is not WETH (WETH path already handled).
+        _sweepDust(order.tokenIn);
 
         IERC20Permit(order.tokenIn).permit(order.user, address(this), order.amountIn, order.deadline, v, r, s);
         uint256 nativeOut = _pullSwapAndSettle(order, swapData);
@@ -239,11 +240,12 @@ contract GasRescueSwap is IGasRescueSwap, Ownable, Pausable, ReentrancyGuard, EI
         if (!permit2Enabled || address(permit2) == address(0)) revert NoGaslessAuth();
         _consumeNonce(order);
 
-        // Sweep pre-existing ETH/WETH donations to owner BEFORE the pull so a
-        // donation cannot DoS rescues via DustRemaining. Always sweep WETH too:
-        // at this point the user's funds have not been pulled yet, so any WETH
-        // here is a donation, never the user's just-pulled amountIn.
-        _sweepDust();
+        // Sweep pre-existing ETH/WETH/tokenIn donations to owner BEFORE the pull
+        // so a donation cannot DoS rescues via DustRemaining or SwapInputNotConsumed.
+        // Always sweep WETH: at this point the user's funds have not been pulled
+        // yet, so any WETH here is a donation, never the user's just-pulled amountIn.
+        // tokenIn is swept only when it is not WETH (WETH path already handled).
+        _sweepDust(order.tokenIn);
 
         IERC20 token = IERC20(order.tokenIn);
         uint256 balanceBefore = token.balanceOf(address(this));
@@ -374,17 +376,20 @@ contract GasRescueSwap is IGasRescueSwap, Ownable, Pausable, ReentrancyGuard, EI
         }
     }
 
-    /// @dev Send any pre-existing ETH and WETH on this contract to the owner.
-    ///      Called BEFORE the pull in both entrypoints so donations cannot block
-    ///      rescues via DustRemaining, and so the user's just-pulled funds are
-    ///      never swept. Uses IERC20.safeTransfer because IWETH only declares
+    /// @dev Send any pre-existing ETH, WETH, and (when not WETH) tokenIn dust
+    ///      on this contract to the owner. Called BEFORE the pull in both
+    ///      entrypoints so donations cannot block rescues via DustRemaining or
+    ///      SwapInputNotConsumed, and so the user's just-pulled funds are never
+    ///      swept. Uses IERC20.safeTransfer because IWETH only declares
     ///      `transfer`, not SafeERC20.
     ///
     ///      ETH is wrapped to WETH and transferred to owner (option B). This keeps
     ///      the strict end-of-tx zero invariant, kills owner-receive grief (ERC-20
     ///      transfers do not depend on a receive hook), and avoids stranded credits
     ///      on ownership transfer. WETH is transferred directly for the same reason.
-    function _sweepDust() internal {
+    ///      tokenIn is swept the same way when it is not WETH; the WETH path
+    ///      already covers tokenIn == WETH.
+    function _sweepDust(address tokenIn) internal {
         uint256 ethDust = address(this).balance;
         if (ethDust > 0) {
             weth.deposit{value: ethDust}();
@@ -396,6 +401,14 @@ contract GasRescueSwap is IGasRescueSwap, Ownable, Pausable, ReentrancyGuard, EI
         if (wethDust > 0) {
             IERC20(address(weth)).safeTransfer(owner(), wethDust);
             emit DustSwept(address(weth), wethDust, owner());
+        }
+
+        if (tokenIn != address(weth)) {
+            uint256 tokenDust = IERC20(tokenIn).balanceOf(address(this));
+            if (tokenDust > 0) {
+                IERC20(tokenIn).safeTransfer(owner(), tokenDust);
+                emit DustSwept(tokenIn, tokenDust, owner());
+            }
         }
     }
 
