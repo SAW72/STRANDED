@@ -1,0 +1,27 @@
+name: Tests
+
+on:
+  push:
+    branches: [main, fix/issue-6-wrap-eth-dust]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+
+      - name: Show forge version
+        run: forge --version
+
+      - name: Run tests
+        run: forge test -vv
