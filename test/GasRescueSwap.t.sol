@@ -434,6 +434,28 @@ contract GasRescueSwapTest is Test {
         assertTrue(rescue.usedNonces(user, 6));
     }
 
+    function test_donatedTokenIn_sweptToOwner() public {
+        // 1-wei donation of allowlisted tokenIn used to brick rescues via
+        // SwapInputNotConsumed. Sweep to owner BEFORE the pull.
+        token.mint(stranger, 1);
+        vm.prank(stranger);
+        token.transfer(address(rescue), 1);
+        assertEq(token.balanceOf(address(rescue)), 1);
+
+        uint256 ownerTokenBefore = token.balanceOf(owner);
+
+        (IGasRescueSwap.Order memory order, bytes memory swapData) = _defaultOrderAndPath(1);
+        (bytes memory orderSig, uint8 v, bytes32 r, bytes32 s) = _signOrderAndPermit(order, address(token), USER_PK);
+
+        vm.prank(relayer);
+        rescue.rescueWithPermit(order, orderSig, v, r, s, swapData);
+
+        assertEq(token.balanceOf(owner), ownerTokenBefore + 1, "donated tokenIn dust swept to owner");
+        assertEq(token.balanceOf(address(rescue)), 0, "contract tokenIn zero after sweep");
+        assertEq(nativeTo.balance, 0.05 ether, "nativeTo only gets this job's native");
+        assertTrue(rescue.usedNonces(user, 1));
+    }
+
     function test_endOfTx_zeroAsserts_tokenInWethEth() public {
         (IGasRescueSwap.Order memory order, bytes memory swapData) = _defaultOrderAndPath(12);
         (bytes memory orderSig, uint8 v, bytes32 r, bytes32 s) = _signOrderAndPermit(order, address(token), USER_PK);
