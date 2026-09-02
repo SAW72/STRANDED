@@ -145,7 +145,7 @@ contract GasRescueSwap is IGasRescueSwap, Ownable, Pausable, ReentrancyGuard, EI
         bool allowed
     ) external onlyOwner {
         if (router == address(0)) revert ZeroAddress();
-        routerAllowed[router] = allowed;
+        allowedRouters[router] = allowed;
         emit RouterAllowed(router, allowed);
     }
 
