@@ -200,9 +200,10 @@ contract GasRescueSwap is IGasRescueSwap, Ownable, Pausable, ReentrancyGuard, EI
     }
 
     /// @dev Appendix A sequence: view-only checks + EIP-712 recover + funding
-    ///      preflight (no nonce write) → consume nonce → permit → pull → feeAmount
-    ///      pre-skim → remainder ERC-20 to `to` (before swap) → router consumes
-    ///      exactly `amountSwap` → this job's native delta to `nativeTo` ≥ `minAmountOut`.
+    ///      preflight (no nonce write) → consume nonce → sweep pre-existing dust →
+    ///      permit/Permit2 pull → feeAmount pre-skim → remainder ERC-20 to `to`
+    ///      (before swap) → router consumes exactly `amountSwap` → this job's native
+    ///      delta to `nativeTo` ≥ `minAmountOut`.
     ///      End-of-tx tokenIn / WETH / ETH on this contract must be 0. Atomic; no partial fills.
     function rescueWithPermit(
         Order calldata order,
@@ -215,6 +216,12 @@ contract GasRescueSwap is IGasRescueSwap, Ownable, Pausable, ReentrancyGuard, EI
         _preflight(order, orderSignature, swapData);
         if (!eip2612Tokens[order.tokenIn]) revert NoGaslessAuth();
         _consumeNonce(order);
+
+        // Sweep pre-existing ETH/WETH donations to owner BEFORE the pull so a
+        // donation cannot DoS rescues via DustRemaining. Always sweep WETH too:
+        // at this point the user's funds have not been pulled yet, so any WETH
+        // here is a donation, never the user's just-pulled amountIn.
+        _sweepDust();
 
         IERC20Permit(order.tokenIn).permit(order.user, address(this), order.amountIn, order.deadline, v, r, s);
         uint256 nativeOut = _pullSwapAndSettle(order, swapData);
@@ -231,6 +238,12 @@ contract GasRescueSwap is IGasRescueSwap, Ownable, Pausable, ReentrancyGuard, EI
         _preflight(order, orderSignature, swapData);
         if (!permit2Enabled || address(permit2) == address(0)) revert NoGaslessAuth();
         _consumeNonce(order);
+
+        // Sweep pre-existing ETH/WETH donations to owner BEFORE the pull so a
+        // donation cannot DoS rescues via DustRemaining. Always sweep WETH too:
+        // at this point the user's funds have not been pulled yet, so any WETH
+        // here is a donation, never the user's just-pulled amountIn.
+        _sweepDust();
 
         IERC20 token = IERC20(order.tokenIn);
         uint256 balanceBefore = token.balanceOf(address(this));
@@ -320,11 +333,6 @@ contract GasRescueSwap is IGasRescueSwap, Ownable, Pausable, ReentrancyGuard, EI
     ) internal returns (uint256 nativeOut) {
         IERC20 token = IERC20(order.tokenIn);
 
-        // Sweep pre-existing ETH/WETH donations to the owner BEFORE the pull so a
-        // donation cannot DoS rescues via DustRemaining, and so we never sweep the
-        // user's just-pulled tokenIn (when tokenIn == WETH) to the owner.
-        _sweepDust(order.tokenIn);
-
         // Appendix A: feeAmount pre-skim, then remainder ERC-20 → `to` (before swap).
         if (order.feeAmount > 0) {
             token.safeTransfer(order.feeTo, order.feeAmount);
@@ -367,22 +375,16 @@ contract GasRescueSwap is IGasRescueSwap, Ownable, Pausable, ReentrancyGuard, EI
     }
 
     /// @dev Send any pre-existing ETH and WETH on this contract to the owner.
-    ///      Called at the start of settlement, before the pull, so donations cannot
-    ///      block rescues and the user's just-pulled WETH (when tokenIn == WETH) is
-    ///      never swept to the owner. Uses IERC20.safeTransfer because IWETH only
-    ///      declares `transfer`, not SafeERC20.
-    function _sweepDust(address tokenIn) internal {
+    ///      Called BEFORE the pull in both entrypoints so donations cannot block
+    ///      rescues via DustRemaining, and so the user's just-pulled funds are
+    ///      never swept. Uses IERC20.safeTransfer because IWETH only declares
+    ///      `transfer`, not SafeERC20.
+    function _sweepDust() internal {
         uint256 ethDust = address(this).balance;
         if (ethDust > 0) {
             (bool sent,) = payable(owner()).call{value: ethDust}("");
             if (!sent) revert NativeTransferFailed();
             emit DustSwept(address(0), ethDust, owner());
-        }
-
-        // Skip WETH when it is the input token: the pull happens after this sweep,
-        // so any WETH here is a donation, not the user's funds.
-        if (tokenIn == address(weth)) {
-            return;
         }
 
         uint256 wethDust = weth.balanceOf(address(this));
