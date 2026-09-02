@@ -9,6 +9,15 @@ import { parseQuoteResponse, type RescueQuote } from "./quotes";
 export const RELAYER_DRY_PATH_HASH =
   "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" as const;
 
+/** Base Sepolia (84532) Relayer deploy — fixtures only, not a live quote. */
+export const BASE_SEPOLIA_DEPLOY = {
+  chainId: BASE_SEPOLIA_CHAIN_ID,
+  tokenIn: "0x611550aFB7fE0950a43838CBda1Bf488D6469127",
+  feeTo: "0x30466A210961c0C2C13AF0A9d35dfC6E8858bA9D",
+  gasRescue: "0x9975DEeC3C39c661fCc38bc84aaFF5D4861d910a",
+  router: "0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4",
+} as const;
+
 /** Relayer dry-mock amounts: 1e18 in, 0.2e18 swap, 0.01e18 fee, 0.79e18 remainder. */
 export const RELAYER_DRY_AMOUNTS = {
   amountIn: 10n ** 18n,

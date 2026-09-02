@@ -34,17 +34,17 @@ cp .env.example .env
 
 | Variable | Required | Purpose |
 | --- | --- | --- |
-| `VITE_RELAYER_URL` | for live quotes | Public Relayer origin. The app calls `POST {VITE_RELAYER_URL}/v1/quotes`. |
-| `VITE_GAS_RESCUE_ADDRESS` | to sign | Deployed rescue contract on Base Sepolia (also used as Arb fallback). |
-| `VITE_TOKEN_ADDRESS` | to read/sign | Allowlisted EIP-2612 ERC-20 on Base Sepolia (also used as Arb fallback). |
-| `VITE_GAS_RESCUE_ADDRESS_ARB_SEPOLIA` | no | Arb Sepolia rescue override. |
-| `VITE_TOKEN_ADDRESS_ARB_SEPOLIA` | no | Arb Sepolia token override. |
+| `VITE_RELAYER_URL` | for live quotes | Public Relayer origin. **Leave unset** — live `POST /v1/quotes` is a STUB until Spencer’s Relayer key. |
+| `VITE_GAS_RESCUE_ADDRESS` | to sign | Base Sepolia GasRescueSwap `0x9975DEeC3C39c661fCc38bc84aaFF5D4861d910a`. |
+| `VITE_TOKEN_ADDRESS` | to read/sign | Base Sepolia MockERC20Permit `0x611550aFB7fE0950a43838CBda1Bf488D6469127`. |
+| `VITE_GAS_RESCUE_ADDRESS_ARB_SEPOLIA` | no | Arb Sepolia rescue. Leave empty — no Arb deploy yet. |
+| `VITE_TOKEN_ADDRESS_ARB_SEPOLIA` | no | Arb Sepolia token. Leave empty — no Arb deploy yet. |
 | `VITE_BASE_SEPOLIA_RPC_URL` | no | Defaults to `https://sepolia.base.org` |
 | `VITE_ARB_SEPOLIA_RPC_URL` | no | Defaults to `https://sepolia-rollup.arbitrum.io/rpc` |
 
 `VITE_RELAYER_URL` is a public origin, not a secret. Aliases `RELAYER_BASE_URL` and `VITE_RELAYER_BASE_URL` still work. **Do not** put private keys, Relayer keys, or mainnet RPC credentials in `.env`.
 
-If `VITE_RELAYER_URL` is unset, the wallet uses the Relayer dry-mock fixture (not a live price). If the URL is set, a failed POST does **not** invent a quote.
+If `VITE_RELAYER_URL` is unset, the wallet uses the Relayer dry-mock fixture (not a live price). Confirm details still gates the fixture path. Live `/v1/quotes` stays a STUB until Spencer’s Relayer key. If the URL is set, a failed POST does **not** invent a quote.
 
 ## Run
 
@@ -91,7 +91,16 @@ Dry-mock amounts (also in `src/fixtures/sample-swap-quote.json` / `sample-swap-q
 | `amountRemainder` | `0.79e18` |
 | `tokenSymbol` | `mPERMIT` |
 | `pathHash` | `0xbbb…` (32 bytes) |
-| `chainId` | `84532` or `421614` |
+| `chainId` | `84532` (Base fixtures use the real deploy addrs below) or `421614` (placeholders only) |
+
+Base Sepolia fixture / `.env.example` deploy addrs (84532 only):
+
+| Role | Address |
+| --- | --- |
+| `tokenIn` / MockERC20Permit | `0x611550aFB7fE0950a43838CBda1Bf488D6469127` |
+| `feeTo` (Owner) | `0x30466A210961c0C2C13AF0A9d35dfC6E8858bA9D` |
+| GasRescueSwap | `0x9975DEeC3C39c661fCc38bc84aaFF5D4861d910a` |
+| `router` | `0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4` |
 
 `amountSwap + feeAmount + amountRemainder` must equal `amountIn`. `safeRecipient` is not accepted. The old fee-skim shape (`amount` / `token` only) fails closed.
 

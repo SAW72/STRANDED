@@ -5,6 +5,7 @@ import sampleArb from "../fixtures/sample-swap-quote-arb.json";
 import sampleBase from "../fixtures/sample-swap-quote.json";
 import { ARB_SEPOLIA_CHAIN_ID, BASE_SEPOLIA_CHAIN_ID } from "./chains";
 import {
+  BASE_SEPOLIA_DEPLOY,
   MOCK_QUOTES_RESPONSE_ARB,
   MOCK_QUOTES_RESPONSE_BASE,
   RELAYER_DRY_AMOUNTS,
@@ -28,6 +29,13 @@ describe("Relayer dry-mock fixtures", () => {
     expect(base?.amountRemainder).toBe(RELAYER_DRY_AMOUNTS.amountRemainder);
     expect(base?.pathHash).toBe(RELAYER_DRY_PATH_HASH);
     expect(arb?.pathHash).toBe(RELAYER_DRY_PATH_HASH);
+    expect(base?.tokenIn).toBe(BASE_SEPOLIA_DEPLOY.tokenIn);
+    expect(base?.feeTo).toBe(BASE_SEPOLIA_DEPLOY.feeTo);
+    expect(base?.router).toBe(BASE_SEPOLIA_DEPLOY.router);
+    expect(base?.chainId).toBe(84532);
+    // Arb fixtures stay placeholders — do not invent an Arb deploy.
+    expect(arb?.tokenIn).not.toBe(BASE_SEPOLIA_DEPLOY.tokenIn);
+    expect(arb?.router).not.toBe(BASE_SEPOLIA_DEPLOY.router);
     expect(base).not.toHaveProperty("safeRecipient");
   });
 
@@ -39,7 +47,9 @@ describe("Relayer dry-mock fixtures", () => {
     expect(base?.chainId).toBe(BASE_SEPOLIA_CHAIN_ID);
     expect(arb?.chainId).toBe(ARB_SEPOLIA_CHAIN_ID);
     expect(mockBase.eip712.domain.name).toBe("StewardGasRescue");
+    expect(mockBase.eip712.domain.verifyingContract).toBe(BASE_SEPOLIA_DEPLOY.gasRescue);
     expect(mockArb.eip712.domain.version).toBe("1");
+    expect(mockArb.eip712.domain.verifyingContract).not.toBe(BASE_SEPOLIA_DEPLOY.gasRescue);
     expect(mockBase.eip712.types.Order.map((field) => field.name)).not.toContain("safeRecipient");
     expect(MOCK_QUOTES_RESPONSE_BASE.quoteId).toMatch(/base/);
     expect(MOCK_QUOTES_RESPONSE_ARB.quoteId).toMatch(/arb/);

@@ -40,20 +40,16 @@ export function relayerBaseUrl(): string {
 
 export function gasRescueAddress(chainId: SupportedChainId = BASE_SEPOLIA_CHAIN_ID): Address | null {
   if (chainId === ARB_SEPOLIA_CHAIN_ID) {
-    return (
-      optionalAddress(readEnv("VITE_GAS_RESCUE_ADDRESS_ARB_SEPOLIA")) ??
-      optionalAddress(readEnv("VITE_GAS_RESCUE_ADDRESS"))
-    );
+    // No Arb deploy yet — do not reuse the Base Sepolia address.
+    return optionalAddress(readEnv("VITE_GAS_RESCUE_ADDRESS_ARB_SEPOLIA"));
   }
   return optionalAddress(readEnv("VITE_GAS_RESCUE_ADDRESS"));
 }
 
 export function tokenAddress(chainId: SupportedChainId = BASE_SEPOLIA_CHAIN_ID): Address | null {
   if (chainId === ARB_SEPOLIA_CHAIN_ID) {
-    return (
-      optionalAddress(readEnv("VITE_TOKEN_ADDRESS_ARB_SEPOLIA")) ??
-      optionalAddress(readEnv("VITE_TOKEN_ADDRESS"))
-    );
+    // No Arb deploy yet — do not reuse the Base Sepolia address.
+    return optionalAddress(readEnv("VITE_TOKEN_ADDRESS_ARB_SEPOLIA"));
   }
   return optionalAddress(readEnv("VITE_TOKEN_ADDRESS"));
 }
