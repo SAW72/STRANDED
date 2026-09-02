@@ -1,6 +1,6 @@
 # GasRescueSwap Design Doc
 
-**Status:** Draft for CEO sign-off and auditor trace.  
+**Status:** Documents the approved freeze / merged impl; CEO sign-off of this write-up.  
 **Product:** `GasRescueSwap` (testnet only: Base Sepolia 84532, Arb Sepolia 421614).  
 **Blocker:** GitHub issue #4.  
 **Auditor gate:** docs/AUDITOR.md.  
@@ -112,14 +112,11 @@ Any revert rolls back the nonce write. Bad signatures, underfunded, path mismatc
 
 ---
 
-## 8. Non-permit tokens (open design question)
+## 8. Non-permit tokens (LOCKED for v1: B)
 
-Current posture: fail closed. Two options for a future version:
+**LOCKED for v1: B.** Non-permit tokens are fail-closed. If a token does not support EIP-2612 permits and Permit2 is disabled, the rescue reverts with `NoGaslessAuth`. No rescue path, no partial execution, no trusted forwarder in v1.
 
-- **A.** Owner allowlists a trusted forwarder that can call a `rescueWithTransfer` path (still signed Order, but pull is `transferFrom` after an off-chain approval). Higher trust surface.
-- **B.** Keep fail closed; only support permit / Permit2 tokens. Recommended for v1.
-
-Decision needed at sign-off.
+Option A (owner allowlists a trusted forwarder with a `rescueWithTransfer` path) is deferred to v2 after the core is audited and live. This keeps the audit surface small and matches the fail-closed posture everywhere else in the contract.
 
 ---
 
