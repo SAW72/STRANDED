@@ -361,36 +361,70 @@ contract GasRescueSwapTest is Test {
         assertFalse(rescue.usedNonces(user, 1));
     }
 
-    function test_donatedEth_notSweptToNativeTo() public {
+    function test_donatedEth_sweptToOwner_notNativeTo() public {
         vm.deal(address(rescue), 1 ether);
+        uint256 ownerBefore = owner.balance;
+
         (IGasRescueSwap.Order memory order, bytes memory swapData) = _defaultOrderAndPath(1);
         (bytes memory orderSig, uint8 v, bytes32 r, bytes32 s) = _signOrderAndPermit(order, address(token), USER_PK);
 
-        vm.expectRevert(GasRescueSwap.DustRemaining.selector);
         vm.prank(relayer);
         rescue.rescueWithPermit(order, orderSig, v, r, s, swapData);
 
-        assertEq(address(rescue).balance, 1 ether, "pre-existing ETH stays on the contract");
-        assertEq(nativeTo.balance, 0, "nativeTo must not receive swept address(this).balance");
-        assertFalse(rescue.usedNonces(user, 1));
+        assertEq(owner.balance, ownerBefore + 1 ether, "donated ETH swept to owner");
+        assertEq(address(rescue).balance, 0, "contract ETH zero after sweep");
+        assertEq(nativeTo.balance, 0.05 ether, "nativeTo only gets this job's native");
+        assertTrue(rescue.usedNonces(user, 1));
     }
 
-    function test_donatedWeth_notUnwrappedIntoNativeTo() public {
+    function test_donatedWeth_sweptToOwner_notNativeTo() public {
         vm.deal(address(rescue), 1 ether);
         vm.prank(address(rescue));
         weth.deposit{value: 1 ether}();
         assertEq(weth.balanceOf(address(rescue)), 1 ether);
 
+        uint256 ownerWethBefore = weth.balanceOf(owner);
+
         (IGasRescueSwap.Order memory order, bytes memory swapData) = _defaultOrderAndPath(1);
         (bytes memory orderSig, uint8 v, bytes32 r, bytes32 s) = _signOrderAndPermit(order, address(token), USER_PK);
 
-        vm.expectRevert(GasRescueSwap.DustRemaining.selector);
         vm.prank(relayer);
         rescue.rescueWithPermit(order, orderSig, v, r, s, swapData);
 
-        assertEq(weth.balanceOf(address(rescue)), 1 ether, "pre-existing WETH is not unwrapped");
-        assertEq(nativeTo.balance, 0, "nativeTo must not receive donated WETH as native");
-        assertFalse(rescue.usedNonces(user, 1));
+        assertEq(weth.balanceOf(owner), ownerWethBefore + 1 ether, "donated WETH swept to owner");
+        assertEq(weth.balanceOf(address(rescue)), 0, "contract WETH zero after sweep");
+        assertEq(nativeTo.balance, 0.05 ether, "nativeTo only gets this job's native");
+        assertTrue(rescue.usedNonces(user, 1));
+    }
+
+    function test_wethAsTokenIn_donationNotSweptBeforePull() public {
+        // tokenIn == WETH: sweep must skip WETH so the user's just-pulled WETH
+        // is not sent to owner. Donate 0.5 WETH first; it stays until after pull.
+        vm.prank(address(rescue));
+        weth.deposit{value: 0.5 ether}();
+        assertEq(weth.balanceOf(address(rescue)), 0.5 ether);
+
+        router.setPayAsWeth(true, address(weth));
+        (IGasRescueSwap.Order memory order, bytes memory swapData) = _defaultOrderAndPath(6);
+        order.tokenIn = address(weth);
+        order.amountIn = 10 ether;
+        order.feeAmount = 0;
+        order.amountSwap = 10 ether;
+        order.pathHash = keccak256(swapData);
+        (bytes memory orderSig, uint8 v, bytes32 r, bytes32 s) = _signOrderAndPermit(order, address(weth), USER_PK);
+
+        uint256 ownerWethBefore = weth.balanceOf(owner);
+
+        vm.prank(relayer);
+        rescue.rescueWithPermit(order, orderSig, v, r, s, swapData);
+
+        // Donation (0.5) + job-produced WETH (0.05) both unwrapped to native and
+        // credited to nativeTo. Owner receives none of it.
+        assertEq(weth.balanceOf(owner), ownerWethBefore, "WETH-as-tokenIn: donation not swept to owner");
+        assertEq(nativeTo.balance, 0.55 ether, "nativeTo gets job native + unwrapped donation");
+        assertEq(weth.balanceOf(address(rescue)), 0);
+        assertEq(address(rescue).balance, 0);
+        assertTrue(rescue.usedNonces(user, 6));
     }
 
     function test_endOfTx_zeroAsserts_tokenInWethEth() public {
