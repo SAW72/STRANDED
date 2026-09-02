@@ -69,7 +69,7 @@ export const QUOTE_IDLE_UNAVAILABLE = "Rescue details aren’t available yet.";
 export const FIXTURE_BANNER =
   "Sample quote — not live. These numbers are a fixture for review, not a Relayer price.";
 export const FIXTURE_HELP =
-  "A live Relayer quote isn’t available. You can review a sample rescue to see the flow. It is not a live price.";
+  "No Relayer URL is set, so this is a sample rescue for review. It is not a live price.";
 export const USE_SAMPLE_LABEL = "Use sample quote";
 export const CLEAR_SAMPLE_LABEL = "Clear sample";
 export const SAMPLE_BADGE = "Sample · not live";

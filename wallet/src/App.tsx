@@ -17,7 +17,6 @@ import {
   AMOUNT_SWAP_LABEL,
   CANCEL_LABEL,
   CHAIN_SWITCH_HINT,
-  CLEAR_SAMPLE_LABEL,
   CONFIRM_HINT,
   CONFIRMED_HINT,
   DEADLINE_HELPER,
@@ -56,7 +55,6 @@ import {
   TOKEN_IN_LABEL,
   TOKEN_LABEL,
   TRY_AGAIN_LABEL,
-  USE_SAMPLE_LABEL,
   USER_HELPER,
   USER_LABEL,
 } from "./copy";
@@ -118,8 +116,8 @@ function dashOr(value: ReactNode, ready: boolean): ReactNode {
 
 export function App() {
   const relayer = relayerUrl();
+  const useFixture = !relayer;
   const [selectedChainId, setSelectedChainId] = useState<SupportedChainId>(BASE_SEPOLIA_CHAIN_ID);
-  const [useFixture, setUseFixture] = useState(!relayer);
 
   const rescue = gasRescueAddress(selectedChainId);
   const token = tokenAddress(selectedChainId);
@@ -212,10 +210,13 @@ export function App() {
     enabled: liveEnabled,
     queryFn: () =>
       fetchRescueQuote(relayer, {
-        chainId: selectedChainId,
-        token: token!,
-        amount: requestedAmount!,
         user: address!,
+        tokenIn: token!,
+        amountIn: requestedAmount!,
+        chainId: selectedChainId,
+        to: address!,
+        nativeTo: address!,
+        slippageBps: 100,
       }),
     retry: false,
   });
@@ -266,7 +267,6 @@ export function App() {
   }, [
     humanAmount,
     selectedChainId,
-    useFixture,
     quote?.amountIn,
     quote?.amountSwap,
     quote?.feeAmount,
@@ -370,8 +370,6 @@ export function App() {
     if (!relayer) issues.push("VITE_RELAYER_URL is missing — sample quote mode is available.");
     return issues;
   }, [rescue, token, relayer]);
-
-  const showLiveOffer = Boolean(relayer) && !useFixture;
 
   return (
     <main className="app">
@@ -626,20 +624,6 @@ export function App() {
           </div>
         )}
         {quoteStatus.kind === "idle" && !useFixture && <p className="muted">{quoteStatus.message}</p>}
-
-        <div className="row">
-          {!useFixture &&
-            (!relayer || quoteStatus.kind === "error" || (showLiveOffer && !quoteReady)) && (
-            <button className="btn" type="button" onClick={() => setUseFixture(true)}>
-              {USE_SAMPLE_LABEL}
-            </button>
-          )}
-          {useFixture && relayer && (
-            <button className="btn" type="button" onClick={() => setUseFixture(false)}>
-              {CLEAR_SAMPLE_LABEL}
-            </button>
-          )}
-        </div>
 
         <p className="trust-line">{REVIEW_TRUST_LINE}</p>
 

@@ -7,32 +7,33 @@ import {
   hasRequiredQuoteFields,
   ORDER_REVIEW_FIELDS,
   parseQuoteResponse,
+  quoteRequestBody,
   quotesUrl,
 } from "./quotes";
 
 const USER = "0x1111111111111111111111111111111111111111" as const;
 const TOKEN = "0x2222222222222222222222222222222222222222" as const;
 const FEE_TO = "0x3333333333333333333333333333333333333333" as const;
-const TO = "0x4444444444444444444444444444444444444444" as const;
-const NATIVE_TO = "0x5555555555555555555555555555555555555555" as const;
+const TO = "0x1111111111111111111111111111111111111111" as const;
+const NATIVE_TO = "0x1111111111111111111111111111111111111111" as const;
 const ROUTER = "0x6666666666666666666666666666666666666666" as const;
-const PATH = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" as const;
+const PATH = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" as const;
 
 const validBody = {
   quoteId: "q-1",
   chainId: 84532,
   tokenIn: TOKEN,
-  tokenSymbol: "MOCK",
+  tokenSymbol: "mPERMIT",
   tokenDecimals: 18,
   user: USER,
-  amountIn: "100000000000000000000",
-  amountSwap: "10000000000000000000",
-  feeAmount: "1000000000000000000",
+  amountIn: "1000000000000000000",
+  amountSwap: "200000000000000000",
+  feeAmount: "10000000000000000",
   feeTo: FEE_TO,
   to: TO,
   nativeTo: NATIVE_TO,
-  minAmountOut: "2500000000000000",
-  amountRemainder: "89000000000000000000",
+  minAmountOut: "1000000000000000",
+  amountRemainder: "790000000000000000",
   router: ROUTER,
   pathHash: PATH,
   deadline: "1893456000",
@@ -50,19 +51,18 @@ describe("parseQuoteResponse", () => {
   it("reads the canonical swap-for-gas fields", () => {
     const quote = parseQuoteResponse(validBody);
     expect(quote).not.toBeNull();
-    expect(quote?.amountIn).toBe(100n * 10n ** 18n);
-    expect(quote?.amountSwap).toBe(10n * 10n ** 18n);
-    expect(quote?.amountRemainder).toBe(89n * 10n ** 18n);
+    expect(quote?.amountIn).toBe(10n ** 18n);
+    expect(quote?.amountSwap).toBe(2n * 10n ** 17n);
+    expect(quote?.feeAmount).toBe(10n ** 16n);
+    expect(quote?.amountRemainder).toBe(79n * 10n ** 16n);
     expect(quote?.nativeTo).toBe(NATIVE_TO);
-    expect(quote?.to).toBe(TO);
-    expect(quote?.tokenIn).toBe(TOKEN);
-    expect(quote?.chainId).toBe(84532);
+    expect(quote?.tokenSymbol).toBe("mPERMIT");
     expect(quote?.pathHash).toBe(PATH);
   });
 
   it("unwraps { quote } and { quotes: [] }", () => {
     expect(parseQuoteResponse({ quote: validBody })?.nativeTo).toBe(NATIVE_TO);
-    expect(parseQuoteResponse({ quotes: [validBody] })?.amountIn).toBe(100n * 10n ** 18n);
+    expect(parseQuoteResponse({ quotes: [validBody] })?.amountIn).toBe(10n ** 18n);
   });
 
   it("accepts Arb Sepolia chainId 421614", () => {
@@ -90,8 +90,15 @@ describe("parseQuoteResponse", () => {
     expect(parseQuoteResponse({ ...validBody, amountSwap: "0" })).toBeNull();
   });
 
-  it("parses the checked-in sample fixture shape", () => {
+  it("parses the Relayer dry-mock fixture", () => {
     expect(parseQuoteResponse(sampleFixtureRaw())).not.toBeNull();
+  });
+
+  it("fails closed when eip712 disagrees with top-level fields", () => {
+    const raw = sampleFixtureRaw();
+    const eip = raw.eip712 as { message: { nativeTo: string } };
+    eip.message.nativeTo = "0x5555555555555555555555555555555555555555";
+    expect(parseQuoteResponse(raw)).toBeNull();
   });
 });
 
@@ -134,22 +141,46 @@ describe("displayBeforeConfirm / required fields", () => {
   });
 });
 
-describe("quotesUrl", () => {
-  it("builds GET /quotes on the Relayer origin", () => {
-    const url = quotesUrl("http://127.0.0.1:8787/", {
-      chainId: 84532,
-      token: TOKEN,
-      amount: 5n,
+describe("quotesUrl / quoteRequestBody", () => {
+  it("builds POST /v1/quotes on the Relayer origin", () => {
+    expect(quotesUrl("http://127.0.0.1:8787/")).toBe("http://127.0.0.1:8787/v1/quotes");
+  });
+
+  it("serializes required and optional POST fields", () => {
+    expect(
+      quoteRequestBody({
+        user: USER,
+        tokenIn: TOKEN,
+        amountIn: 10n ** 18n,
+        chainId: 84532,
+        amountSwap: 2n * 10n ** 17n,
+        to: USER,
+        nativeTo: USER,
+        slippageBps: 100,
+      }),
+    ).toEqual({
       user: USER,
+      tokenIn: TOKEN,
+      amountIn: "1000000000000000000",
+      chainId: 84532,
+      amountSwap: "200000000000000000",
+      to: USER,
+      nativeTo: USER,
+      slippageBps: 100,
     });
-    expect(url).toBe(
-      "http://127.0.0.1:8787/quotes?chainId=84532&token=0x2222222222222222222222222222222222222222&amount=5&user=0x1111111111111111111111111111111111111111",
-    );
   });
 });
 
-describe("fetchRescueQuote", () => {
-  const params = { chainId: 84532, token: TOKEN, amount: 10n, user: USER };
+describe("fetchRescueQuote POST /v1/quotes", () => {
+  const params = {
+    user: USER,
+    tokenIn: TOKEN,
+    amountIn: 10n ** 18n,
+    chainId: 84532,
+    to: USER,
+    nativeTo: USER,
+    slippageBps: 100,
+  };
 
   it("fails closed when the Relayer URL is empty", async () => {
     const result = await fetchRescueQuote("  ", params);
@@ -163,9 +194,17 @@ describe("fetchRescueQuote", () => {
     if (!result.ok) expect(result.reason).toMatch(/Base Sepolia or Arb Sepolia/);
   });
 
-  it("fails closed on HTTP error and does not synthesize a quote", async () => {
-    const fetchImpl: typeof fetch = async () =>
-      new Response("nope", { status: 404, headers: { "Content-Type": "text/plain" } });
+  it("POSTs JSON and fails closed on HTTP error", async () => {
+    const fetchImpl: typeof fetch = async (input, init) => {
+      expect(input).toBe("http://relayer.test/v1/quotes");
+      expect(init?.method).toBe("POST");
+      const body = JSON.parse(String(init?.body));
+      expect(body.user).toBe(USER);
+      expect(body.tokenIn).toBe(TOKEN);
+      expect(body.amountIn).toBe("1000000000000000000");
+      expect(body.slippageBps).toBe(100);
+      return new Response("nope", { status: 404, headers: { "Content-Type": "text/plain" } });
+    };
     const result = await fetchRescueQuote("http://relayer.test", params, fetchImpl);
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.reason).toMatch(/HTTP 404/);
@@ -182,7 +221,7 @@ describe("fetchRescueQuote", () => {
     if (!result.ok) expect(result.reason).toMatch(/missing required fields/);
   });
 
-  it("returns the Relayer quote when GET /quotes is well-formed", async () => {
+  it("returns the Relayer quote when POST /v1/quotes is well-formed", async () => {
     const fetchImpl: typeof fetch = async () =>
       new Response(JSON.stringify(validBody), {
         status: 200,

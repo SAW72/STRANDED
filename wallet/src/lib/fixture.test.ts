@@ -1,50 +1,57 @@
 import { describe, expect, it } from "vitest";
+import mockArb from "../fixtures/mock-quotes-response-arb.json";
+import mockBase from "../fixtures/mock-quotes-response-base.json";
+import sampleArb from "../fixtures/sample-swap-quote-arb.json";
+import sampleBase from "../fixtures/sample-swap-quote.json";
 import { ARB_SEPOLIA_CHAIN_ID, BASE_SEPOLIA_CHAIN_ID } from "./chains";
-import { SAMPLE_FIXTURE_RAW, sampleFixtureQuote, sampleFixtureRaw } from "./fixture";
+import {
+  MOCK_QUOTES_RESPONSE_ARB,
+  MOCK_QUOTES_RESPONSE_BASE,
+  RELAYER_DRY_AMOUNTS,
+  RELAYER_DRY_PATH_HASH,
+  sampleFixtureQuote,
+  sampleFixtureRaw,
+} from "./fixture";
 import { displayBeforeConfirm, parseQuoteResponse } from "./quotes";
 
-describe("sample fixture", () => {
-  it("uses the freeze field names", () => {
-    const keys = Object.keys(SAMPLE_FIXTURE_RAW);
-    expect(keys).toEqual([
-      "quoteId",
-      "chainId",
-      "tokenIn",
-      "tokenSymbol",
-      "tokenDecimals",
-      "user",
-      "amountIn",
-      "amountSwap",
-      "feeAmount",
-      "feeTo",
-      "to",
-      "nativeTo",
-      "minAmountOut",
-      "amountRemainder",
-      "router",
-      "pathHash",
-      "deadline",
-      "nonce",
-    ]);
-    expect(keys).not.toContain("safeRecipient");
-    expect(keys).not.toContain("amount");
-    expect(keys).not.toContain("token");
+describe("Relayer dry-mock fixtures", () => {
+  it("parses sample-swap-quote.json and the Arb pair", () => {
+    const base = parseQuoteResponse(sampleBase);
+    const arb = parseQuoteResponse(sampleArb);
+    expect(base?.chainId).toBe(84532);
+    expect(arb?.chainId).toBe(421614);
+    expect(base?.tokenSymbol).toBe("mPERMIT");
+    expect(arb?.tokenSymbol).toBe("mPERMIT");
+    expect(base?.amountIn).toBe(RELAYER_DRY_AMOUNTS.amountIn);
+    expect(base?.amountSwap).toBe(RELAYER_DRY_AMOUNTS.amountSwap);
+    expect(base?.feeAmount).toBe(RELAYER_DRY_AMOUNTS.feeAmount);
+    expect(base?.amountRemainder).toBe(RELAYER_DRY_AMOUNTS.amountRemainder);
+    expect(base?.pathHash).toBe(RELAYER_DRY_PATH_HASH);
+    expect(arb?.pathHash).toBe(RELAYER_DRY_PATH_HASH);
+    expect(base).not.toHaveProperty("safeRecipient");
   });
 
-  it("parses for both testnets without inventing extra legs", () => {
+  it("parses full mock-quotes-response-base.json / arb.json including eip712", () => {
+    const base = parseQuoteResponse(mockBase);
+    const arb = parseQuoteResponse(mockArb);
+    expect(base).not.toBeNull();
+    expect(arb).not.toBeNull();
+    expect(base?.chainId).toBe(BASE_SEPOLIA_CHAIN_ID);
+    expect(arb?.chainId).toBe(ARB_SEPOLIA_CHAIN_ID);
+    expect(mockBase.eip712.domain.name).toBe("StewardGasRescue");
+    expect(mockArb.eip712.domain.version).toBe("1");
+    expect(mockBase.eip712.types.Order.map((field) => field.name)).not.toContain("safeRecipient");
+    expect(MOCK_QUOTES_RESPONSE_BASE.quoteId).toMatch(/base/);
+    expect(MOCK_QUOTES_RESPONSE_ARB.quoteId).toMatch(/arb/);
+  });
+
+  it("sampleFixtureQuote binds Base and Arb without inventing extra legs", () => {
     const base = sampleFixtureQuote({ chainId: BASE_SEPOLIA_CHAIN_ID });
     const arb = sampleFixtureQuote({ chainId: ARB_SEPOLIA_CHAIN_ID });
     expect(base.chainId).toBe(84532);
     expect(arb.chainId).toBe(421614);
-    expect(arb.quoteId).toMatch(/arb/);
     expect(base.amountIn).toBe(arb.amountIn);
     expect(displayBeforeConfirm(base).nativeTo).toBe(base.nativeTo);
-  });
-
-  it("is labeled as a sample in the raw quoteId", () => {
-    expect(String(sampleFixtureRaw().quoteId)).toMatch(/sample/i);
-    expect(parseQuoteResponse(sampleFixtureRaw({ chainId: ARB_SEPOLIA_CHAIN_ID }))?.quoteId).toMatch(
-      /sample/i,
-    );
+    expect(String(sampleFixtureRaw().quoteId)).toMatch(/mock|sample/i);
   });
 });

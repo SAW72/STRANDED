@@ -10,8 +10,8 @@ Flow:
 2. Connect an injected wallet (MetaMask / Rabby / Coinbase). Wrong networks are prompted to switch to the selected testnet.
 3. Read the stranded token balance when the wallet is on that testnet. The UI never invents a live balance.
 4. Bind a quote:
-   - **Live:** `GET {VITE_RELAYER_URL}/quotes` when `VITE_RELAYER_URL` is set.
-   - **Sample:** if the Relayer URL is unset or the live quote fails, **Use sample quote** loads the checked-in fixture. It is labeled **Sample · not live**.
+   - **Live:** `POST {VITE_RELAYER_URL}/v1/quotes` when `VITE_RELAYER_URL` is set.
+   - **Fixture:** only when `VITE_RELAYER_URL` is unset. Loads Relayer dry mocks (`mock-quotes-response-base.json` / `mock-quotes-response-arb.json`). Labeled **Sample · not live**.
 5. Review **every** EIP-712 Order field plus the display-before-confirm set. Tap **Confirm details**. Only then does the app prompt the wallet. **Cancel** steps back without signing.
 6. One signature path: EIP-712 `Order` (domain `StewardGasRescue` / `1`), then EIP-2612 `permit`.
 
@@ -34,7 +34,7 @@ cp .env.example .env
 
 | Variable | Required | Purpose |
 | --- | --- | --- |
-| `VITE_RELAYER_URL` | for live quotes | Public Relayer origin. The app calls `{VITE_RELAYER_URL}/quotes`. |
+| `VITE_RELAYER_URL` | for live quotes | Public Relayer origin. The app calls `POST {VITE_RELAYER_URL}/v1/quotes`. |
 | `VITE_GAS_RESCUE_ADDRESS` | to sign | Deployed rescue contract on Base Sepolia (also used as Arb fallback). |
 | `VITE_TOKEN_ADDRESS` | to read/sign | Allowlisted EIP-2612 ERC-20 on Base Sepolia (also used as Arb fallback). |
 | `VITE_GAS_RESCUE_ADDRESS_ARB_SEPOLIA` | no | Arb Sepolia rescue override. |
@@ -44,7 +44,7 @@ cp .env.example .env
 
 `VITE_RELAYER_URL` is a public origin, not a secret. Aliases `RELAYER_BASE_URL` and `VITE_RELAYER_BASE_URL` still work. **Do not** put private keys, Relayer keys, or mainnet RPC credentials in `.env`.
 
-If `VITE_RELAYER_URL` is unset, the wallet starts in **sample quote** mode so you can walk the review screen. Sample numbers are a fixture, not a live price.
+If `VITE_RELAYER_URL` is unset, the wallet uses the Relayer dry-mock fixture (not a live price). If the URL is set, a failed POST does **not** invent a quote.
 
 ## Run
 
@@ -60,33 +60,38 @@ Open the printed local URL (default `http://localhost:5173`). Connect a wallet o
 Quote request:
 
 ```
-GET {VITE_RELAYER_URL}/quotes?chainId=84532|421614&token=<token>&amount=<raw>&user=<address>
+POST {VITE_RELAYER_URL}/v1/quotes
+Content-Type: application/json
 ```
-
-Required JSON fields (string or number integers are accepted). Field names must match:
 
 ```json
 {
-  "quoteId": "…",
   "chainId": 84532,
-  "tokenIn": "0x…",
-  "tokenSymbol": "MOCK",
-  "tokenDecimals": 18,
-  "user": "0x…",
-  "amountIn": "100000000000000000000",
-  "amountSwap": "10000000000000000000",
-  "feeAmount": "1000000000000000000",
-  "feeTo": "0x…",
-  "to": "0x…",
-  "nativeTo": "0x…",
-  "minAmountOut": "2500000000000000",
-  "amountRemainder": "89000000000000000000",
-  "router": "0x…",
-  "pathHash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-  "deadline": "1893456000",
-  "nonce": "1"
+  "user": "0x1111111111111111111111111111111111111111",
+  "tokenIn": "0x2222222222222222222222222222222222222222",
+  "amountIn": "1000000000000000000",
+  "amountSwap": "200000000000000000",
+  "to": "0x1111111111111111111111111111111111111111",
+  "nativeTo": "0x1111111111111111111111111111111111111111",
+  "slippageBps": 100
 }
 ```
+
+Required request fields: `user`, `tokenIn`, `amountIn`. Optional: `chainId`, `amountSwap`, `to`, `nativeTo`, `slippageBps`.
+
+The Relayer `QuoteResponse` must include Appendix A fields at the top level. Optional `eip712` must be `StewardGasRescue` / `1` with the frozen Order field order (`nativeTo`, not `safeRecipient`) and must agree with the top-level values.
+
+Dry-mock amounts (also in `src/fixtures/sample-swap-quote.json` / `sample-swap-quote-arb.json`):
+
+| Field | Value |
+| --- | --- |
+| `amountIn` | `1e18` |
+| `amountSwap` | `0.2e18` |
+| `feeAmount` | `0.01e18` |
+| `amountRemainder` | `0.79e18` |
+| `tokenSymbol` | `mPERMIT` |
+| `pathHash` | `0xbbb…` (32 bytes) |
+| `chainId` | `84532` or `421614` |
 
 `amountSwap + feeAmount + amountRemainder` must equal `amountIn`. `safeRecipient` is not accepted. The old fee-skim shape (`amount` / `token` only) fails closed.
 
@@ -101,7 +106,7 @@ cd wallet
 npm test
 ```
 
-Covers quote parsing (fail closed, including fee-skim bodies), fixture shape, Confirm-details process gate, Order field sourcing, domain name, and end-user copy.
+Covers POST `/v1/quotes` client, QuoteResponse parse (fail closed, including fee-skim bodies and disagreeing `eip712`), Base/Arb Relayer dry-mock fixtures, Confirm-details process gate, Order field sourcing, and end-user copy.
 
 ## Out of scope
 

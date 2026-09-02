@@ -1,31 +1,26 @@
 import type { Address, Hex } from "viem";
+import mockArb from "../fixtures/mock-quotes-response-arb.json";
+import mockBase from "../fixtures/mock-quotes-response-base.json";
+import sampleArb from "../fixtures/sample-swap-quote-arb.json";
+import sampleBase from "../fixtures/sample-swap-quote.json";
 import { ARB_SEPOLIA_CHAIN_ID, BASE_SEPOLIA_CHAIN_ID, type SupportedChainId } from "./chains";
 import { parseQuoteResponse, type RescueQuote } from "./quotes";
 
-/**
- * Sample fixture — not a live Relayer quote and not a live balance.
- * Field names match the design-freeze quote shape exactly.
- */
-export const SAMPLE_FIXTURE_RAW = {
-  quoteId: "sample-base-sepolia-swap-for-gas",
-  chainId: BASE_SEPOLIA_CHAIN_ID,
-  tokenIn: "0x2222222222222222222222222222222222222222",
-  tokenSymbol: "MOCK",
-  tokenDecimals: 18,
-  user: "0x1111111111111111111111111111111111111111",
-  amountIn: "100000000000000000000",
-  amountSwap: "10000000000000000000",
-  feeAmount: "1000000000000000000",
-  feeTo: "0x3333333333333333333333333333333333333333",
-  to: "0x4444444444444444444444444444444444444444",
-  nativeTo: "0x5555555555555555555555555555555555555555",
-  minAmountOut: "2500000000000000",
-  amountRemainder: "89000000000000000000",
-  router: "0x6666666666666666666666666666666666666666",
-  pathHash: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-  deadline: "1893456000",
-  nonce: "1",
+export const RELAYER_DRY_PATH_HASH =
+  "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" as const;
+
+/** Relayer dry-mock amounts: 1e18 in, 0.2e18 swap, 0.01e18 fee, 0.79e18 remainder. */
+export const RELAYER_DRY_AMOUNTS = {
+  amountIn: 10n ** 18n,
+  amountSwap: 2n * 10n ** 17n,
+  feeAmount: 10n ** 16n,
+  amountRemainder: 79n * 10n ** 16n,
 } as const;
+
+export const SAMPLE_FIXTURE_RAW = sampleBase;
+export const SAMPLE_FIXTURE_ARB_RAW = sampleArb;
+export const MOCK_QUOTES_RESPONSE_BASE = mockBase;
+export const MOCK_QUOTES_RESPONSE_ARB = mockArb;
 
 export type SampleFixtureOverrides = {
   chainId?: SupportedChainId;
@@ -34,31 +29,46 @@ export type SampleFixtureOverrides = {
   tokenSymbol?: string;
 };
 
-export function sampleFixtureRaw(overrides: SampleFixtureOverrides = {}): Record<string, unknown> {
-  const chainId = overrides.chainId ?? BASE_SEPOLIA_CHAIN_ID;
-  const quoteId =
-    chainId === ARB_SEPOLIA_CHAIN_ID
-      ? "sample-arb-sepolia-swap-for-gas"
-      : SAMPLE_FIXTURE_RAW.quoteId;
-  return {
-    ...SAMPLE_FIXTURE_RAW,
-    quoteId,
-    chainId,
-    user: overrides.user ?? SAMPLE_FIXTURE_RAW.user,
-    tokenIn: overrides.tokenIn ?? SAMPLE_FIXTURE_RAW.tokenIn,
-    tokenSymbol: overrides.tokenSymbol ?? SAMPLE_FIXTURE_RAW.tokenSymbol,
-  };
+function cloneJson(value: unknown): Record<string, unknown> {
+  return JSON.parse(JSON.stringify(value)) as Record<string, unknown>;
 }
 
-/** Parse the sample into a RescueQuote. Throws only if the checked-in sample is broken. */
+/** Full Relayer dry-mock QuoteResponse (Appendix A + eip712). */
+export function sampleFixtureRaw(overrides: SampleFixtureOverrides = {}): Record<string, unknown> {
+  const chainId = overrides.chainId ?? BASE_SEPOLIA_CHAIN_ID;
+  const raw = cloneJson(chainId === ARB_SEPOLIA_CHAIN_ID ? mockArb : mockBase);
+  if (overrides.user) raw.user = overrides.user;
+  if (overrides.tokenIn) raw.tokenIn = overrides.tokenIn;
+  if (overrides.tokenSymbol) raw.tokenSymbol = overrides.tokenSymbol;
+  raw.chainId = chainId;
+
+  const eip = raw.eip712;
+  if (eip && typeof eip === "object" && !Array.isArray(eip)) {
+    const block = eip as Record<string, unknown>;
+    const domain = block.domain;
+    if (domain && typeof domain === "object" && !Array.isArray(domain)) {
+      (domain as Record<string, unknown>).chainId = chainId;
+    }
+    const message = block.message;
+    if (message && typeof message === "object" && !Array.isArray(message)) {
+      const msg = message as Record<string, unknown>;
+      msg.chainId = chainId;
+      if (overrides.user) msg.user = overrides.user;
+      if (overrides.tokenIn) msg.tokenIn = overrides.tokenIn;
+    }
+  }
+  return raw;
+}
+
+/** Parse the Relayer dry mock into a RescueQuote. Throws only if the checked-in shape is broken. */
 export function sampleFixtureQuote(overrides: SampleFixtureOverrides = {}): RescueQuote {
   const quote = parseQuoteResponse(sampleFixtureRaw(overrides));
   if (!quote) {
-    throw new Error("Sample fixture failed to parse — the checked-in shape is invalid.");
+    throw new Error("Sample fixture failed to parse — the checked-in Relayer dry mock is invalid.");
   }
   return quote;
 }
 
 export function isSamplePathHash(pathHash: Hex): boolean {
-  return pathHash === SAMPLE_FIXTURE_RAW.pathHash;
+  return pathHash.toLowerCase() === RELAYER_DRY_PATH_HASH;
 }
