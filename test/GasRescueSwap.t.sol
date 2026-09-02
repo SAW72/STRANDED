@@ -361,9 +361,9 @@ contract GasRescueSwapTest is Test {
         assertFalse(rescue.usedNonces(user, 1));
     }
 
-    function test_donatedEth_sweptToOwner_notNativeTo() public {
+    function test_donatedEth_creditedPending_notNativeTo() public {
         vm.deal(address(rescue), 1 ether);
-        uint256 ownerBefore = owner.balance;
+        uint256 pendingBefore = rescue.pendingEth(owner);
 
         (IGasRescueSwap.Order memory order, bytes memory swapData) = _defaultOrderAndPath(1);
         (bytes memory orderSig, uint8 v, bytes32 r, bytes32 s) = _signOrderAndPermit(order, address(token), USER_PK);
@@ -371,7 +371,7 @@ contract GasRescueSwapTest is Test {
         vm.prank(relayer);
         rescue.rescueWithPermit(order, orderSig, v, r, s, swapData);
 
-        assertEq(owner.balance, ownerBefore + 1 ether, "donated ETH swept to owner");
+        assertEq(rescue.pendingEth(owner), pendingBefore + 1 ether, "donated ETH credited to pending, not pushed");
         assertEq(address(rescue).balance, 0, "contract ETH zero after sweep");
         assertEq(nativeTo.balance, 0.05 ether, "nativeTo only gets this job's native");
         assertTrue(rescue.usedNonces(user, 1));
@@ -570,6 +570,21 @@ contract GasRescueSwapTest is Test {
         assertFalse(rescue.usedNonces(user, 1));
     }
 
+    function test_skimEth_pullPattern_nonReceivingOwner() public {
+        // Owner is a contract with no receive/fallback — direct ETH push would revert.
+        NonReceivingOwner badOwner = new NonReceivingOwner();
+        GasRescueSwap badRescue = new GasRescueSwap(address(badOwner), relayer, address(weth));
+
+        vm.deal(address(badRescue), 1 ether);
+        assertEq(badRescue.pendingEth(address(badOwner)), 0);
+
+        // Anyone can skim; funds stay claimable even though owner cannot receive.
+        badRescue.skimEth();
+        assertEq(badRescue.pendingEth(address(badOwner)), 1 ether, "ETH stays pending, not lost");
+        assertEq(address(badRescue).balance, 0);
+        assertEq(address(badOwner).balance, 0, "non-receiving owner got nothing pushed");
+    }
+
     function _assertReentrantAttack(
         bool onPermit,
         bool onTransfer
@@ -715,4 +730,9 @@ contract GasRescueSwapTest is Test {
         bytes32 digest = keccak256(abi.encodePacked("\x19\x01", domainSeparator, structHash));
         (v, r, s) = vm.sign(pk, digest);
     }
+}
+
+/// @dev Contract with no receive/fallback — cannot accept ETH pushes.
+contract NonReceivingOwner {
+    // intentionally empty
 }
