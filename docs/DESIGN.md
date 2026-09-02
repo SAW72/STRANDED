@@ -79,7 +79,7 @@ Modifiers: `nonReentrant`, `whenNotPaused`, `onlyRelayer`.
 1. **View-only preflight** (no nonce write): testnet + matching chainId; nonzero addresses; amount bounds; deadline; token + router allowlists; unused nonce; `keccak256(swapData) == pathHash`; recover signer == `order.user`; `balanceOf(user) >= amountIn`.
 2. **Gasless-auth gate** — else `NoGaslessAuth` (still no nonce write).
 3. **Consume nonce** — `usedNonces[user][nonce] = true`.
-4. **Sweep pre-existing dust** — any ETH or WETH sitting on the contract from prior donations is sent to the owner *before* the pull, so a donation cannot DoS rescues via `DustRemaining`. When `tokenIn == WETH`, the WETH sweep is skipped so the user's just-pulled funds are never sent to the owner.
+4. **Sweep pre-existing dust** — any ETH or WETH sitting on the contract from prior donations is sent to the owner *before* the pull, so a donation cannot DoS rescues via `DustRemaining`. Sweep runs in both `rescueWithPermit` and `rescueWithPermit2` entrypoints, before `permit`/`permitWitnessTransferFrom`. Because the sweep is pre-pull, any WETH present is a donation — never the user's just-pulled `amountIn` — so WETH is always swept, including when `tokenIn == WETH`.
 5. **Pull** — permit or Permit2. Exact balance delta required (`FoTOrBalanceMismatch` on fee-on-transfer).
 6. **Settle (Appendix A):**
    - skim `feeAmount` → `feeTo`,
@@ -96,7 +96,7 @@ Any revert rolls back the nonce write. Bad signatures, underfunded, path mismatc
 ## 6. Security invariants (locked)
 
 - Fail closed: no mainnet path, no unallowlisted token/router, no disabled Permit2, no non-permit fallback.
-- Job-only native credit: donated ETH/WETH on the contract is **swept to the owner at settle start**, never to `nativeTo`. `nativeTo` receives only this job's earned native.
+- Job-only native credit: donated ETH/WETH on the contract is **swept to the owner before the pull**, never to `nativeTo`. `nativeTo` receives only this job's earned native.
 - Exact `amountSwap` consumption: partial fills revert; leftovers never reach `to`.
 - Owner ≠ relayer hot key.
 - Non-proxy, `ReentrancyGuard`, owner-only pause + allowlists.
