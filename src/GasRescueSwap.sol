@@ -320,11 +320,10 @@ contract GasRescueSwap is IGasRescueSwap, Ownable, Pausable, ReentrancyGuard, EI
     ) internal returns (uint256 nativeOut) {
         IERC20 token = IERC20(order.tokenIn);
 
-        // Sweep any pre-existing ETH/WETH dust (donations) to the owner so a
-        // donation cannot DoS rescues via DustRemaining. Job-produced balances
-        // are measured as deltas after this sweep, so nativeTo still only gets
-        // what this job earned.
-        _sweepDust();
+        // Sweep pre-existing ETH/WETH donations to the owner BEFORE the pull so a
+        // donation cannot DoS rescues via DustRemaining, and so we never sweep the
+        // user's just-pulled tokenIn (when tokenIn == WETH) to the owner.
+        _sweepDust(order.tokenIn);
 
         // Appendix A: feeAmount pre-skim, then remainder ERC-20 → `to` (before swap).
         if (order.feeAmount > 0) {
@@ -368,9 +367,11 @@ contract GasRescueSwap is IGasRescueSwap, Ownable, Pausable, ReentrancyGuard, EI
     }
 
     /// @dev Send any pre-existing ETH and WETH on this contract to the owner.
-    ///      Called at the start of settlement so donations cannot block rescues.
-    ///      Does not touch tokenIn — that is handled by the exact-amountSwap check.
-    function _sweepDust() internal {
+    ///      Called at the start of settlement, before the pull, so donations cannot
+    ///      block rescues and the user's just-pulled WETH (when tokenIn == WETH) is
+    ///      never swept to the owner. Uses IERC20.safeTransfer because IWETH only
+    ///      declares `transfer`, not SafeERC20.
+    function _sweepDust(address tokenIn) internal {
         uint256 ethDust = address(this).balance;
         if (ethDust > 0) {
             (bool sent,) = payable(owner()).call{value: ethDust}("");
@@ -378,9 +379,15 @@ contract GasRescueSwap is IGasRescueSwap, Ownable, Pausable, ReentrancyGuard, EI
             emit DustSwept(address(0), ethDust, owner());
         }
 
+        // Skip WETH when it is the input token: the pull happens after this sweep,
+        // so any WETH here is a donation, not the user's funds.
+        if (tokenIn == address(weth)) {
+            return;
+        }
+
         uint256 wethDust = weth.balanceOf(address(this));
         if (wethDust > 0) {
-            weth.safeTransfer(owner(), wethDust);
+            IERC20(address(weth)).safeTransfer(owner(), wethDust);
             emit DustSwept(address(weth), wethDust, owner());
         }
     }
