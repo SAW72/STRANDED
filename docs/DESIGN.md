@@ -21,7 +21,7 @@ No bridges in v1. No mainnet. No token launch.
 ## 2. Actors
 
 | Actor | Role |
-| --- | --- |
+| --- | --- | 
 | **User** | Holds stranded ERC-20, has zero native. Signs the Order + gasless auth. Never pays gas. |
 | **Relayer** | Hot key that pays gas and submits the tx. Allowlisted; must not be the owner. |
 | **Owner** | Deployer / admin. Sets allowlists, pause, Permit2. Cannot be a relayer. |
@@ -79,14 +79,15 @@ Modifiers: `nonReentrant`, `whenNotPaused`, `onlyRelayer`.
 1. **View-only preflight** (no nonce write): testnet + matching chainId; nonzero addresses; amount bounds; deadline; token + router allowlists; unused nonce; `keccak256(swapData) == pathHash`; recover signer == `order.user`; `balanceOf(user) >= amountIn`.
 2. **Gasless-auth gate** — else `NoGaslessAuth` (still no nonce write).
 3. **Consume nonce** — `usedNonces[user][nonce] = true`.
-4. **Pull** — permit or Permit2. Exact balance delta required (`FoTOrBalanceMismatch` on fee-on-transfer).
-5. **Settle (Appendix A):**
+4. **Sweep pre-existing dust** — any ETH or WETH sitting on the contract from prior donations is sent to the owner *before* the pull, so a donation cannot DoS rescues via `DustRemaining`. When `tokenIn == WETH`, the WETH sweep is skipped so the user's just-pulled funds are never sent to the owner.
+5. **Pull** — permit or Permit2. Exact balance delta required (`FoTOrBalanceMismatch` on fee-on-transfer).
+6. **Settle (Appendix A):**
    - skim `feeAmount` → `feeTo`,
    - send `remainder = amountIn - feeAmount - amountSwap` → `to`,
    - require contract holds **exactly** `amountSwap` (leftover tokenIn reverts; never forwarded to `to`),
    - call router with `swapData`; unwrap **this job's** WETH delta; credit **this job's** native delta to `nativeTo` if `>= minAmountOut`,
    - end-of-tx: `tokenIn`, WETH, and ETH on the contract must all be zero (`DustRemaining` otherwise).
-6. Emit `Rescued`.
+7. Emit `Rescued`.
 
 Any revert rolls back the nonce write. Bad signatures, underfunded, path mismatch, slippage — none burn the nonce.
 
@@ -95,11 +96,12 @@ Any revert rolls back the nonce write. Bad signatures, underfunded, path mismatc
 ## 6. Security invariants (locked)
 
 - Fail closed: no mainnet path, no unallowlisted token/router, no disabled Permit2, no non-permit fallback.
-- Job-only native credit: donated ETH/WETH on the contract is **not** swept to `nativeTo`.
+- Job-only native credit: donated ETH/WETH on the contract is **swept to the owner at settle start**, never to `nativeTo`. `nativeTo` receives only this job's earned native.
 - Exact `amountSwap` consumption: partial fills revert; leftovers never reach `to`.
 - Owner ≠ relayer hot key.
 - Non-proxy, `ReentrancyGuard`, owner-only pause + allowlists.
 - End-of-tx dust must be zero.
+- Owner-receive grief: if `owner()` cannot accept ETH, the ETH sweep reverts `NativeTransferFailed` and the rescue fails — deploy with an EOA owner or a pull-pattern skim for v2.
 
 ---
 
