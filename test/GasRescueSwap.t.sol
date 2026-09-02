@@ -361,9 +361,9 @@ contract GasRescueSwapTest is Test {
         assertFalse(rescue.usedNonces(user, 1));
     }
 
-    function test_donatedEth_creditedPending_notNativeTo() public {
+    function test_donatedEth_wrappedAndSweptToOwner_notNativeTo() public {
         vm.deal(address(rescue), 1 ether);
-        uint256 pendingBefore = rescue.pendingEth(owner);
+        uint256 ownerWethBefore = weth.balanceOf(owner);
 
         (IGasRescueSwap.Order memory order, bytes memory swapData) = _defaultOrderAndPath(1);
         (bytes memory orderSig, uint8 v, bytes32 r, bytes32 s) = _signOrderAndPermit(order, address(token), USER_PK);
@@ -371,8 +371,9 @@ contract GasRescueSwapTest is Test {
         vm.prank(relayer);
         rescue.rescueWithPermit(order, orderSig, v, r, s, swapData);
 
-        assertEq(rescue.pendingEth(owner), pendingBefore + 1 ether, "donated ETH credited to pending, not pushed");
+        assertEq(weth.balanceOf(owner), ownerWethBefore + 1 ether, "donated ETH wrapped to WETH and swept to owner");
         assertEq(address(rescue).balance, 0, "contract ETH zero after sweep");
+        assertEq(weth.balanceOf(address(rescue)), 0, "contract WETH zero after sweep");
         assertEq(nativeTo.balance, 0.05 ether, "nativeTo only gets this job's native");
         assertTrue(rescue.usedNonces(user, 1));
     }
@@ -397,9 +398,9 @@ contract GasRescueSwapTest is Test {
         assertTrue(rescue.usedNonces(user, 1));
     }
 
-    function test_wethAsTokenIn_donationNotSweptBeforePull() public {
-        // tokenIn == WETH: sweep must skip WETH so the user's just-pulled WETH
-        // is not sent to owner. Donate 0.5 WETH first; it stays until after pull.
+    function test_wethAsTokenIn_donationSweptBeforePull() public {
+        // tokenIn == WETH: donation is swept to owner BEFORE the pull (always sweep
+        // WETH pre-pull). Donate 0.5 WETH; it must go to owner, not nativeTo.
         vm.prank(address(rescue));
         weth.deposit{value: 0.5 ether}();
         assertEq(weth.balanceOf(address(rescue)), 0.5 ether);
@@ -418,10 +419,9 @@ contract GasRescueSwapTest is Test {
         vm.prank(relayer);
         rescue.rescueWithPermit(order, orderSig, v, r, s, swapData);
 
-        // Donation (0.5) + job-produced WETH (0.05) both unwrapped to native and
-        // credited to nativeTo. Owner receives none of it.
-        assertEq(weth.balanceOf(owner), ownerWethBefore, "WETH-as-tokenIn: donation not swept to owner");
-        assertEq(nativeTo.balance, 0.55 ether, "nativeTo gets job native + unwrapped donation");
+        // Donation (0.5) swept to owner; job-produced WETH (0.05) unwrapped to nativeTo.
+        assertEq(weth.balanceOf(owner), ownerWethBefore + 0.5 ether, "WETH-as-tokenIn: donation swept to owner");
+        assertEq(nativeTo.balance, 0.05 ether, "nativeTo gets job-only native");
         assertEq(weth.balanceOf(address(rescue)), 0);
         assertEq(address(rescue).balance, 0);
         assertTrue(rescue.usedNonces(user, 6));
@@ -570,19 +570,30 @@ contract GasRescueSwapTest is Test {
         assertFalse(rescue.usedNonces(user, 1));
     }
 
-    function test_skimEth_pullPattern_nonReceivingOwner() public {
+    function test_ownerReceiveGrief_nonReceivingOwnerDoesNotBlock() public {
         // Owner is a contract with no receive/fallback — direct ETH push would revert.
+        // Wrap-and-transfer path must still succeed; donated ETH becomes WETH on owner.
         NonReceivingOwner badOwner = new NonReceivingOwner();
         GasRescueSwap badRescue = new GasRescueSwap(address(badOwner), relayer, address(weth));
 
-        vm.deal(address(badRescue), 1 ether);
-        assertEq(badRescue.pendingEth(address(badOwner)), 0);
+        vm.prank(owner);
+        badRescue.setEip2612Token(address(token), true);
+        vm.prank(owner);
+        badRescue.setRouterAllowed(address(router), true);
 
-        // Anyone can skim; funds stay claimable even though owner cannot receive.
-        badRescue.skimEth();
-        assertEq(badRescue.pendingEth(address(badOwner)), 1 ether, "ETH stays pending, not lost");
-        assertEq(address(badRescue).balance, 0);
-        assertEq(address(badOwner).balance, 0, "non-receiving owner got nothing pushed");
+        vm.deal(address(badRescue), 1 ether);
+        uint256 ownerWethBefore = weth.balanceOf(address(badOwner));
+
+        (IGasRescueSwap.Order memory order, bytes memory swapData) = _defaultOrderAndPath(1);
+        (bytes memory orderSig, uint8 v, bytes32 r, bytes32 s) = _signOrderAndPermit(order, address(token), USER_PK);
+
+        vm.prank(relayer);
+        badRescue.rescueWithPermit(order, orderSig, v, r, s, swapData);
+
+        assertEq(weth.balanceOf(address(badOwner)), ownerWethBefore + 1 ether, "donated ETH wrapped to WETH on non-receiving owner");
+        assertEq(address(badRescue).balance, 0, "contract ETH zero — rescue not blocked");
+        assertEq(nativeTo.balance, 0.05 ether, "nativeTo only gets this job's native");
+        assertTrue(badRescue.usedNonces(user, 1));
     }
 
     function _assertReentrantAttack(
