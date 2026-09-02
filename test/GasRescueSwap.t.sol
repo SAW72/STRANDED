@@ -361,36 +361,77 @@ contract GasRescueSwapTest is Test {
         assertFalse(rescue.usedNonces(user, 1));
     }
 
-    function test_donatedEth_notSweptToNativeTo() public {
+    function test_donatedEth_wrappedAndSweptToOwner_notNativeTo() public {
         vm.deal(address(rescue), 1 ether);
+        uint256 ownerWethBefore = weth.balanceOf(owner);
+
         (IGasRescueSwap.Order memory order, bytes memory swapData) = _defaultOrderAndPath(1);
         (bytes memory orderSig, uint8 v, bytes32 r, bytes32 s) = _signOrderAndPermit(order, address(token), USER_PK);
 
-        vm.expectRevert(GasRescueSwap.DustRemaining.selector);
         vm.prank(relayer);
         rescue.rescueWithPermit(order, orderSig, v, r, s, swapData);
 
-        assertEq(address(rescue).balance, 1 ether, "pre-existing ETH stays on the contract");
-        assertEq(nativeTo.balance, 0, "nativeTo must not receive swept address(this).balance");
-        assertFalse(rescue.usedNonces(user, 1));
+        assertEq(weth.balanceOf(owner), ownerWethBefore + 1 ether, "donated ETH wrapped to WETH and swept to owner");
+        assertEq(address(rescue).balance, 0, "contract ETH zero after sweep");
+        assertEq(weth.balanceOf(address(rescue)), 0, "contract WETH zero after sweep");
+        assertEq(nativeTo.balance, 0.05 ether, "nativeTo only gets this job's native");
+        assertTrue(rescue.usedNonces(user, 1));
     }
 
-    function test_donatedWeth_notUnwrappedIntoNativeTo() public {
+    function test_donatedWeth_sweptToOwner_notNativeTo() public {
         vm.deal(address(rescue), 1 ether);
         vm.prank(address(rescue));
         weth.deposit{value: 1 ether}();
         assertEq(weth.balanceOf(address(rescue)), 1 ether);
 
+        uint256 ownerWethBefore = weth.balanceOf(owner);
+
         (IGasRescueSwap.Order memory order, bytes memory swapData) = _defaultOrderAndPath(1);
         (bytes memory orderSig, uint8 v, bytes32 r, bytes32 s) = _signOrderAndPermit(order, address(token), USER_PK);
 
-        vm.expectRevert(GasRescueSwap.DustRemaining.selector);
         vm.prank(relayer);
         rescue.rescueWithPermit(order, orderSig, v, r, s, swapData);
 
-        assertEq(weth.balanceOf(address(rescue)), 1 ether, "pre-existing WETH is not unwrapped");
-        assertEq(nativeTo.balance, 0, "nativeTo must not receive donated WETH as native");
-        assertFalse(rescue.usedNonces(user, 1));
+        assertEq(weth.balanceOf(owner), ownerWethBefore + 1 ether, "donated WETH swept to owner");
+        assertEq(weth.balanceOf(address(rescue)), 0, "contract WETH zero after sweep");
+        assertEq(nativeTo.balance, 0.05 ether, "nativeTo only gets this job's native");
+        assertTrue(rescue.usedNonces(user, 1));
+    }
+
+    function test_wethAsTokenIn_donationSweptBeforePull() public {
+        // tokenIn == WETH: donation is swept to owner BEFORE the pull (always sweep
+        // WETH pre-pull). Donate 0.5 WETH; it must go to owner, not nativeTo.
+        vm.deal(address(rescue), 0.5 ether);
+        vm.prank(address(rescue));
+        weth.deposit{value: 0.5 ether}();
+        assertEq(weth.balanceOf(address(rescue)), 0.5 ether);
+
+        vm.prank(owner);
+        rescue.setEip2612Token(address(weth), true);
+        vm.deal(user, 10 ether);
+        vm.prank(user);
+        weth.deposit{value: 10 ether}();
+
+        bytes memory swapData =
+            abi.encodeWithSelector(MockSwapRouter.swapExact.selector, address(weth), 10 ether, nativeTo);
+        IGasRescueSwap.Order memory order = _orderFor(address(weth), 6, swapData);
+        order.amountIn = 10 ether;
+        order.feeAmount = 0;
+        order.amountSwap = 10 ether;
+        order.pathHash = keccak256(swapData);
+        (bytes memory orderSig, uint8 v, bytes32 r, bytes32 s) = _signOrderAndPermit(order, address(weth), USER_PK);
+
+        uint256 ownerWethBefore = weth.balanceOf(owner);
+
+        vm.prank(relayer);
+        rescue.rescueWithPermit(order, orderSig, v, r, s, swapData);
+
+        // Donation (0.5) swept to owner; job-produced WETH (0.05) unwrapped to nativeTo.
+        assertEq(weth.balanceOf(owner), ownerWethBefore + 0.5 ether, "WETH-as-tokenIn: donation swept to owner");
+        assertEq(nativeTo.balance, 0.05 ether, "nativeTo gets job-only native");
+        assertEq(weth.balanceOf(address(rescue)), 0);
+        assertEq(address(rescue).balance, 0);
+        assertTrue(rescue.usedNonces(user, 6));
     }
 
     function test_endOfTx_zeroAsserts_tokenInWethEth() public {
@@ -536,6 +577,34 @@ contract GasRescueSwapTest is Test {
         assertFalse(rescue.usedNonces(user, 1));
     }
 
+    function test_ownerReceiveGrief_nonReceivingOwnerDoesNotBlock() public {
+        // Owner is a contract with no receive/fallback — direct ETH push would revert.
+        // Wrap-and-transfer path must still succeed; donated ETH becomes WETH on owner.
+        NonReceivingOwner badOwner = new NonReceivingOwner();
+        GasRescueSwap badRescue = new GasRescueSwap(address(badOwner), relayer, address(weth));
+
+        vm.prank(address(badOwner));
+        badRescue.setEip2612Token(address(token), true);
+        vm.prank(address(badOwner));
+        badRescue.setRouterAllowed(address(router), true);
+
+        vm.deal(address(badRescue), 1 ether);
+        uint256 ownerWethBefore = weth.balanceOf(address(badOwner));
+
+        (IGasRescueSwap.Order memory order, bytes memory swapData) = _defaultOrderAndPath(1);
+        bytes memory orderSig = _signOrderFor(badRescue, order, USER_PK);
+        (uint8 v, bytes32 r, bytes32 s) =
+            _signPermitFor(address(token), user, address(badRescue), order.amountIn, order.deadline, USER_PK);
+
+        vm.prank(relayer);
+        badRescue.rescueWithPermit(order, orderSig, v, r, s, swapData);
+
+        assertEq(weth.balanceOf(address(badOwner)), ownerWethBefore + 1 ether, "donated ETH wrapped to WETH on non-receiving owner");
+        assertEq(address(badRescue).balance, 0, "contract ETH zero - rescue not blocked");
+        assertEq(nativeTo.balance, 0.05 ether, "nativeTo only gets this job's native");
+        assertTrue(badRescue.usedNonces(user, 1));
+    }
+
     function _assertReentrantAttack(
         bool onPermit,
         bool onTransfer
@@ -624,7 +693,15 @@ contract GasRescueSwapTest is Test {
         IGasRescueSwap.Order memory order,
         uint256 pk
     ) internal view returns (bytes memory) {
-        bytes32 digest = rescue.hashOrder(order);
+        return _signOrderFor(rescue, order, pk);
+    }
+
+    function _signOrderFor(
+        GasRescueSwap target,
+        IGasRescueSwap.Order memory order,
+        uint256 pk
+    ) internal view returns (bytes memory) {
+        bytes32 digest = target.hashOrder(order);
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(pk, digest);
         return abi.encodePacked(r, s, v);
     }
@@ -675,10 +752,26 @@ contract GasRescueSwapTest is Test {
         uint256 deadline,
         uint256 pk
     ) internal view returns (uint8 v, bytes32 r, bytes32 s) {
+        return _signPermitFor(token_, owner_, address(rescue), value, deadline, pk);
+    }
+
+    function _signPermitFor(
+        address token_,
+        address owner_,
+        address spender,
+        uint256 value,
+        uint256 deadline,
+        uint256 pk
+    ) internal view returns (uint8 v, bytes32 r, bytes32 s) {
         bytes32 domainSeparator = IERC20Permit(token_).DOMAIN_SEPARATOR();
         uint256 nonce = IERC20Permit(token_).nonces(owner_);
-        bytes32 structHash = keccak256(abi.encode(PERMIT_TYPEHASH, owner_, address(rescue), value, nonce, deadline));
+        bytes32 structHash = keccak256(abi.encode(PERMIT_TYPEHASH, owner_, spender, value, nonce, deadline));
         bytes32 digest = keccak256(abi.encodePacked("\x19\x01", domainSeparator, structHash));
         (v, r, s) = vm.sign(pk, digest);
     }
+}
+
+/// @dev Contract with no receive/fallback — cannot accept ETH pushes.
+contract NonReceivingOwner {
+    // intentionally empty
 }

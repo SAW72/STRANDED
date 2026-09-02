@@ -60,6 +60,7 @@ contract GasRescueSwap is IGasRescueSwap, Ownable, Pausable, ReentrancyGuard, EI
         uint256 nonce,
         address relayer
     );
+    event DustSwept(address indexed token, uint256 amount, address indexed to);
 
     error NotRelayer();
     error OwnerIsRelayer();
@@ -199,9 +200,10 @@ contract GasRescueSwap is IGasRescueSwap, Ownable, Pausable, ReentrancyGuard, EI
     }
 
     /// @dev Appendix A sequence: view-only checks + EIP-712 recover + funding
-    ///      preflight (no nonce write) → consume nonce → permit → pull → feeAmount
-    ///      pre-skim → remainder ERC-20 to `to` (before swap) → router consumes
-    ///      exactly `amountSwap` → this job's native delta to `nativeTo` ≥ `minAmountOut`.
+    ///      preflight (no nonce write) → consume nonce → sweep pre-existing dust →
+    ///      permit/Permit2 pull → feeAmount pre-skim → remainder ERC-20 to `to`
+    ///      (before swap) → router consumes exactly `amountSwap` → this job's native
+    ///      delta to `nativeTo` ≥ `minAmountOut`.
     ///      End-of-tx tokenIn / WETH / ETH on this contract must be 0. Atomic; no partial fills.
     function rescueWithPermit(
         Order calldata order,
@@ -214,6 +216,12 @@ contract GasRescueSwap is IGasRescueSwap, Ownable, Pausable, ReentrancyGuard, EI
         _preflight(order, orderSignature, swapData);
         if (!eip2612Tokens[order.tokenIn]) revert NoGaslessAuth();
         _consumeNonce(order);
+
+        // Sweep pre-existing ETH/WETH donations to owner BEFORE the pull so a
+        // donation cannot DoS rescues via DustRemaining. Always sweep WETH too:
+        // at this point the user's funds have not been pulled yet, so any WETH
+        // here is a donation, never the user's just-pulled amountIn.
+        _sweepDust();
 
         IERC20Permit(order.tokenIn).permit(order.user, address(this), order.amountIn, order.deadline, v, r, s);
         uint256 nativeOut = _pullSwapAndSettle(order, swapData);
@@ -230,6 +238,12 @@ contract GasRescueSwap is IGasRescueSwap, Ownable, Pausable, ReentrancyGuard, EI
         _preflight(order, orderSignature, swapData);
         if (!permit2Enabled || address(permit2) == address(0)) revert NoGaslessAuth();
         _consumeNonce(order);
+
+        // Sweep pre-existing ETH/WETH donations to owner BEFORE the pull so a
+        // donation cannot DoS rescues via DustRemaining. Always sweep WETH too:
+        // at this point the user's funds have not been pulled yet, so any WETH
+        // here is a donation, never the user's just-pulled amountIn.
+        _sweepDust();
 
         IERC20 token = IERC20(order.tokenIn);
         uint256 balanceBefore = token.balanceOf(address(this));
@@ -357,6 +371,31 @@ contract GasRescueSwap is IGasRescueSwap, Ownable, Pausable, ReentrancyGuard, EI
 
         if (token.balanceOf(address(this)) != 0 || weth.balanceOf(address(this)) != 0 || address(this).balance != 0) {
             revert DustRemaining();
+        }
+    }
+
+    /// @dev Send any pre-existing ETH and WETH on this contract to the owner.
+    ///      Called BEFORE the pull in both entrypoints so donations cannot block
+    ///      rescues via DustRemaining, and so the user's just-pulled funds are
+    ///      never swept. Uses IERC20.safeTransfer because IWETH only declares
+    ///      `transfer`, not SafeERC20.
+    ///
+    ///      ETH is wrapped to WETH and transferred to owner (option B). This keeps
+    ///      the strict end-of-tx zero invariant, kills owner-receive grief (ERC-20
+    ///      transfers do not depend on a receive hook), and avoids stranded credits
+    ///      on ownership transfer. WETH is transferred directly for the same reason.
+    function _sweepDust() internal {
+        uint256 ethDust = address(this).balance;
+        if (ethDust > 0) {
+            weth.deposit{value: ethDust}();
+            IERC20(address(weth)).safeTransfer(owner(), ethDust);
+            emit DustSwept(address(0), ethDust, owner());
+        }
+
+        uint256 wethDust = weth.balanceOf(address(this));
+        if (wethDust > 0) {
+            IERC20(address(weth)).safeTransfer(owner(), wethDust);
+            emit DustSwept(address(weth), wethDust, owner());
         }
     }
 
