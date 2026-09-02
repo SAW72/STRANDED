@@ -401,13 +401,20 @@ contract GasRescueSwapTest is Test {
     function test_wethAsTokenIn_donationSweptBeforePull() public {
         // tokenIn == WETH: donation is swept to owner BEFORE the pull (always sweep
         // WETH pre-pull). Donate 0.5 WETH; it must go to owner, not nativeTo.
+        vm.deal(address(rescue), 0.5 ether);
         vm.prank(address(rescue));
         weth.deposit{value: 0.5 ether}();
         assertEq(weth.balanceOf(address(rescue)), 0.5 ether);
 
-        router.setPayAsWeth(true, address(weth));
-        (IGasRescueSwap.Order memory order, bytes memory swapData) = _defaultOrderAndPath(6);
-        order.tokenIn = address(weth);
+        vm.prank(owner);
+        rescue.setEip2612Token(address(weth), true);
+        vm.deal(user, 10 ether);
+        vm.prank(user);
+        weth.deposit{value: 10 ether}();
+
+        bytes memory swapData =
+            abi.encodeWithSelector(MockSwapRouter.swapExact.selector, address(weth), 10 ether, nativeTo);
+        IGasRescueSwap.Order memory order = _orderFor(address(weth), 6, swapData);
         order.amountIn = 10 ether;
         order.feeAmount = 0;
         order.amountSwap = 10 ether;
@@ -576,22 +583,24 @@ contract GasRescueSwapTest is Test {
         NonReceivingOwner badOwner = new NonReceivingOwner();
         GasRescueSwap badRescue = new GasRescueSwap(address(badOwner), relayer, address(weth));
 
-        vm.prank(owner);
+        vm.prank(address(badOwner));
         badRescue.setEip2612Token(address(token), true);
-        vm.prank(owner);
+        vm.prank(address(badOwner));
         badRescue.setRouterAllowed(address(router), true);
 
         vm.deal(address(badRescue), 1 ether);
         uint256 ownerWethBefore = weth.balanceOf(address(badOwner));
 
         (IGasRescueSwap.Order memory order, bytes memory swapData) = _defaultOrderAndPath(1);
-        (bytes memory orderSig, uint8 v, bytes32 r, bytes32 s) = _signOrderAndPermit(order, address(token), USER_PK);
+        bytes memory orderSig = _signOrderFor(badRescue, order, USER_PK);
+        (uint8 v, bytes32 r, bytes32 s) =
+            _signPermitFor(address(token), user, address(badRescue), order.amountIn, order.deadline, USER_PK);
 
         vm.prank(relayer);
         badRescue.rescueWithPermit(order, orderSig, v, r, s, swapData);
 
         assertEq(weth.balanceOf(address(badOwner)), ownerWethBefore + 1 ether, "donated ETH wrapped to WETH on non-receiving owner");
-        assertEq(address(badRescue).balance, 0, "contract ETH zero — rescue not blocked");
+        assertEq(address(badRescue).balance, 0, "contract ETH zero - rescue not blocked");
         assertEq(nativeTo.balance, 0.05 ether, "nativeTo only gets this job's native");
         assertTrue(badRescue.usedNonces(user, 1));
     }
@@ -684,7 +693,15 @@ contract GasRescueSwapTest is Test {
         IGasRescueSwap.Order memory order,
         uint256 pk
     ) internal view returns (bytes memory) {
-        bytes32 digest = rescue.hashOrder(order);
+        return _signOrderFor(rescue, order, pk);
+    }
+
+    function _signOrderFor(
+        GasRescueSwap target,
+        IGasRescueSwap.Order memory order,
+        uint256 pk
+    ) internal view returns (bytes memory) {
+        bytes32 digest = target.hashOrder(order);
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(pk, digest);
         return abi.encodePacked(r, s, v);
     }
@@ -735,9 +752,20 @@ contract GasRescueSwapTest is Test {
         uint256 deadline,
         uint256 pk
     ) internal view returns (uint8 v, bytes32 r, bytes32 s) {
+        return _signPermitFor(token_, owner_, address(rescue), value, deadline, pk);
+    }
+
+    function _signPermitFor(
+        address token_,
+        address owner_,
+        address spender,
+        uint256 value,
+        uint256 deadline,
+        uint256 pk
+    ) internal view returns (uint8 v, bytes32 r, bytes32 s) {
         bytes32 domainSeparator = IERC20Permit(token_).DOMAIN_SEPARATOR();
         uint256 nonce = IERC20Permit(token_).nonces(owner_);
-        bytes32 structHash = keccak256(abi.encode(PERMIT_TYPEHASH, owner_, address(rescue), value, nonce, deadline));
+        bytes32 structHash = keccak256(abi.encode(PERMIT_TYPEHASH, owner_, spender, value, nonce, deadline));
         bytes32 digest = keccak256(abi.encodePacked("\x19\x01", domainSeparator, structHash));
         (v, r, s) = vm.sign(pk, digest);
     }
