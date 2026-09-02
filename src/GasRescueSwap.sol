@@ -42,7 +42,6 @@ contract GasRescueSwap is IGasRescueSwap, Ownable, Pausable, ReentrancyGuard, EI
     mapping(address token => bool allowed) public eip2612Tokens;
     mapping(address router => bool allowed) public allowedRouters;
     mapping(address user => mapping(uint256 nonce => bool used)) public usedNonces;
-    mapping(address => uint256) public pendingEth;
 
     event RelayerUpdated(address indexed relayer, bool allowed);
     event TokenAllowed(address indexed token, bool allowed);
@@ -381,13 +380,15 @@ contract GasRescueSwap is IGasRescueSwap, Ownable, Pausable, ReentrancyGuard, EI
     ///      never swept. Uses IERC20.safeTransfer because IWETH only declares
     ///      `transfer`, not SafeERC20.
     ///
-    ///      ETH is credited to a pending balance (pull pattern) so a non-receiving
-    ///      owner cannot grief rescues. WETH is transferred directly because ERC-20
-    ///      transfers do not depend on the recipient's receive/fallback.
+    ///      ETH is wrapped to WETH and transferred to owner (option B). This keeps
+    ///      the strict end-of-tx zero invariant, kills owner-receive grief (ERC-20
+    ///      transfers do not depend on a receive hook), and avoids stranded credits
+    ///      on ownership transfer. WETH is transferred directly for the same reason.
     function _sweepDust() internal {
         uint256 ethDust = address(this).balance;
         if (ethDust > 0) {
-            pendingEth[owner()] += ethDust;
+            weth.deposit{value: ethDust}();
+            IERC20(address(weth)).safeTransfer(owner(), ethDust);
             emit DustSwept(address(0), ethDust, owner());
         }
 
@@ -395,20 +396,6 @@ contract GasRescueSwap is IGasRescueSwap, Ownable, Pausable, ReentrancyGuard, EI
         if (wethDust > 0) {
             IERC20(address(weth)).safeTransfer(owner(), wethDust);
             emit DustSwept(address(weth), wethDust, owner());
-        }
-    }
-
-    /// @dev Pull-pattern skim for donated ETH. Anyone can trigger; funds go to the
-    ///      recorded owner. Safe even if owner() is a contract that cannot receive ETH.
-    function skimEth() external {
-        uint256 amount = pendingEth[owner()];
-        if (amount == 0) return;
-        pendingEth[owner()] = 0;
-        (bool sent,) = payable(owner()).call{value: amount}("");
-        if (!sent) {
-            // Roll back the zeroing so funds are not lost if owner still cannot receive.
-            pendingEth[owner()] = amount;
-            revert NativeTransferFailed();
         }
     }
 
