@@ -60,6 +60,7 @@ contract GasRescueSwap is IGasRescueSwap, Ownable, Pausable, ReentrancyGuard, EI
         uint256 nonce,
         address relayer
     );
+    event DustSwept(address indexed token, uint256 amount, address indexed to);
 
     error NotRelayer();
     error OwnerIsRelayer();
@@ -144,7 +145,7 @@ contract GasRescueSwap is IGasRescueSwap, Ownable, Pausable, ReentrancyGuard, EI
         bool allowed
     ) external onlyOwner {
         if (router == address(0)) revert ZeroAddress();
-        allowedRouters[router] = allowed;
+        routerAllowed[router] = allowed;
         emit RouterAllowed(router, allowed);
     }
 
@@ -319,6 +320,12 @@ contract GasRescueSwap is IGasRescueSwap, Ownable, Pausable, ReentrancyGuard, EI
     ) internal returns (uint256 nativeOut) {
         IERC20 token = IERC20(order.tokenIn);
 
+        // Sweep any pre-existing ETH/WETH dust (donations) to the owner so a
+        // donation cannot DoS rescues via DustRemaining. Job-produced balances
+        // are measured as deltas after this sweep, so nativeTo still only gets
+        // what this job earned.
+        _sweepDust();
+
         // Appendix A: feeAmount pre-skim, then remainder ERC-20 → `to` (before swap).
         if (order.feeAmount > 0) {
             token.safeTransfer(order.feeTo, order.feeAmount);
@@ -357,6 +364,24 @@ contract GasRescueSwap is IGasRescueSwap, Ownable, Pausable, ReentrancyGuard, EI
 
         if (token.balanceOf(address(this)) != 0 || weth.balanceOf(address(this)) != 0 || address(this).balance != 0) {
             revert DustRemaining();
+        }
+    }
+
+    /// @dev Send any pre-existing ETH and WETH on this contract to the owner.
+    ///      Called at the start of settlement so donations cannot block rescues.
+    ///      Does not touch tokenIn — that is handled by the exact-amountSwap check.
+    function _sweepDust() internal {
+        uint256 ethDust = address(this).balance;
+        if (ethDust > 0) {
+            (bool sent,) = payable(owner()).call{value: ethDust}("");
+            if (!sent) revert NativeTransferFailed();
+            emit DustSwept(address(0), ethDust, owner());
+        }
+
+        uint256 wethDust = weth.balanceOf(address(this));
+        if (wethDust > 0) {
+            weth.safeTransfer(owner(), wethDust);
+            emit DustSwept(address(weth), wethDust, owner());
         }
     }
 
