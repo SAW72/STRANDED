@@ -1,8 +1,7 @@
 # GasRescueSwap Design Doc
 
-**Status:** Documents the approved freeze / merged impl; CEO sign-off of this write-up.  
+**Status:** CEO signed off 2026-09-02. Auditor-bot APPROVE at `2d601ad` ([docs/AUDIT-FINDINGS.md](AUDIT-FINDINGS.md)). Issues #3 and #4 closed.  
 **Product:** `GasRescueSwap` (testnet only: Base Sepolia 84532, Arb Sepolia 421614).  
-**Blocker:** GitHub issue #4.  
 **Auditor gate:** docs/AUDITOR.md.  
 **Code:** `src/GasRescueSwap.sol` (already implemented and tested; this doc freezes the intent).
 
@@ -133,12 +132,12 @@ Option A (owner allowlists a trusted forwarder with a `rescueWithTransfer` path)
 
 ## 10. Gates before mainnet
 
-1. This design doc signed off by CEO.
-2. Auditor bot traces it + `GasRescueSwap.sol` → severity-ranked findings (docs/AUDITOR.md).
-3. Residual Medium fixed: `DustRemaining` + donation DoS (issue #6).
+1. This design doc signed off by CEO. **Done 2026-09-02.**
+2. Auditor bot traces it + `GasRescueSwap.sol` → severity-ranked findings (docs/AUDITOR.md). **Done: APPROVE, docs/AUDIT-FINDINGS.md.**
+3. Residual Medium: ETH/WETH `DustRemaining` donation DoS (issue #6) **fixed and closed.** Remaining Medium: `tokenIn` dust → `SwapInputNotConsumed` (issue #8) — firm-audit / mainnet gate, not a Sepolia blocker.
 4. Full E2E rescue on Arb Sepolia with a real stranded token.
 5. Human firm audit (Trail of Bits / OpenZeppelin / equivalent) signs off.
-6. Relayer service + wallet UX built and tested.
+6. Relayer service + wallet UX built and tested. Wallet UX PR #2 stays **held** until Spencer says merge.
 
 No mainnet work starts until all six pass.
 
@@ -148,6 +147,6 @@ No mainnet work starts until all six pass.
 
 | Role | Name | Date | Signature |
 | --- | --- | --- | --- |
-| CEO |  |  |  |
-| Auditor (bot) |  |  |  |
-| Builder |  |  |  |
+| CEO | Spencer | 2026-09-02 | Signed off (issues #3 / #4 close) |
+| Auditor (bot) | Grok auditor bot | 2026-09-02 | APPROVE — [docs/AUDIT-FINDINGS.md](AUDIT-FINDINGS.md) @ `2d601ad` |
+| Builder | main @ `c2e4a17` + auditor doc `2d601ad` | 2026-09-02 | GasRescueSwap shipped; freeze documented |
