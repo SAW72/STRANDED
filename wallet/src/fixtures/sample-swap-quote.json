@@ -1,7 +1,7 @@
 {
   "quoteId": "sample-swap-quote",
   "chainId": 84532,
-  "tokenIn": "0x611550aFB7fE0950a43838CBda1Bf488D6469127",
+  "tokenIn": "0xE36c35cbF0373D77D00732f7B92dB4fB8fd37166",
   "tokenSymbol": "mPERMIT",
   "tokenDecimals": 18,
   "user": "0x1111111111111111111111111111111111111111",

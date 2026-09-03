@@ -35,8 +35,8 @@ cp .env.example .env
 | Variable | Required | Purpose |
 | --- | --- | --- |
 | `VITE_RELAYER_URL` | for live quotes | Public Relayer origin. **Leave unset** — live `POST /v1/quotes` is a STUB until Spencer’s Relayer key. |
-| `VITE_GAS_RESCUE_ADDRESS` | to sign | Base Sepolia GasRescueSwap `0x14cf5De1B9fAEa03c059E3e5C8A2B45d97D1EfA5`. |
-| `VITE_TOKEN_ADDRESS` | to read/sign | Base Sepolia MockERC20Permit `0x611550aFB7fE0950a43838CBda1Bf488D6469127`. |
+| `VITE_GAS_RESCUE_ADDRESS` | to sign | Base Sepolia GasRescueSwap `0x21A1ADf810e64B5bd1d530D31abA6856b8DEf688`. |
+| `VITE_TOKEN_ADDRESS` | to read/sign | Base Sepolia MockERC20Permit `0xE36c35cbF0373D77D00732f7B92dB4fB8fd37166`. |
 | `VITE_GAS_RESCUE_ADDRESS_ARB_SEPOLIA` | no | Arb Sepolia rescue. Leave empty — no Arb deploy yet. |
 | `VITE_TOKEN_ADDRESS_ARB_SEPOLIA` | no | Arb Sepolia token. Leave empty — no Arb deploy yet. |
 | `VITE_BASE_SEPOLIA_RPC_URL` | no | Defaults to `https://sepolia.base.org` |
@@ -97,9 +97,9 @@ Base Sepolia fixture / `.env.example` deploy addrs (84532 only):
 
 | Role | Address |
 | --- | --- |
-| `tokenIn` / MockERC20Permit | `0x611550aFB7fE0950a43838CBda1Bf488D6469127` |
+| `tokenIn` / MockERC20Permit | `0xE36c35cbF0373D77D00732f7B92dB4fB8fd37166` |
 | `feeTo` (Owner) | `0x30466A210961c0C2C13AF0A9d35dfC6E8858bA9D` |
-| GasRescueSwap | `0x14cf5De1B9fAEa03c059E3e5C8A2B45d97D1EfA5` |
+| GasRescueSwap | `0x21A1ADf810e64B5bd1d530D31abA6856b8DEf688` |
 | `router` | `0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4` |
 
 `amountSwap + feeAmount + amountRemainder` must equal `amountIn`. `safeRecipient` is not accepted. The old fee-skim shape (`amount` / `token` only) fails closed.

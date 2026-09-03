@@ -12,9 +12,9 @@ export const RELAYER_DRY_PATH_HASH =
 /** Base Sepolia (84532) Relayer deploy — fixtures only, not a live quote. */
 export const BASE_SEPOLIA_DEPLOY = {
   chainId: BASE_SEPOLIA_CHAIN_ID,
-  tokenIn: "0x611550aFB7fE0950a43838CBda1Bf488D6469127",
+  tokenIn: "0xE36c35cbF0373D77D00732f7B92dB4fB8fd37166",
   feeTo: "0x30466A210961c0C2C13AF0A9d35dfC6E8858bA9D",
-  gasRescue: "0x14cf5De1B9fAEa03c059E3e5C8A2B45d97D1EfA5",
+  gasRescue: "0x21A1ADf810e64B5bd1d530D31abA6856b8DEf688",
   router: "0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4",
 } as const;
 

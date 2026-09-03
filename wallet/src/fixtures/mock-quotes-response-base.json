@@ -1,7 +1,7 @@
 {
   "quoteId": "mock-quotes-response-base",
   "chainId": 84532,
-  "tokenIn": "0x611550aFB7fE0950a43838CBda1Bf488D6469127",
+  "tokenIn": "0xE36c35cbF0373D77D00732f7B92dB4fB8fd37166",
   "tokenSymbol": "mPERMIT",
   "tokenDecimals": 18,
   "user": "0x1111111111111111111111111111111111111111",
@@ -22,7 +22,7 @@
       "name": "StewardGasRescue",
       "version": "1",
       "chainId": 84532,
-      "verifyingContract": "0x14cf5De1B9fAEa03c059E3e5C8A2B45d97D1EfA5"
+      "verifyingContract": "0x21A1ADf810e64B5bd1d530D31abA6856b8DEf688"
     },
     "primaryType": "Order",
     "types": {
@@ -45,7 +45,7 @@
     },
     "message": {
       "user": "0x1111111111111111111111111111111111111111",
-      "tokenIn": "0x611550aFB7fE0950a43838CBda1Bf488D6469127",
+      "tokenIn": "0xE36c35cbF0373D77D00732f7B92dB4fB8fd37166",
       "amountIn": "1000000000000000000",
       "feeAmount": "10000000000000000",
       "feeTo": "0x30466A210961c0C2C13AF0A9d35dfC6E8858bA9D",
