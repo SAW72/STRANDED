@@ -2,6 +2,7 @@
 pragma solidity ^0.8.24;
 
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {EIP712} from "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
@@ -17,7 +18,9 @@ import {IGasRescue} from "./interfaces/IGasRescue.sol";
 ///         Not the product. Real rescue is `GasRescueSwap` (swap-for-gas + same-chain move-out).
 ///         Relayer permit-pulls an allowlisted EIP-2612 ERC-20, pays `feeAmount` to `feeTo`,
 ///         and returns the remainder to `order.user`. Kept compiling for harness tests.
-contract GasRescue is IGasRescue, Ownable, Pausable, ReentrancyGuard, EIP712 {
+///         Owner is `Ownable2Step`; `renounceOwnership` is disabled. Mainnet must
+///         use a multisig or timelock for the owner role (docs-only; not deployed here).
+contract GasRescue is IGasRescue, Ownable2Step, Pausable, ReentrancyGuard, EIP712 {
     using SafeERC20 for IERC20;
 
     uint256 public constant BASE_SEPOLIA_CHAIN_ID = 84_532;
@@ -52,6 +55,7 @@ contract GasRescue is IGasRescue, Ownable, Pausable, ReentrancyGuard, EIP712 {
     error InvalidSignature();
     error Underfunded();
     error FoTOrBalanceMismatch();
+    error OwnershipCannotBeRenounced();
 
     modifier onlyRelayer() {
         if (!relayers[msg.sender]) revert NotRelayer();
@@ -64,6 +68,11 @@ contract GasRescue is IGasRescue, Ownable, Pausable, ReentrancyGuard, EIP712 {
             relayers[initialRelayer] = true;
             emit RelayerUpdated(initialRelayer, true);
         }
+    }
+
+    /// @notice Disabled. Owner remains settable only via two-step transfer.
+    function renounceOwnership() public pure override {
+        revert OwnershipCannotBeRenounced();
     }
 
     function setRelayer(address relayer, bool allowed) external onlyOwner {

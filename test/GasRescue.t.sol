@@ -153,6 +153,59 @@ contract GasRescueTest is Test {
         assertEq(token.balanceOf(stranger), 0);
     }
 
+    function test_transferOwnership_isTwoStep() public {
+        address newOwner = makeAddr("newOwner");
+        assertEq(rescue.owner(), owner);
+        assertEq(rescue.pendingOwner(), address(0));
+
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, stranger));
+        vm.prank(stranger);
+        rescue.transferOwnership(newOwner);
+
+        vm.prank(owner);
+        rescue.transferOwnership(newOwner);
+
+        assertEq(rescue.owner(), owner, "owner unchanged until accept");
+        assertEq(rescue.pendingOwner(), newOwner);
+
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, newOwner));
+        vm.prank(newOwner);
+        rescue.pause();
+
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, stranger));
+        vm.prank(stranger);
+        rescue.acceptOwnership();
+
+        vm.prank(newOwner);
+        rescue.acceptOwnership();
+
+        assertEq(rescue.owner(), newOwner);
+        assertEq(rescue.pendingOwner(), address(0));
+
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, owner));
+        vm.prank(owner);
+        rescue.setTokenAllowed(address(token), false);
+
+        vm.prank(newOwner);
+        rescue.pause();
+        assertTrue(rescue.paused());
+        vm.prank(newOwner);
+        rescue.unpause();
+        assertFalse(rescue.paused());
+    }
+
+    function test_renounceOwnership_reverts() public {
+        vm.expectRevert(GasRescue.OwnershipCannotBeRenounced.selector);
+        vm.prank(owner);
+        rescue.renounceOwnership();
+        assertEq(rescue.owner(), owner);
+
+        vm.expectRevert(GasRescue.OwnershipCannotBeRenounced.selector);
+        vm.prank(stranger);
+        rescue.renounceOwnership();
+        assertEq(rescue.owner(), owner);
+    }
+
     function test_pause_blocksRescueAndOnlyOwnerCanToggle() public {
         vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, stranger));
         vm.prank(stranger);

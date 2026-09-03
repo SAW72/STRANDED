@@ -2,6 +2,7 @@
 pragma solidity ^0.8.24;
 
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {EIP712} from "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
@@ -18,7 +19,9 @@ import {IWETH} from "./interfaces/IWETH.sol";
 /// @notice Scout #1 product: swap a slice of stranded `tokenIn` for native gas and
 ///         same-chain move-out of the remainder to `to`. Non-proxy. Testnet only.
 ///         Never treats `msg.sender` as a user/fee/native/remainder substitute.
-contract GasRescueSwap is IGasRescueSwap, Ownable, Pausable, ReentrancyGuard, EIP712 {
+///         Owner is `Ownable2Step`; `renounceOwnership` is disabled. Mainnet must
+///         use a multisig or timelock for the owner role (docs-only; not deployed here).
+contract GasRescueSwap is IGasRescueSwap, Ownable2Step, Pausable, ReentrancyGuard, EIP712 {
     using SafeERC20 for IERC20;
 
     uint256 public constant BASE_SEPOLIA_CHAIN_ID = 84_532;
@@ -81,6 +84,7 @@ contract GasRescueSwap is IGasRescueSwap, Ownable, Pausable, ReentrancyGuard, EI
     error SwapInputNotConsumed();
     error DustRemaining();
     error NativeTransferFailed();
+    error OwnershipCannotBeRenounced();
 
     modifier onlyRelayer() {
         if (!relayers[msg.sender]) revert NotRelayer();
@@ -103,6 +107,11 @@ contract GasRescueSwap is IGasRescueSwap, Ownable, Pausable, ReentrancyGuard, EI
     }
 
     receive() external payable {}
+
+    /// @notice Disabled. Owner remains settable only via two-step transfer.
+    function renounceOwnership() public pure override {
+        revert OwnershipCannotBeRenounced();
+    }
 
     function setRelayer(
         address relayer,

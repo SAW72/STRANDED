@@ -23,7 +23,7 @@ No bridges in v1. No mainnet. No token launch.
 | --- | --- | 
 | **User** | Holds stranded ERC-20, has zero native. Signs the Order + gasless auth. Never pays gas. |
 | **Relayer** | Hot key that pays gas and submits the tx. Allowlisted; must not be the owner. |
-| **Owner** | Deployer / admin. Sets allowlists, pause, Permit2. Cannot be a relayer. |
+| **Owner** | Deployer / admin. Sets allowlists, pause, Permit2. Cannot be a relayer. `Ownable2Step` two-step transfer only; `renounceOwnership` disabled. **Mainnet must use a multisig or timelock for this role** (docs-only; not implemented on testnet). |
 | **Router** | Allowlisted DEX router (e.g. Uniswap). Called with exact signed calldata. |
 | **feeTo** | Receives the in-token fee. |
 | **to** | Receives the remainder ERC-20 (same-chain move-out). |
@@ -98,6 +98,8 @@ Any revert rolls back the nonce write. Bad signatures, underfunded, path mismatc
 - Job-only native credit: donated ETH/WETH on the contract is **wrapped/swept to the owner before the pull**, never to `nativeTo`. `nativeTo` receives only this job's earned native. Donated `tokenIn` (when not WETH) is likewise swept to the owner before the pull so it cannot brick rescues via `SwapInputNotConsumed`.
 - Exact `amountSwap` consumption: partial fills revert; leftovers never reach `to`.
 - Owner ≠ relayer hot key.
+- Ownership is OpenZeppelin `Ownable2Step`. `renounceOwnership` always reverts (`OwnershipCannotBeRenounced`). Owner is settable only via two-step `transferOwnership` + `acceptOwnership`.
+- **Mainnet must use a multisig or timelock for the owner role.** Testnet may use an EOA. Do not deploy custom multisig/timelock contracts as part of this testnet codebase.
 - Non-proxy, `ReentrancyGuard`, owner-only pause + allowlists.
 - End-of-tx dust must be zero: `tokenIn`, WETH, and ETH balances on the contract are all zero after every rescue.
 - Owner-receive grief: ETH donations are wrapped to WETH and transferred to owner (option B), so a non-receiving owner cannot revert the rescue. WETH is transferred directly. No pending balance, no skim function, no stranded credits on ownership transfer.
@@ -138,8 +140,9 @@ Option A (owner allowlists a trusted forwarder with a `rescueWithTransfer` path)
 4. Full E2E rescue on Arb Sepolia with a real stranded token.
 5. Human firm audit (Trail of Bits / OpenZeppelin / equivalent) signs off.
 6. Relayer service + wallet UX built and tested. Wallet UX PR #2 stays **held** until Spencer says merge.
+7. Mainnet owner role must be a **multisig or timelock** (docs requirement only; no such contracts in this repo / not deployed on testnet).
 
-No mainnet work starts until all six pass.
+No mainnet work starts until all seven pass.
 
 ---
 
