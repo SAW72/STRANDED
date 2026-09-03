@@ -19,7 +19,7 @@ A user who holds an allowlisted ERC-20 but has **zero native ETH** signs an EIP-
 5. Unwraps **this job's** WETH delta and credits **this job's** native delta to `nativeTo` (≥ `minAmountOut`, fail closed). Never sweeps `address(this).balance`
 6. End-of-tx zeros: `tokenIn`, WETH, and ETH on the contract must be `0`
 
-Never treats `msg.sender` as a user / fee / remainder / native substitute. Atomic all-or-nothing; no on-chain partial fills. Owner ≠ relayer hot key. Non-proxy, `nonReentrant`, owner-only pause + allowlists.
+Never treats `msg.sender` as a user / fee / remainder / native substitute. Atomic all-or-nothing; no on-chain partial fills. Owner ≠ relayer hot key. Owner is OpenZeppelin `Ownable2Step`; `renounceOwnership` is disabled. **Mainnet must use a multisig or timelock for the owner role** (docs-only; not implemented or deployed on testnet). Non-proxy, `nonReentrant`, owner-only pause + allowlists.
 
 ### Locked EIP-712
 
@@ -66,7 +66,7 @@ forge test -vv
 forge test -vv
 ```
 
-`GasRescueSwap` coverage: happy-path mock swap (native + WETH unwrap, both testnets), exact `amountSwap` consume (leftover tokenIn reverts), job-only native credit (donated ETH/WETH not swept), end-of-tx tokenIn/WETH/ETH zeros, Permit2 Order witness binding, slippage, underfunded / path / domain / sig without nonce burn, replay, wrong `chainId` / mainnet blocked, `feeAmount + amountSwap` overflow, FoT, reentrancy (permit / transferFrom / router), non-permit and disabled Permit2 fail-closed, owner ≠ relayer, pause.
+`GasRescueSwap` coverage: happy-path mock swap (native + WETH unwrap, both testnets), exact `amountSwap` consume (leftover tokenIn reverts), job-only native credit (donated ETH/WETH not swept), end-of-tx tokenIn/WETH/ETH zeros, Permit2 Order witness binding, slippage, underfunded / path / domain / sig without nonce burn, replay, wrong `chainId` / mainnet blocked, `feeAmount + amountSwap` overflow, FoT, reentrancy (permit / transferFrom / router), non-permit and disabled Permit2 fail-closed, owner ≠ relayer, two-step `Ownable2Step` transfer + disabled `renounceOwnership`, pause.
 
 Harness tests in `test/GasRescue.t.sol` stay green.
 
@@ -136,4 +136,4 @@ script/Rescue.s.sol                # harness
 
 ## Appendix: fee-skim harness (`GasRescue`)
 
-Kept compiling so existing tests remain a regression gate. Destination-only skim on **Base Sepolia**: permit-pull `amount`, send `feeAmount` to `feeTo`, return remainder to `user`. Domain name `GasRescue` / version `1`. See `test/GasRescue.t.sol` and `script/Deploy.s.sol`.
+Kept compiling so existing tests remain a regression gate. Destination-only skim on **Base Sepolia**: permit-pull `amount`, send `feeAmount` to `feeTo`, return remainder to `user`. Domain name `GasRescue` / version `1`. Same ownership hardening as the product: `Ownable2Step`, `renounceOwnership` disabled. See `test/GasRescue.t.sol` and `script/Deploy.s.sol`.

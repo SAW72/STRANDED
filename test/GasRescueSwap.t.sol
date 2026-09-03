@@ -520,6 +520,78 @@ contract GasRescueSwapTest is Test {
         assertTrue(rescue.relayers(stranger));
     }
 
+    function test_transferOwnership_isTwoStep() public {
+        address newOwner = makeAddr("newOwner");
+        assertEq(rescue.owner(), owner);
+        assertEq(rescue.pendingOwner(), address(0));
+
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, stranger));
+        vm.prank(stranger);
+        rescue.transferOwnership(newOwner);
+
+        vm.prank(owner);
+        rescue.transferOwnership(newOwner);
+
+        assertEq(rescue.owner(), owner, "owner unchanged until accept");
+        assertEq(rescue.pendingOwner(), newOwner);
+
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, newOwner));
+        vm.prank(newOwner);
+        rescue.pause();
+
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, stranger));
+        vm.prank(stranger);
+        rescue.acceptOwnership();
+
+        vm.prank(newOwner);
+        rescue.acceptOwnership();
+
+        assertEq(rescue.owner(), newOwner);
+        assertEq(rescue.pendingOwner(), address(0));
+
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, owner));
+        vm.prank(owner);
+        rescue.pause();
+
+        vm.prank(newOwner);
+        rescue.pause();
+        assertTrue(rescue.paused());
+        vm.prank(newOwner);
+        rescue.unpause();
+        assertFalse(rescue.paused());
+
+        vm.expectRevert(GasRescueSwap.OwnerIsRelayer.selector);
+        vm.prank(newOwner);
+        rescue.setRelayer(newOwner, true);
+    }
+
+    function test_renounceOwnership_reverts() public {
+        vm.expectRevert(GasRescueSwap.OwnershipCannotBeRenounced.selector);
+        vm.prank(owner);
+        rescue.renounceOwnership();
+        assertEq(rescue.owner(), owner);
+
+        vm.expectRevert(GasRescueSwap.OwnershipCannotBeRenounced.selector);
+        vm.prank(stranger);
+        rescue.renounceOwnership();
+        assertEq(rescue.owner(), owner);
+    }
+
+    function test_transferOwnership_ontoRelayerDisablesHotKey() public {
+        vm.prank(owner);
+        rescue.transferOwnership(relayer);
+        vm.prank(relayer);
+        rescue.acceptOwnership();
+        assertEq(rescue.owner(), relayer);
+
+        (IGasRescueSwap.Order memory order, bytes memory swapData) = _defaultOrderAndPath(1);
+        (bytes memory orderSig, uint8 v, bytes32 r, bytes32 s) = _signOrderAndPermit(order, address(token), USER_PK);
+
+        vm.expectRevert(GasRescueSwap.OwnerIsRelayer.selector);
+        vm.prank(relayer);
+        rescue.rescueWithPermit(order, orderSig, v, r, s, swapData);
+    }
+
     function test_routerNotAllowed_reverts() public {
         MockSwapRouter other = new MockSwapRouter();
         vm.deal(address(other), 1 ether);
