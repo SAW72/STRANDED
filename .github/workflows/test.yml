@@ -6,6 +6,8 @@ on:
   pull_request:
   workflow_dispatch:
 
+# Unit tests only. Do not wire RELAYER_PRIVATE_KEY (or any hot key) into this
+# job. Relayer secret consumption lives in relayer.yml and is runtime-only.
 jobs:
   test:
     runs-on: ubuntu-latest

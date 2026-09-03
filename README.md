@@ -74,10 +74,13 @@ Harness tests in `test/GasRescue.t.sol` stay green.
 
 Copy `.env.example` to `.env`. **Do not commit `.env` or any private key.**
 
+The Relayer hot key is **not** stored in `.env`, the workspace, or any generated file. GitHub Actions consumes it only at runtime from the repository secret named `RELAYER_PRIVATE_KEY` (Settings → Secrets and variables → Actions). Never paste that value into chat, the editor, or a tracked file. See [`.github/workflows/relayer.yml`](.github/workflows/relayer.yml) (`jobs.runtime` step **Consume RELAYER_PRIVATE_KEY at runtime**). The Tests workflow does not receive this secret. CI defaults to `STUB_RPC=1` (no live RPC, no broadcast). Testnet only: Base Sepolia (`84532`) and Arb Sepolia (`421614`).
+
 | Variable | Purpose |
 | --- | --- |
-| `PRIVATE_KEY` | Deployer (owner). Must not equal `RELAYER_ADDRESS`. |
+| `PRIVATE_KEY` | Deployer (owner). Must not equal `RELAYER_ADDRESS`. Local demo scripts only. |
 | `RELAYER_ADDRESS` | First allowlisted relayer hot key. |
+| `RELAYER_PRIVATE_KEY` | **GitHub Actions secret only.** Relayer signer. Injected at runtime; never written to disk. |
 | `WETH_ADDRESS` | Required. Set per testnet; no mainnet fallback. |
 | `ROUTER_ADDRESS` | Optional post-deploy router allowlist. |
 | `TOKEN_ADDRESS` | Optional EIP-2612 allowlist. |
