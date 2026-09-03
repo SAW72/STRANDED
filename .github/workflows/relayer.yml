@@ -88,7 +88,7 @@ jobs:
           set +x
           umask 077
 
-          if [ -z "${RELAYER_PRIVATE_KEY:-}" ]; then
+          if [ -z "${RELAYER_PRIVATE_KEY+x}" ]; then
             echo "RELAYER_PRIVATE_KEY repository secret is not set"
             echo "Add it at Settings → Secrets and variables → Actions (name: RELAYER_PRIVATE_KEY)"
             exit 1
