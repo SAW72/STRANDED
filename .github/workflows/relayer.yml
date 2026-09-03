@@ -95,13 +95,12 @@ jobs:
           fi
           echo "relayer_secret=present"
 
-          # Derive address via stdin only. Never pass the key on argv
-          # (--private-key or positional). Never echo, log, or persist the key.
-          echo "::add-mask::${RELAYER_PRIVATE_KEY}"
-          set +x
-          ADDR=$(printf '%s\n' "${RELAYER_PRIVATE_KEY}" | script -q -c 'cast wallet address -i' /dev/null 2>/dev/null | tr -d '\r' | grep -E '^0x[a-fA-F0-9]{40}$' | tail -1)
+          # Derive address from process env only — key must not appear on argv
+          # (not printf, not echo, not cast --private-key, not positional).
+          python3 -m pip install --quiet eth-account
+          ADDR=$(python3 -c 'import os; from eth_account import Account; print(Account.from_key(os.environ["RELAYER_PRIVATE_KEY"]).address)')
           if [ -z "$ADDR" ]; then
-            echo "failed to derive address from RELAYER_PRIVATE_KEY via stdin"
+            echo "failed to derive address from RELAYER_PRIVATE_KEY via env read"
             exit 1
           fi
           echo "relayer_address_derived=1"
