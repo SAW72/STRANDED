@@ -1,0 +1,132 @@
+# Relayer — testnet only (Base Sepolia 84532, Arb Sepolia 421614).
+#
+# RELAYER_PRIVATE_KEY is consumed only at runtime from the repository secret
+# named RELAYER_PRIVATE_KEY. It is never written to a tracked or generated
+# file, never echoed, and never exported via $GITHUB_ENV / $GITHUB_OUTPUT.
+#
+# Default STUB_RPC=1: no live RPC, no broadcast. Do not send transactions
+# from this workflow.
+name: Relayer
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      stub_rpc:
+        description: Keep STUB_RPC (no live RPC, no broadcast)
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: relayer-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  STUB_RPC: "1"
+  ALLOWED_CHAIN_IDS: "84532 421614"
+
+jobs:
+  # PR/push proof: testnet + stub guards only. This job must not receive the key.
+  stub:
+    name: STUB_RPC guard
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Assert testnet-only stub (no secret, no RPC, no broadcast)
+        shell: bash
+        run: |
+          set +x
+          echo "STUB_RPC=${STUB_RPC}"
+          echo "allowed_chain_ids=${ALLOWED_CHAIN_IDS}"
+
+          if git ls-files --error-unmatch .env >/dev/null 2>&1; then
+            echo "Tracked .env is forbidden"
+            exit 1
+          fi
+          if [ -e .env ] || [ -e .env.relayer ]; then
+            echo "Generated env file must not exist in CI"
+            exit 1
+          fi
+          if [ -n "${RELAYER_PRIVATE_KEY+x}" ]; then
+            echo "RELAYER_PRIVATE_KEY must not be wired into the stub job"
+            exit 1
+          fi
+          if ! grep -F 'secrets.RELAYER_PRIVATE_KEY' .github/workflows/relayer.yml >/dev/null; then
+            echo "runtime step must reference secrets.RELAYER_PRIVATE_KEY"
+            exit 1
+          fi
+          echo "stub_ok: no live RPC, no broadcast, no key in this job"
+
+  # Manual run only: inject the secret at runtime via step env (masking-safe).
+  runtime:
+    name: Runtime secret wiring
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    env:
+      STUB_RPC: ${{ github.event.inputs.stub_rpc == 'false' && '0' || '1' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+
+      - name: Consume RELAYER_PRIVATE_KEY at runtime
+        shell: bash
+        env:
+          RELAYER_PRIVATE_KEY: ${{ secrets.RELAYER_PRIVATE_KEY }}
+        run: |
+          set +x
+          umask 077
+
+          if [ -z "${RELAYER_PRIVATE_KEY+x}" ]; then
+            echo "RELAYER_PRIVATE_KEY repository secret is not set"
+            echo "Add it at Settings → Secrets and variables → Actions (name: RELAYER_PRIVATE_KEY)"
+            exit 1
+          fi
+          echo "relayer_secret=present"
+
+          # Derive address from process env only — key must not appear on argv
+          # (not printf, not echo, not cast --private-key, not positional).
+          python3 -m pip install --quiet eth-account
+          ADDR=$(python3 -c 'import os; from eth_account import Account; print(Account.from_key(os.environ["RELAYER_PRIVATE_KEY"]).address)')
+          if [ -z "$ADDR" ]; then
+            echo "failed to derive address from RELAYER_PRIVATE_KEY via env read"
+            exit 1
+          fi
+          echo "relayer_address_derived=1"
+          echo "relayer_address=${ADDR}"
+
+          echo "STUB_RPC=${STUB_RPC}"
+          if [ "${STUB_RPC}" != "0" ]; then
+            echo "STUB_RPC=1: skipping live RPC and broadcast (testnet safety)"
+            exit 0
+          fi
+
+          # Read-only chain-id checks. No --broadcast. Testnet RPCs only.
+          check_chain() {
+            rpc="$1"
+            expect="$2"
+            got="$(cast chain-id --rpc-url "${rpc}")"
+            echo "rpc_ok expected=${expect} got=${got}"
+            if [ "${got}" != "${expect}" ]; then
+              echo "Refusing non-testnet or unexpected chain id"
+              exit 1
+            fi
+            case " ${ALLOWED_CHAIN_IDS} " in
+              *" ${got} "*) ;;
+              *) echo "chain id ${got} is not allowlisted"; exit 1 ;;
+            esac
+          }
+          check_chain "https://sepolia.base.org" "84532"
+          check_chain "https://sepolia-rollup.arbitrum.io/rpc" "421614"
+          echo "No broadcast. No transactions sent."
