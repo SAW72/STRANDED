@@ -95,8 +95,16 @@ jobs:
           fi
           echo "relayer_secret=present"
 
-          # Derive address only. Never echo, log, or persist the key.
-          ADDR="$(cast wallet address --private-key "${RELAYER_PRIVATE_KEY}")"
+          # Derive address via stdin only. Never pass the key on argv
+          # (--private-key or positional). Never echo, log, or persist the key.
+          echo "::add-mask::${RELAYER_PRIVATE_KEY}"
+          set +x
+          ADDR=$(printf '%s\n' "${RELAYER_PRIVATE_KEY}" | script -q -c 'cast wallet address -i' /dev/null 2>/dev/null | tr -d '\r' | grep -E '^0x[a-fA-F0-9]{40}$' | tail -1)
+          if [ -z "$ADDR" ]; then
+            echo "failed to derive address from RELAYER_PRIVATE_KEY via stdin"
+            exit 1
+          fi
+          echo "relayer_address_derived=1"
           echo "relayer_address=${ADDR}"
 
           echo "STUB_RPC=${STUB_RPC}"
