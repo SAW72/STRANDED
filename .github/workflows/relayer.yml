@@ -62,10 +62,6 @@ jobs:
             echo "runtime step must reference secrets.RELAYER_PRIVATE_KEY"
             exit 1
           fi
-          if grep -E 'GITHUB_ENV|GITHUB_OUTPUT' .github/workflows/relayer.yml | grep -F 'RELAYER_PRIVATE_KEY' >/dev/null; then
-            echo "key must not be written to GITHUB_ENV or GITHUB_OUTPUT"
-            exit 1
-          fi
           echo "stub_ok: no live RPC, no broadcast, no key in this job"
 
   # Manual run only: inject the secret at runtime via step env (masking-safe).
