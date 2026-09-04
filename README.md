@@ -34,7 +34,7 @@ Native recipient field is **`nativeTo`** (not `safeRecipient`).
 ### Auth
 
 - EIP-2612 tokens must be owner-allowlisted (`setEip2612Token`).
-- Permit2 is **gated** (`setPermit2`); default off. `rescueWithPermit2` reverts `NoGaslessAuth` unless enabled. The pull uses `permitWitnessTransferFrom` with the Order struct hash as witness.
+- Permit2 address is **constructor-immutable** (`address(0)` = unwired). Gated off by default (`permit2Enabled = false`). `setPermit2` reverts; owner may only toggle `setPermit2Enabled` for the frozen address. `rescueWithPermit2` reverts `NoGaslessAuth` unless enabled. The pull uses `permitWitnessTransferFrom` with the Order struct hash as witness, then requires the user's `balanceOf` drop == `amountIn`.
 - Non-permit tokens with Permit2 disabled fail closed. There is no “just transferFrom” path.
 
 ### Sequence (`rescueWithPermit` / `rescueWithPermit2`)
@@ -84,7 +84,8 @@ The Relayer hot key is **not** stored in `.env`, the workspace, or any generated
 | `WETH_ADDRESS` | Required. Set per testnet; no mainnet fallback. |
 | `ROUTER_ADDRESS` | Optional post-deploy router allowlist. |
 | `TOKEN_ADDRESS` | Optional EIP-2612 allowlist. |
-| `PERMIT2_ADDRESS` / `PERMIT2_ENABLED` | Gated; default `false`. |
+| `PERMIT2_ADDRESS` | Constructor-immutable. Default `address(0)` (unwired). |
+| `PERMIT2_ENABLED` | Not set at deploy; `permit2Enabled` always starts `false`. |
 | `BASE_SEPOLIA_RPC_URL` | Default `https://sepolia.base.org` |
 | `ARB_SEPOLIA_RPC_URL` | Default `https://sepolia-rollup.arbitrum.io/rpc` |
 

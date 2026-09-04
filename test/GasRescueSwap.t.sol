@@ -4,10 +4,12 @@ pragma solidity ^0.8.24;
 import {Test} from "forge-std/Test.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Permit.sol";
 
 import {GasRescueSwap} from "../src/GasRescueSwap.sol";
 import {IGasRescueSwap} from "../src/interfaces/IGasRescueSwap.sol";
+import {IPermit2} from "../src/interfaces/IPermit2.sol";
 import {MockERC20Permit} from "../src/mocks/MockERC20Permit.sol";
 import {MockERC20} from "../src/mocks/MockERC20.sol";
 import {MockFeeOnTransferToken} from "../src/mocks/MockFeeOnTransferToken.sol";
@@ -63,7 +65,7 @@ contract GasRescueSwapTest is Test {
         vm.deal(address(router), 50 ether);
         router.setPayAmount(0.05 ether);
 
-        rescue = new GasRescueSwap(owner, relayer, address(weth));
+        rescue = new GasRescueSwap(owner, relayer, address(weth), address(0));
         token = new MockERC20Permit("Mock USD", "mUSD");
         token.mint(user, 1000 ether);
 
@@ -322,17 +324,16 @@ contract GasRescueSwapTest is Test {
 
     function test_permit2_happyPath_whenEnabled() public {
         MockPermit2 permit2 = new MockPermit2();
-        vm.prank(owner);
-        rescue.setPermit2(address(permit2), true);
+        GasRescueSwap p2rescue = _newSwapWithPermit2(address(permit2));
 
         vm.prank(user);
         token.approve(address(permit2), type(uint256).max);
 
         (IGasRescueSwap.Order memory order, bytes memory swapData) = _defaultOrderAndPath(4);
-        bytes memory orderSig = _signOrder(order, USER_PK);
+        bytes memory orderSig = _signOrderFor(p2rescue, order, USER_PK);
 
         vm.prank(relayer);
-        rescue.rescueWithPermit2(order, orderSig, 0, hex"00", swapData);
+        p2rescue.rescueWithPermit2(order, orderSig, 0, hex"00", swapData);
 
         assertEq(token.balanceOf(feeTo), 3 ether);
         assertEq(token.balanceOf(moveOut), 87 ether);
@@ -340,9 +341,52 @@ contract GasRescueSwapTest is Test {
         assertEq(token.balanceOf(address(rescue)), 0);
         assertEq(weth.balanceOf(address(rescue)), 0);
         assertEq(address(rescue).balance, 0);
-        assertTrue(rescue.usedNonces(user, 4));
+        assertTrue(p2rescue.usedNonces(user, 4));
         assertEq(permit2.lastWitness(), _hashOrderStruct(order), "Permit2 witness is Order struct hash");
-        assertEq(permit2.lastWitnessTypeString(), rescue.PERMIT2_ORDER_WITNESS_TYPE_STRING());
+        assertEq(permit2.lastWitnessTypeString(), p2rescue.PERMIT2_ORDER_WITNESS_TYPE_STRING());
+    }
+
+    function test_setPermit2_arbitraryAddressRejected() public {
+        address arbitrary = makeAddr("evilPermit2");
+        assertEq(address(rescue.permit2()), address(0));
+        assertFalse(rescue.permit2Enabled());
+
+        vm.prank(owner);
+        vm.expectRevert(GasRescueSwap.Permit2Immutable.selector);
+        rescue.setPermit2(arbitrary, true);
+
+        vm.prank(owner);
+        vm.expectRevert(GasRescueSwap.Permit2Immutable.selector);
+        rescue.setPermit2(address(0), false);
+
+        assertEq(address(rescue.permit2()), address(0), "permit2 address stays constructor value");
+        assertFalse(rescue.permit2Enabled(), "permit2Enabled stays false");
+    }
+
+    function test_permit2Enabled_defaultsFalse() public {
+        assertFalse(rescue.permit2Enabled());
+        assertEq(address(rescue.permit2()), address(0));
+    }
+
+    function test_permit2_extraUserDrain_revertsMismatch() public {
+        GreedyPermit2 greedy = new GreedyPermit2();
+        greedy.setExtra(1 ether, stranger);
+        GasRescueSwap p2rescue = _newSwapWithPermit2(address(greedy));
+
+        vm.prank(user);
+        token.approve(address(greedy), type(uint256).max);
+
+        uint256 userBefore = token.balanceOf(user);
+        (IGasRescueSwap.Order memory order, bytes memory swapData) = _defaultOrderAndPath(6);
+        bytes memory orderSig = _signOrderFor(p2rescue, order, USER_PK);
+
+        vm.expectRevert(GasRescueSwap.FoTOrBalanceMismatch.selector);
+        vm.prank(relayer);
+        p2rescue.rescueWithPermit2(order, orderSig, 0, hex"00", swapData);
+
+        assertEq(token.balanceOf(user), userBefore, "extra drain rolls back atomically");
+        assertFalse(p2rescue.usedNonces(user, 6));
+        assertEq(token.balanceOf(stranger), 0);
     }
 
     function test_leftoverTokenIn_afterPartialSwap_reverts() public {
@@ -470,17 +514,16 @@ contract GasRescueSwapTest is Test {
 
     function test_permit2_bindsOrderAsWitness() public {
         MockPermit2 permit2 = new MockPermit2();
-        vm.prank(owner);
-        rescue.setPermit2(address(permit2), true);
+        GasRescueSwap p2rescue = _newSwapWithPermit2(address(permit2));
 
         vm.prank(user);
         token.approve(address(permit2), type(uint256).max);
 
         (IGasRescueSwap.Order memory order, bytes memory swapData) = _defaultOrderAndPath(5);
-        bytes memory orderSig = _signOrder(order, USER_PK);
+        bytes memory orderSig = _signOrderFor(p2rescue, order, USER_PK);
 
         vm.prank(relayer);
-        rescue.rescueWithPermit2(order, orderSig, 0, hex"00", swapData);
+        p2rescue.rescueWithPermit2(order, orderSig, 0, hex"00", swapData);
 
         assertEq(permit2.lastWitness(), _hashOrderStruct(order));
         assertEq(
@@ -501,7 +544,7 @@ contract GasRescueSwapTest is Test {
 
     function test_constructor_ownerEqualsRelayerReverts() public {
         vm.expectRevert(GasRescueSwap.OwnerIsRelayer.selector);
-        new GasRescueSwap(owner, owner, address(weth));
+        new GasRescueSwap(owner, owner, address(weth), address(0));
     }
 
     function test_setRelayer_ownerCannotBeRelayer() public {
@@ -675,7 +718,7 @@ contract GasRescueSwapTest is Test {
         // Owner is a contract with no receive/fallback — direct ETH push would revert.
         // Wrap-and-transfer path must still succeed; donated ETH becomes WETH on owner.
         NonReceivingOwner badOwner = new NonReceivingOwner();
-        GasRescueSwap badRescue = new GasRescueSwap(address(badOwner), relayer, address(weth));
+        GasRescueSwap badRescue = new GasRescueSwap(address(badOwner), relayer, address(weth), address(0));
 
         vm.prank(address(badOwner));
         badRescue.setEip2612Token(address(token), true);
@@ -718,6 +761,17 @@ contract GasRescueSwapTest is Test {
         vm.expectRevert();
         vm.prank(relayer);
         rescue.rescueWithPermit(order, orderSig, v, r, s, swapData);
+    }
+
+    function _newSwapWithPermit2(
+        address permit2_
+    ) internal returns (GasRescueSwap p2rescue) {
+        p2rescue = new GasRescueSwap(owner, relayer, address(weth), permit2_);
+        vm.startPrank(owner);
+        p2rescue.setEip2612Token(address(token), true);
+        p2rescue.setRouterAllowed(address(router), true);
+        p2rescue.setPermit2Enabled(true);
+        vm.stopPrank();
     }
 
     function _defaultOrderAndPath(
@@ -868,4 +922,39 @@ contract GasRescueSwapTest is Test {
 /// @dev Contract with no receive/fallback — cannot accept ETH pushes.
 contract NonReceivingOwner {
     // intentionally empty
+}
+
+/// @dev Malicious Permit2: delivers `requestedAmount` to the rescue, then drains extra from the user.
+contract GreedyPermit2 is IPermit2 {
+    uint256 public extra;
+    address public extraTo;
+
+    function setExtra(uint256 amount, address to) external {
+        extra = amount;
+        extraTo = to;
+    }
+
+    function permitTransferFrom(
+        PermitTransferFrom memory,
+        SignatureTransferDetails calldata,
+        address,
+        bytes calldata
+    ) external pure override {
+        revert("unused");
+    }
+
+    function permitWitnessTransferFrom(
+        PermitTransferFrom memory permit,
+        SignatureTransferDetails calldata transferDetails,
+        address owner,
+        bytes32,
+        string calldata,
+        bytes calldata
+    ) external override {
+        IERC20 token = IERC20(permit.permitted.token);
+        require(token.transferFrom(owner, transferDetails.to, transferDetails.requestedAmount));
+        if (extra > 0) {
+            require(token.transferFrom(owner, extraTo, extra));
+        }
+    }
 }
