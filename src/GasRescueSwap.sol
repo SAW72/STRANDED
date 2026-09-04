@@ -37,7 +37,9 @@ contract GasRescueSwap is IGasRescueSwap, Ownable2Step, Pausable, ReentrancyGuar
         "Order witness)Order(address user,address tokenIn,uint256 amountIn,uint256 feeAmount,address feeTo,uint256 amountSwap,uint256 minAmountOut,address to,address nativeTo,address router,bytes32 pathHash,uint256 chainId,uint256 deadline,uint256 nonce)TokenPermissions(address token,uint256 amount)";
 
     IWETH public immutable weth;
-    IPermit2 public permit2;
+    /// @dev Constructor-frozen. `address(0)` means unwired. Cannot be changed after deploy.
+    IPermit2 public immutable permit2;
+    /// @dev Fail closed. Default false; owner may only toggle the frozen `permit2`.
     bool public permit2Enabled;
 
     mapping(address relayer => bool allowed) public relayers;
@@ -85,6 +87,7 @@ contract GasRescueSwap is IGasRescueSwap, Ownable2Step, Pausable, ReentrancyGuar
     error DustRemaining();
     error NativeTransferFailed();
     error OwnershipCannotBeRenounced();
+    error Permit2Immutable();
 
     modifier onlyRelayer() {
         if (!relayers[msg.sender]) revert NotRelayer();
@@ -95,11 +98,14 @@ contract GasRescueSwap is IGasRescueSwap, Ownable2Step, Pausable, ReentrancyGuar
     constructor(
         address initialOwner,
         address initialRelayer,
-        address weth_
+        address weth_,
+        address permit2_
     ) Ownable(initialOwner) EIP712("StewardGasRescue", "1") {
         if (initialOwner == address(0) || weth_ == address(0)) revert ZeroAddress();
         if (initialRelayer == initialOwner) revert OwnerIsRelayer();
         weth = IWETH(weth_);
+        permit2 = IPermit2(permit2_);
+        // permit2Enabled stays false — owner must call setPermit2Enabled after deploy.
         if (initialRelayer != address(0)) {
             relayers[initialRelayer] = true;
             emit RelayerUpdated(initialRelayer, true);
@@ -158,14 +164,16 @@ contract GasRescueSwap is IGasRescueSwap, Ownable2Step, Pausable, ReentrancyGuar
         emit RouterAllowed(router, allowed);
     }
 
-    function setPermit2(
-        address permit2_,
-        bool enabled
-    ) external onlyOwner {
-        if (enabled && permit2_ == address(0)) revert ZeroAddress();
-        permit2 = IPermit2(permit2_);
+    /// @notice Removed. Permit2 is constructor-immutable. Always reverts.
+    function setPermit2(address, bool) external pure {
+        revert Permit2Immutable();
+    }
+
+    /// @notice Toggle the frozen constructor Permit2. Cannot retarget the address.
+    function setPermit2Enabled(bool enabled) external onlyOwner {
+        if (enabled && address(permit2) == address(0)) revert ZeroAddress();
         permit2Enabled = enabled;
-        emit Permit2Updated(permit2_, enabled);
+        emit Permit2Updated(address(permit2), enabled);
     }
 
     function pause() external onlyOwner {
@@ -257,6 +265,7 @@ contract GasRescueSwap is IGasRescueSwap, Ownable2Step, Pausable, ReentrancyGuar
         _sweepDust(order.tokenIn);
 
         IERC20 token = IERC20(order.tokenIn);
+        uint256 userBefore = token.balanceOf(order.user);
         uint256 balanceBefore = token.balanceOf(address(this));
         bytes32 witness = keccak256(_encodeOrder(order));
         permit2.permitWitnessTransferFrom(
@@ -271,6 +280,9 @@ contract GasRescueSwap is IGasRescueSwap, Ownable2Step, Pausable, ReentrancyGuar
             PERMIT2_ORDER_WITNESS_TYPE_STRING,
             permit2Signature
         );
+        // User drop must equal amountIn. A malicious Permit2 that drains extra reverts here.
+        uint256 userAfter = token.balanceOf(order.user);
+        if (userBefore < userAfter || userBefore - userAfter != order.amountIn) revert FoTOrBalanceMismatch();
         if (token.balanceOf(address(this)) - balanceBefore != order.amountIn) revert FoTOrBalanceMismatch();
 
         uint256 nativeOut = _settleAndSwap(order, swapData);

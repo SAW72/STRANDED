@@ -15,8 +15,8 @@ import {GasRescueSwap} from "../src/GasRescueSwap.sol";
 /// Optional:
 ///   ROUTER_ADDRESS       allowlisted immediately after deploy
 ///   TOKEN_ADDRESS        marked EIP-2612-allowlisted after deploy
-///   PERMIT2_ADDRESS      stored when set; enable only if PERMIT2_ENABLED=true
-///   PERMIT2_ENABLED      default false (fail closed)
+///   PERMIT2_ADDRESS      constructor-immutable (default address(0) = unwired)
+///   PERMIT2_ENABLED      ignored at deploy; permit2Enabled always starts false
 ///
 /// Testnet WETH references (set WETH_ADDRESS explicitly; not used as defaults):
 ///   Base Sepolia 84532:  0x4200000000000000000000000000000000000006
@@ -40,8 +40,10 @@ contract DeployGasRescueSwap is Script {
         require(weth != address(0), "WETH_ADDRESS required");
         require(relayer != deployer, "owner must not be the relayer hot key");
 
+        address permit2 = vm.envOr("PERMIT2_ADDRESS", address(0));
+
         vm.startBroadcast(deployerKey);
-        GasRescueSwap rescue = new GasRescueSwap(deployer, relayer, weth);
+        GasRescueSwap rescue = new GasRescueSwap(deployer, relayer, weth, permit2);
 
         address router = vm.envOr("ROUTER_ADDRESS", address(0));
         if (router != address(0)) {
@@ -52,12 +54,7 @@ contract DeployGasRescueSwap is Script {
         if (token != address(0)) {
             rescue.setEip2612Token(token, true);
         }
-
-        address permit2 = vm.envOr("PERMIT2_ADDRESS", address(0));
-        bool permit2Enabled = vm.envOr("PERMIT2_ENABLED", false);
-        if (permit2 != address(0)) {
-            rescue.setPermit2(permit2, permit2Enabled);
-        }
+        // permit2Enabled stays false. Do not call setPermit2 — it reverts.
         vm.stopBroadcast();
 
         console2.log("chain            ", chainId);
@@ -67,9 +64,7 @@ contract DeployGasRescueSwap is Script {
         console2.log("weth             ", weth);
         if (router != address(0)) console2.log("router           ", router);
         if (token != address(0)) console2.log("eip2612 token    ", token);
-        if (permit2 != address(0)) {
-            console2.log("permit2          ", permit2);
-            console2.log("permit2Enabled   ", permit2Enabled);
-        }
+        console2.log("permit2          ", permit2);
+        console2.log("permit2Enabled   ", rescue.permit2Enabled());
     }
 }

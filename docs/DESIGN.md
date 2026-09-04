@@ -23,7 +23,7 @@ No bridges in v1. No mainnet. No token launch.
 | --- | --- | 
 | **User** | Holds stranded ERC-20, has zero native. Signs the Order + gasless auth. Never pays gas. |
 | **Relayer** | Hot key that pays gas and submits the tx. Allowlisted; must not be the owner. |
-| **Owner** | Deployer / admin. Sets allowlists, pause, Permit2. Cannot be a relayer. `Ownable2Step` two-step transfer only; `renounceOwnership` disabled. **Mainnet must use a multisig or timelock for this role** (docs-only; not implemented on testnet). |
+| **Owner** | Deployer / admin. Sets allowlists, pause, and `permit2Enabled` for the constructor-frozen Permit2. Cannot retarget Permit2. Cannot be a relayer. `Ownable2Step` two-step transfer only; `renounceOwnership` disabled. **Mainnet must use a multisig or timelock for this role** (docs-only; not implemented on testnet). |
 | **Router** | Allowlisted DEX router (e.g. Uniswap). Called with exact signed calldata. |
 | **feeTo** | Receives the in-token fee. |
 | **to** | Receives the remainder ERC-20 (same-chain move-out). |
@@ -66,7 +66,7 @@ Order(
 ## 4. Auth paths (gasless)
 
 1. **EIP-2612 permit** — token must be owner-allowlisted via `setEip2612Token`. User signs a standard permit; contract pulls exactly `amountIn`.
-2. **Permit2** — gated off by default (`setPermit2`). When enabled, uses `permitWitnessTransferFrom` with the Order struct hash as the witness. Fail closed if disabled.
+2. **Permit2** — address is constructor-immutable (`address(0)` = unwired). Gated off by default (`permit2Enabled = false`). Owner may toggle `setPermit2Enabled` for the frozen address only; `setPermit2` reverts. When enabled, uses `permitWitnessTransferFrom` with the Order struct hash as the witness. After the pull, the user's `balanceOf` drop must equal `amountIn` exactly (`FoTOrBalanceMismatch` if more is drained). Fail closed if disabled.
 3. **Non-permit tokens** — no "just transferFrom" path. If the token is not EIP-2612-allowlisted and Permit2 is disabled, the call reverts `NoGaslessAuth`. This is intentional: no user signature on-chain means no rescue.
 
 ---
@@ -79,7 +79,7 @@ Modifiers: `nonReentrant`, `whenNotPaused`, `onlyRelayer`.
 2. **Gasless-auth gate** — else `NoGaslessAuth` (still no nonce write).
 3. **Consume nonce** — `usedNonces[user][nonce] = true`.
 4. **Sweep pre-existing dust** — any ETH, WETH, or (when `tokenIn != WETH`) `tokenIn` sitting on the contract from prior donations is sent to the owner *before* the pull, so a donation cannot DoS rescues via `DustRemaining` or `SwapInputNotConsumed`. Sweep runs in both `rescueWithPermit` and `rescueWithPermit2` entrypoints, before `permit`/`permitWitnessTransferFrom`. Because the sweep is pre-pull, any WETH present is a donation — never the user's just-pulled `amountIn` — so WETH is always swept, including when `tokenIn == WETH`. ETH is **wrapped to WETH** (`weth.deposit{value: ethDust}()`) and transferred to owner via `IERC20.safeTransfer` (option B). This keeps the strict end-of-tx zero invariant, kills owner-receive grief (ERC-20 transfers do not depend on a receive hook), and avoids stranded credits on ownership transfer. When `tokenIn != WETH`, leftover `tokenIn` is transferred to owner the same way (`IERC20(tokenIn).safeTransfer`); do **not** sweep `tokenIn` when it is WETH (that path is already handled).
-5. **Pull** — permit or Permit2. Exact balance delta required (`FoTOrBalanceMismatch` on fee-on-transfer).
+5. **Pull** — permit or Permit2. Exact contract balance delta required (`FoTOrBalanceMismatch` on fee-on-transfer). Permit2 also requires the user's `balanceOf` drop == `amountIn` (reverts atomically if more is drained).
 6. **Settle (Appendix A):**
    - skim `feeAmount` → `feeTo`,
    - send `remainder = amountIn - feeAmount - amountSwap` → `to`,

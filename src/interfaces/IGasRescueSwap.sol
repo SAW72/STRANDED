@@ -34,8 +34,9 @@ interface IGasRescueSwap {
         bytes calldata swapData
     ) external;
 
-    /// @notice Permit2 path. Reverts `NoGaslessAuth` unless Permit2 is owner-enabled (fail closed).
+    /// @notice Permit2 path. Reverts `NoGaslessAuth` unless the constructor-frozen Permit2 is owner-enabled.
     ///         Pulls via `permitWitnessTransferFrom` with the Order struct hash as witness.
+    ///         User `balanceOf` drop must equal `amountIn`.
     function rescueWithPermit2(
         Order calldata order,
         bytes calldata orderSignature,
