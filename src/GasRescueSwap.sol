@@ -48,7 +48,11 @@ contract GasRescueSwap is IGasRescueSwap, Ownable2Step, Pausable, ReentrancyGuar
     mapping(address router => bool allowed) public allowedRouters;
     mapping(address user => mapping(uint256 nonce => bool used)) public usedNonces;
 
+    /// @dev Separate from owner. `address(0)` means no guardian; owner can still pause.
+    address public guardian;
+
     event RelayerUpdated(address indexed relayer, bool allowed);
+    event GuardianUpdated(address indexed previous, address indexed current);
     event TokenAllowed(address indexed token, bool allowed);
     event Eip2612TokenAllowed(address indexed token, bool allowed);
     event RouterAllowed(address indexed router, bool allowed);
@@ -88,10 +92,17 @@ contract GasRescueSwap is IGasRescueSwap, Ownable2Step, Pausable, ReentrancyGuar
     error NativeTransferFailed();
     error OwnershipCannotBeRenounced();
     error Permit2Immutable();
+    error NotGuardianOrOwner();
+    error GuardianIsOwner();
 
     modifier onlyRelayer() {
         if (!relayers[msg.sender]) revert NotRelayer();
         if (msg.sender == owner()) revert OwnerIsRelayer();
+        _;
+    }
+
+    modifier onlyGuardianOrOwner() {
+        if (msg.sender != owner() && msg.sender != guardian) revert NotGuardianOrOwner();
         _;
     }
 
@@ -176,11 +187,21 @@ contract GasRescueSwap is IGasRescueSwap, Ownable2Step, Pausable, ReentrancyGuar
         emit Permit2Updated(address(permit2), enabled);
     }
 
-    function pause() external onlyOwner {
+    /// @notice Owner-only. Guardian must not equal owner. `address(0)` clears the role.
+    function setGuardian(address newGuardian) external onlyOwner {
+        if (newGuardian == owner()) revert GuardianIsOwner();
+        address previous = guardian;
+        guardian = newGuardian;
+        emit GuardianUpdated(previous, newGuardian);
+    }
+
+    /// @notice Guardian or owner. Emits OZ `Paused(address account)` with the caller (`by`).
+    function pause() external onlyGuardianOrOwner {
         _pause();
     }
 
-    function unpause() external onlyOwner {
+    /// @notice Guardian or owner. Emits OZ `Unpaused(address account)` with the caller (`by`).
+    function unpause() external onlyGuardianOrOwner {
         _unpause();
     }
 

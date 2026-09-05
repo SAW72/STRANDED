@@ -42,6 +42,7 @@ contract GasRescueSwapTest is Test {
     address internal relayer;
     address internal user;
     address internal stranger;
+    address internal pauseGuardian;
     address internal feeTo;
     address internal moveOut;
     address internal nativeTo;
@@ -53,6 +54,7 @@ contract GasRescueSwapTest is Test {
         relayer = vm.addr(RELAYER_PK);
         user = vm.addr(USER_PK);
         stranger = vm.addr(STRANGER_PK);
+        pauseGuardian = makeAddr("pauseGuardian");
         feeTo = makeAddr("feeTo");
         moveOut = makeAddr("moveOut");
         nativeTo = makeAddr("nativeTo");
@@ -578,7 +580,7 @@ contract GasRescueSwapTest is Test {
         assertEq(rescue.owner(), owner, "owner unchanged until accept");
         assertEq(rescue.pendingOwner(), newOwner);
 
-        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, newOwner));
+        vm.expectRevert(GasRescueSwap.NotGuardianOrOwner.selector);
         vm.prank(newOwner);
         rescue.pause();
 
@@ -592,7 +594,7 @@ contract GasRescueSwapTest is Test {
         assertEq(rescue.owner(), newOwner);
         assertEq(rescue.pendingOwner(), address(0));
 
-        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, owner));
+        vm.expectRevert(GasRescueSwap.NotGuardianOrOwner.selector);
         vm.prank(owner);
         rescue.pause();
 
@@ -676,7 +678,7 @@ contract GasRescueSwapTest is Test {
     }
 
     function test_pause_blocksRescueAndOnlyOwnerCanToggle() public {
-        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, stranger));
+        vm.expectRevert(GasRescueSwap.NotGuardianOrOwner.selector);
         vm.prank(stranger);
         rescue.pause();
 
@@ -697,6 +699,101 @@ contract GasRescueSwapTest is Test {
         vm.prank(relayer);
         rescue.rescueWithPermit(order, orderSig, v, r, s, swapData);
         assertTrue(rescue.usedNonces(user, 1));
+    }
+
+    function test_setGuardian_onlyOwnerAndNotOwnerAddress() public {
+        assertEq(rescue.guardian(), address(0));
+
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, stranger));
+        vm.prank(stranger);
+        rescue.setGuardian(pauseGuardian);
+
+        vm.expectRevert(GasRescueSwap.GuardianIsOwner.selector);
+        vm.prank(owner);
+        rescue.setGuardian(owner);
+
+        vm.expectEmit(true, true, false, true);
+        emit GasRescueSwap.GuardianUpdated(address(0), pauseGuardian);
+        vm.prank(owner);
+        rescue.setGuardian(pauseGuardian);
+        assertEq(rescue.guardian(), pauseGuardian);
+
+        vm.prank(owner);
+        rescue.setGuardian(address(0));
+        assertEq(rescue.guardian(), address(0));
+    }
+
+    function test_guardian_canPauseUnpause_nonGuardianReverts() public {
+        vm.prank(owner);
+        rescue.setGuardian(pauseGuardian);
+
+        vm.expectRevert(GasRescueSwap.NotGuardianOrOwner.selector);
+        vm.prank(stranger);
+        rescue.pause();
+        vm.expectRevert(GasRescueSwap.NotGuardianOrOwner.selector);
+        vm.prank(stranger);
+        rescue.unpause();
+
+        vm.expectEmit(true, false, false, true);
+        emit Pausable.Paused(pauseGuardian);
+        vm.prank(pauseGuardian);
+        rescue.pause();
+        assertTrue(rescue.paused());
+
+        vm.expectEmit(true, false, false, true);
+        emit Pausable.Unpaused(pauseGuardian);
+        vm.prank(pauseGuardian);
+        rescue.unpause();
+        assertFalse(rescue.paused());
+    }
+
+    function test_guardianPause_blocksRescue_unpauseRestores() public {
+        vm.prank(owner);
+        rescue.setGuardian(pauseGuardian);
+        vm.prank(pauseGuardian);
+        rescue.pause();
+
+        (IGasRescueSwap.Order memory order, bytes memory swapData) = _defaultOrderAndPath(1);
+        (bytes memory orderSig, uint8 v, bytes32 r, bytes32 s) = _signOrderAndPermit(order, address(token), USER_PK);
+
+        vm.expectRevert(Pausable.EnforcedPause.selector);
+        vm.prank(relayer);
+        rescue.rescueWithPermit(order, orderSig, v, r, s, swapData);
+        assertFalse(rescue.usedNonces(user, 1));
+
+        vm.prank(pauseGuardian);
+        rescue.unpause();
+
+        vm.prank(relayer);
+        rescue.rescueWithPermit(order, orderSig, v, r, s, swapData);
+        assertTrue(rescue.usedNonces(user, 1));
+    }
+
+    function test_owner_canOverrideGuardianPause() public {
+        vm.prank(owner);
+        rescue.setGuardian(pauseGuardian);
+        vm.prank(pauseGuardian);
+        rescue.pause();
+        assertTrue(rescue.paused());
+
+        vm.expectEmit(true, false, false, true);
+        emit Pausable.Unpaused(owner);
+        vm.prank(owner);
+        rescue.unpause();
+        assertFalse(rescue.paused());
+
+        (IGasRescueSwap.Order memory order, bytes memory swapData) = _defaultOrderAndPath(1);
+        (bytes memory orderSig, uint8 v, bytes32 r, bytes32 s) = _signOrderAndPermit(order, address(token), USER_PK);
+        vm.prank(relayer);
+        rescue.rescueWithPermit(order, orderSig, v, r, s, swapData);
+        assertTrue(rescue.usedNonces(user, 1));
+
+        vm.prank(owner);
+        rescue.pause();
+        assertTrue(rescue.paused());
+        vm.prank(pauseGuardian);
+        rescue.unpause();
+        assertFalse(rescue.paused());
     }
 
     function test_orderTypehashMatchesApprovedString() public {
