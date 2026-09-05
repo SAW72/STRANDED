@@ -36,8 +36,12 @@ contract GasRescueSwap is IGasRescueSwap, Ownable2Step, Pausable, ReentrancyGuar
     string public constant PERMIT2_ORDER_WITNESS_TYPE_STRING =
         "Order witness)Order(address user,address tokenIn,uint256 amountIn,uint256 feeAmount,address feeTo,uint256 amountSwap,uint256 minAmountOut,address to,address nativeTo,address router,bytes32 pathHash,uint256 chainId,uint256 deadline,uint256 nonce)TokenPermissions(address token,uint256 amount)";
 
+    /// @dev Uniswap canonical Permit2 (CREATE2, same on Ethereum and most L2s).
+    address public constant CANONICAL_PERMIT2 = 0x000000000022D473030F116dDEE9F6B43aC78BA3;
+
     IWETH public immutable weth;
-    /// @dev Constructor-frozen. `address(0)` means unwired. Cannot be changed after deploy.
+    /// @dev Constructor-frozen. Must be `address(0)` (unwired) or `CANONICAL_PERMIT2`.
+    ///      Cannot be changed after deploy. Any other address reverts `InvalidPermit2`.
     IPermit2 public immutable permit2;
     /// @dev Fail closed. Default false; owner may only toggle the frozen `permit2`.
     bool public permit2Enabled;
@@ -88,6 +92,7 @@ contract GasRescueSwap is IGasRescueSwap, Ownable2Step, Pausable, ReentrancyGuar
     error NativeTransferFailed();
     error OwnershipCannotBeRenounced();
     error Permit2Immutable();
+    error InvalidPermit2();
 
     modifier onlyRelayer() {
         if (!relayers[msg.sender]) revert NotRelayer();
@@ -103,6 +108,7 @@ contract GasRescueSwap is IGasRescueSwap, Ownable2Step, Pausable, ReentrancyGuar
     ) Ownable(initialOwner) EIP712("StewardGasRescue", "1") {
         if (initialOwner == address(0) || weth_ == address(0)) revert ZeroAddress();
         if (initialRelayer == initialOwner) revert OwnerIsRelayer();
+        if (permit2_ != address(0) && permit2_ != CANONICAL_PERMIT2) revert InvalidPermit2();
         weth = IWETH(weth_);
         permit2 = IPermit2(permit2_);
         // permit2Enabled stays false — owner must call setPermit2Enabled after deploy.
@@ -129,6 +135,7 @@ contract GasRescueSwap is IGasRescueSwap, Ownable2Step, Pausable, ReentrancyGuar
         emit RelayerUpdated(relayer, allowed);
     }
 
+    /// @notice Allowlist a `tokenIn` for rescues. Do not allowlist hostile tokens.
     function setTokenAllowed(
         address token,
         bool allowed
@@ -142,6 +149,11 @@ contract GasRescueSwap is IGasRescueSwap, Ownable2Step, Pausable, ReentrancyGuar
         emit TokenAllowed(token, allowed);
     }
 
+    /// @notice Allowlist an EIP-2612 token for `rescueWithPermit`.
+    /// @dev Residual risk: do not allowlist hostile tokens. A malicious permit
+    ///      token can still grief via hooks or unexpected accounting. Extra
+    ///      same-token siphon during `transferFrom` is blocked by requiring the
+    ///      user's `balanceOf` drop == `amountIn` (F-6).
     function setEip2612Token(
         address token,
         bool allowed
@@ -165,12 +177,17 @@ contract GasRescueSwap is IGasRescueSwap, Ownable2Step, Pausable, ReentrancyGuar
     }
 
     /// @notice Removed. Permit2 is constructor-immutable. Always reverts.
-    function setPermit2(address, bool) external pure {
+    function setPermit2(
+        address,
+        bool
+    ) external pure {
         revert Permit2Immutable();
     }
 
     /// @notice Toggle the frozen constructor Permit2. Cannot retarget the address.
-    function setPermit2Enabled(bool enabled) external onlyOwner {
+    function setPermit2Enabled(
+        bool enabled
+    ) external onlyOwner {
         if (enabled && address(permit2) == address(0)) revert ZeroAddress();
         permit2Enabled = enabled;
         emit Permit2Updated(address(permit2), enabled);
@@ -280,9 +297,10 @@ contract GasRescueSwap is IGasRescueSwap, Ownable2Step, Pausable, ReentrancyGuar
             PERMIT2_ORDER_WITNESS_TYPE_STRING,
             permit2Signature
         );
-        // User drop must equal amountIn. A malicious Permit2 that drains extra reverts here.
-        uint256 userAfter = token.balanceOf(order.user);
-        if (userBefore < userAfter || userBefore - userAfter != order.amountIn) revert FoTOrBalanceMismatch();
+        // User drop must equal amountIn. A malicious Permit2 that drains extra tokenIn reverts here.
+        // A different-token drain is out of scope of this check — constructor allows only
+        // address(0) or canonical Uniswap Permit2 (F-5).
+        _requireExactUserDrop(token, order.user, userBefore, order.amountIn);
         if (token.balanceOf(address(this)) - balanceBefore != order.amountIn) revert FoTOrBalanceMismatch();
 
         uint256 nativeOut = _settleAndSwap(order, swapData);
@@ -344,10 +362,26 @@ contract GasRescueSwap is IGasRescueSwap, Ownable2Step, Pausable, ReentrancyGuar
         bytes calldata swapData
     ) internal returns (uint256 nativeOut) {
         IERC20 token = IERC20(order.tokenIn);
+        uint256 userBefore = token.balanceOf(order.user);
         uint256 balanceBefore = token.balanceOf(address(this));
         token.safeTransferFrom(order.user, address(this), order.amountIn);
+        // Same user-drop check as the Permit2 path (F-6). Contract delta alone is
+        // not enough: a hostile allowlisted EIP-2612 token can deliver exact
+        // amountIn while siphoning extra same-token from the user.
+        _requireExactUserDrop(token, order.user, userBefore, order.amountIn);
         if (token.balanceOf(address(this)) - balanceBefore != order.amountIn) revert FoTOrBalanceMismatch();
         return _settleAndSwap(order, swapData);
+    }
+
+    /// @dev User `balanceOf` must fall by exactly `amountIn`. Extra drain reverts.
+    function _requireExactUserDrop(
+        IERC20 token,
+        address user,
+        uint256 userBefore,
+        uint256 amountIn
+    ) internal view {
+        uint256 userAfter = token.balanceOf(user);
+        if (userBefore < userAfter || userBefore - userAfter != amountIn) revert FoTOrBalanceMismatch();
     }
 
     function _settleAndSwap(
@@ -410,7 +444,9 @@ contract GasRescueSwap is IGasRescueSwap, Ownable2Step, Pausable, ReentrancyGuar
     ///      on ownership transfer. WETH is transferred directly for the same reason.
     ///      tokenIn is swept the same way when it is not WETH; the WETH path
     ///      already covers tokenIn == WETH.
-    function _sweepDust(address tokenIn) internal {
+    function _sweepDust(
+        address tokenIn
+    ) internal {
         uint256 ethDust = address(this).balance;
         if (ethDust > 0) {
             weth.deposit{value: ethDust}();

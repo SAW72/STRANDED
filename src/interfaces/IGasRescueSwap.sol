@@ -25,6 +25,7 @@ interface IGasRescueSwap {
     }
 
     /// @notice EIP-2612 path. Token must be on the EIP-2612 allowlist. `swapData` must hash to `order.pathHash`.
+    ///         User `balanceOf` drop and contract `tokenIn` delta must equal `amountIn`.
     function rescueWithPermit(
         Order calldata order,
         bytes calldata orderSignature,
