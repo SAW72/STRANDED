@@ -5,10 +5,15 @@ out/
 # Broadcast logs (can include local keys if misconfigured)
 broadcast/
 
-# Secrets
+# Secrets — never track env files or private keys
 .env
+**/.env
 .env.*
 !.env.example
+!**/.env.example
+*.key
+**/*.key
+# Runtime key material lives outside this repo (~/.gas-rescue/). Never copy it in.
 
 # Coverage
 lcov.info
