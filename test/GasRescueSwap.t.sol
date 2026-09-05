@@ -21,6 +21,7 @@ import {ReentrantSwapToken} from "../src/mocks/ReentrantSwapToken.sol";
 contract GasRescueSwapTest is Test {
     uint256 internal constant BASE_SEPOLIA_CHAIN_ID = 84_532;
     uint256 internal constant ARB_SEPOLIA_CHAIN_ID = 421_614;
+    address internal constant CANONICAL_PERMIT2 = 0x000000000022D473030F116dDEE9F6B43aC78BA3;
     uint256 internal constant USER_PK = 0xA11CE;
     uint256 internal constant RELAYER_PK = 0xB0B;
     uint256 internal constant STRANGER_PK = 0xC0FFEE;
@@ -323,8 +324,8 @@ contract GasRescueSwapTest is Test {
     }
 
     function test_permit2_happyPath_whenEnabled() public {
-        MockPermit2 permit2 = new MockPermit2();
-        GasRescueSwap p2rescue = _newSwapWithPermit2(address(permit2));
+        MockPermit2 permit2 = _etchMockPermit2();
+        GasRescueSwap p2rescue = _newSwapWithPermit2();
 
         vm.prank(user);
         token.approve(address(permit2), type(uint256).max);
@@ -369,9 +370,9 @@ contract GasRescueSwapTest is Test {
     }
 
     function test_permit2_extraUserDrain_revertsMismatch() public {
-        GreedyPermit2 greedy = new GreedyPermit2();
+        GreedyPermit2 greedy = _etchGreedyPermit2();
         greedy.setExtra(1 ether, stranger);
-        GasRescueSwap p2rescue = _newSwapWithPermit2(address(greedy));
+        GasRescueSwap p2rescue = _newSwapWithPermit2();
 
         vm.prank(user);
         token.approve(address(greedy), type(uint256).max);
@@ -513,8 +514,8 @@ contract GasRescueSwapTest is Test {
     }
 
     function test_permit2_bindsOrderAsWitness() public {
-        MockPermit2 permit2 = new MockPermit2();
-        GasRescueSwap p2rescue = _newSwapWithPermit2(address(permit2));
+        MockPermit2 permit2 = _etchMockPermit2();
+        GasRescueSwap p2rescue = _newSwapWithPermit2();
 
         vm.prank(user);
         token.approve(address(permit2), type(uint256).max);
@@ -545,6 +546,17 @@ contract GasRescueSwapTest is Test {
     function test_constructor_ownerEqualsRelayerReverts() public {
         vm.expectRevert(GasRescueSwap.OwnerIsRelayer.selector);
         new GasRescueSwap(owner, owner, address(weth), address(0));
+    }
+
+    function test_constructor_nonCanonicalPermit2Reverts() public {
+        vm.expectRevert(GasRescueSwap.InvalidPermit2.selector);
+        new GasRescueSwap(owner, relayer, address(weth), makeAddr("evilPermit2"));
+    }
+
+    function test_constructor_canonicalPermit2AcceptedDisabled() public {
+        GasRescueSwap wired = new GasRescueSwap(owner, relayer, address(weth), CANONICAL_PERMIT2);
+        assertEq(address(wired.permit2()), CANONICAL_PERMIT2);
+        assertFalse(wired.permit2Enabled(), "Permit2 stays disabled by default");
     }
 
     function test_setRelayer_ownerCannotBeRelayer() public {
@@ -736,7 +748,11 @@ contract GasRescueSwapTest is Test {
         vm.prank(relayer);
         badRescue.rescueWithPermit(order, orderSig, v, r, s, swapData);
 
-        assertEq(weth.balanceOf(address(badOwner)), ownerWethBefore + 1 ether, "donated ETH wrapped to WETH on non-receiving owner");
+        assertEq(
+            weth.balanceOf(address(badOwner)),
+            ownerWethBefore + 1 ether,
+            "donated ETH wrapped to WETH on non-receiving owner"
+        );
         assertEq(address(badRescue).balance, 0, "contract ETH zero - rescue not blocked");
         assertEq(nativeTo.balance, 0.05 ether, "nativeTo only gets this job's native");
         assertTrue(badRescue.usedNonces(user, 1));
@@ -763,10 +779,21 @@ contract GasRescueSwapTest is Test {
         rescue.rescueWithPermit(order, orderSig, v, r, s, swapData);
     }
 
-    function _newSwapWithPermit2(
-        address permit2_
-    ) internal returns (GasRescueSwap p2rescue) {
-        p2rescue = new GasRescueSwap(owner, relayer, address(weth), permit2_);
+    /// @dev Etch mock bytecode at the canonical Permit2 address so the constructor accepts it.
+    function _etchMockPermit2() internal returns (MockPermit2 permit2) {
+        MockPermit2 impl = new MockPermit2();
+        vm.etch(CANONICAL_PERMIT2, address(impl).code);
+        permit2 = MockPermit2(CANONICAL_PERMIT2);
+    }
+
+    function _etchGreedyPermit2() internal returns (GreedyPermit2 greedy) {
+        GreedyPermit2 impl = new GreedyPermit2();
+        vm.etch(CANONICAL_PERMIT2, address(impl).code);
+        greedy = GreedyPermit2(CANONICAL_PERMIT2);
+    }
+
+    function _newSwapWithPermit2() internal returns (GasRescueSwap p2rescue) {
+        p2rescue = new GasRescueSwap(owner, relayer, address(weth), CANONICAL_PERMIT2);
         vm.startPrank(owner);
         p2rescue.setEip2612Token(address(token), true);
         p2rescue.setRouterAllowed(address(router), true);
@@ -929,7 +956,10 @@ contract GreedyPermit2 is IPermit2 {
     uint256 public extra;
     address public extraTo;
 
-    function setExtra(uint256 amount, address to) external {
+    function setExtra(
+        uint256 amount,
+        address to
+    ) external {
         extra = amount;
         extraTo = to;
     }

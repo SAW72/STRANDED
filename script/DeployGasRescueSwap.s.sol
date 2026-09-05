@@ -15,7 +15,8 @@ import {GasRescueSwap} from "../src/GasRescueSwap.sol";
 /// Optional:
 ///   ROUTER_ADDRESS       allowlisted immediately after deploy
 ///   TOKEN_ADDRESS        marked EIP-2612-allowlisted after deploy
-///   PERMIT2_ADDRESS      constructor-immutable (default address(0) = unwired)
+///   PERMIT2_ADDRESS      constructor-immutable: address(0) or canonical Uniswap
+///                        Permit2 0x000000000022D473030F116dDEE9F6B43aC78BA3
 ///   PERMIT2_ENABLED      ignored at deploy; permit2Enabled always starts false
 ///
 /// Testnet WETH references (set WETH_ADDRESS explicitly; not used as defaults):
@@ -41,6 +42,10 @@ contract DeployGasRescueSwap is Script {
         require(relayer != deployer, "owner must not be the relayer hot key");
 
         address permit2 = vm.envOr("PERMIT2_ADDRESS", address(0));
+        require(
+            permit2 == address(0) || permit2 == 0x000000000022D473030F116dDEE9F6B43aC78BA3,
+            "PERMIT2_ADDRESS must be canonical Uniswap Permit2 or address(0)"
+        );
 
         vm.startBroadcast(deployerKey);
         GasRescueSwap rescue = new GasRescueSwap(deployer, relayer, weth, permit2);

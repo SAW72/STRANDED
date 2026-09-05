@@ -33,8 +33,8 @@ Native recipient field is **`nativeTo`** (not `safeRecipient`).
 
 ### Auth
 
-- EIP-2612 tokens must be owner-allowlisted (`setEip2612Token`).
-- Permit2 address is **constructor-immutable** (`address(0)` = unwired). Gated off by default (`permit2Enabled = false`). `setPermit2` reverts; owner may only toggle `setPermit2Enabled` for the frozen address. `rescueWithPermit2` reverts `NoGaslessAuth` unless enabled. The pull uses `permitWitnessTransferFrom` with the Order struct hash as witness, then requires the user's `balanceOf` drop == `amountIn`.
+- EIP-2612 tokens must be owner-allowlisted (`setEip2612Token`). Do not allowlist hostile tokens. After the pull, the user's `balanceOf` drop and the contract `tokenIn` delta must both equal `amountIn`.
+- Permit2 address is **constructor-immutable**: `address(0)` (unwired) or canonical Uniswap Permit2 `0x000000000022D473030F116dDEE9F6B43aC78BA3`. Any other constructor address reverts. Gated off by default (`permit2Enabled = false`). `setPermit2` reverts; owner may only toggle `setPermit2Enabled` for the frozen address. `rescueWithPermit2` reverts `NoGaslessAuth` unless enabled. The pull uses `permitWitnessTransferFrom` with the Order struct hash as witness, then requires the user's `balanceOf` drop == `amountIn`.
 - Non-permit tokens with Permit2 disabled fail closed. There is no “just transferFrom” path.
 
 ### Sequence (`rescueWithPermit` / `rescueWithPermit2`)
@@ -46,7 +46,7 @@ Modifiers: `nonReentrant`, `whenNotPaused`, `onlyRelayer`.
 3. `balanceOf(user) >= amountIn` else `Underfunded` — **still no nonce write**.
 4. Gasless-auth gate (`eip2612Tokens` or enabled Permit2) else `NoGaslessAuth` — **still no nonce write**.
 5. `usedNonces[user][nonce] = true`.
-6. Permit / Permit2 pull; exact balance delta (`FoTOrBalanceMismatch`).
+6. Permit / Permit2 pull; user `balanceOf` drop and contract `tokenIn` delta must equal `amountIn` (`FoTOrBalanceMismatch`).
 7. Appendix A: fee → `feeTo`; remainder ERC-20 → `to` (before swap); router must consume exactly `amountSwap`; this job's native delta → `nativeTo` ≥ `minAmountOut`; contract `tokenIn` / WETH / ETH == 0.
 
 User errors (bad sig, underfunded, wrong domain, path mismatch) do not consume the nonce. Later execution reverts roll the nonce write back.
@@ -84,7 +84,7 @@ The Relayer hot key is **not** stored in `.env`, the workspace, or any generated
 | `WETH_ADDRESS` | Required. Set per testnet; no mainnet fallback. |
 | `ROUTER_ADDRESS` | Optional post-deploy router allowlist. |
 | `TOKEN_ADDRESS` | Optional EIP-2612 allowlist. |
-| `PERMIT2_ADDRESS` | Constructor-immutable. Default `address(0)` (unwired). |
+| `PERMIT2_ADDRESS` | Constructor-immutable. `address(0)` (unwired) or canonical Uniswap Permit2. |
 | `PERMIT2_ENABLED` | Not set at deploy; `permit2Enabled` always starts `false`. |
 | `BASE_SEPOLIA_RPC_URL` | Default `https://sepolia.base.org` |
 | `ARB_SEPOLIA_RPC_URL` | Default `https://sepolia-rollup.arbitrum.io/rpc` |
@@ -125,6 +125,7 @@ src/interfaces/IGasRescue.sol
 src/mocks/…
 test/GasRescueSwap.t.sol
 test/GasRescue.t.sol
+test/audit/F5F6Audit.t.sol
 script/DeployGasRescueSwap.s.sol
 script/RescueSwap.s.sol
 script/Deploy.s.sol                # harness
