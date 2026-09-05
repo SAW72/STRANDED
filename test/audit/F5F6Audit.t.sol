@@ -20,6 +20,7 @@ contract F5F6AuditTest is Test {
     uint256 internal constant BASE_SEPOLIA_CHAIN_ID = 84_532;
     uint256 internal constant USER_PK = 0xA11CE;
     uint256 internal constant RELAYER_PK = 0xB0B;
+    address internal constant CANONICAL_PERMIT2 = 0x000000000022D473030F116dDEE9F6B43aC78BA3;
 
     bytes32 internal constant PERMIT_TYPEHASH =
         keccak256("Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)");
@@ -122,13 +123,14 @@ contract F5F6AuditTest is Test {
         vm.expectRevert(GasRescueSwap.ZeroAddress.selector);
         unwired.setPermit2Enabled(true);
 
-        GasRescueSwap wired = new GasRescueSwap(owner, relayer, address(weth), GasRescueSwap.CANONICAL_PERMIT2);
-        assertEq(address(wired.permit2()), GasRescueSwap.CANONICAL_PERMIT2);
+        GasRescueSwap wired = new GasRescueSwap(owner, relayer, address(weth), CANONICAL_PERMIT2);
+        assertEq(address(wired.permit2()), CANONICAL_PERMIT2);
+        assertEq(wired.CANONICAL_PERMIT2(), CANONICAL_PERMIT2);
         assertFalse(wired.permit2Enabled(), "Permit2 stays disabled by default");
 
         vm.prank(owner);
         vm.expectRevert(GasRescueSwap.Permit2Immutable.selector);
-        wired.setPermit2(GasRescueSwap.CANONICAL_PERMIT2, true);
+        wired.setPermit2(CANONICAL_PERMIT2, true);
 
         vm.prank(owner);
         wired.setPermit2Enabled(true);
@@ -137,7 +139,7 @@ contract F5F6AuditTest is Test {
         vm.prank(owner);
         wired.setPermit2Enabled(false);
         assertFalse(wired.permit2Enabled());
-        assertEq(address(wired.permit2()), GasRescueSwap.CANONICAL_PERMIT2, "toggle cannot retarget");
+        assertEq(address(wired.permit2()), CANONICAL_PERMIT2, "toggle cannot retarget");
     }
 
     /// @dev F-6 PoC (post-fix): allowlisted hostile EIP-2612 token delivers exact

@@ -21,6 +21,7 @@ import {ReentrantSwapToken} from "../src/mocks/ReentrantSwapToken.sol";
 contract GasRescueSwapTest is Test {
     uint256 internal constant BASE_SEPOLIA_CHAIN_ID = 84_532;
     uint256 internal constant ARB_SEPOLIA_CHAIN_ID = 421_614;
+    address internal constant CANONICAL_PERMIT2 = 0x000000000022D473030F116dDEE9F6B43aC78BA3;
     uint256 internal constant USER_PK = 0xA11CE;
     uint256 internal constant RELAYER_PK = 0xB0B;
     uint256 internal constant STRANGER_PK = 0xC0FFEE;
@@ -553,8 +554,8 @@ contract GasRescueSwapTest is Test {
     }
 
     function test_constructor_canonicalPermit2AcceptedDisabled() public {
-        GasRescueSwap wired = new GasRescueSwap(owner, relayer, address(weth), GasRescueSwap.CANONICAL_PERMIT2);
-        assertEq(address(wired.permit2()), GasRescueSwap.CANONICAL_PERMIT2);
+        GasRescueSwap wired = new GasRescueSwap(owner, relayer, address(weth), CANONICAL_PERMIT2);
+        assertEq(address(wired.permit2()), CANONICAL_PERMIT2);
         assertFalse(wired.permit2Enabled(), "Permit2 stays disabled by default");
     }
 
@@ -781,18 +782,18 @@ contract GasRescueSwapTest is Test {
     /// @dev Etch mock bytecode at the canonical Permit2 address so the constructor accepts it.
     function _etchMockPermit2() internal returns (MockPermit2 permit2) {
         MockPermit2 impl = new MockPermit2();
-        vm.etch(GasRescueSwap.CANONICAL_PERMIT2, address(impl).code);
-        permit2 = MockPermit2(GasRescueSwap.CANONICAL_PERMIT2);
+        vm.etch(CANONICAL_PERMIT2, address(impl).code);
+        permit2 = MockPermit2(CANONICAL_PERMIT2);
     }
 
     function _etchGreedyPermit2() internal returns (GreedyPermit2 greedy) {
         GreedyPermit2 impl = new GreedyPermit2();
-        vm.etch(GasRescueSwap.CANONICAL_PERMIT2, address(impl).code);
-        greedy = GreedyPermit2(GasRescueSwap.CANONICAL_PERMIT2);
+        vm.etch(CANONICAL_PERMIT2, address(impl).code);
+        greedy = GreedyPermit2(CANONICAL_PERMIT2);
     }
 
     function _newSwapWithPermit2() internal returns (GasRescueSwap p2rescue) {
-        p2rescue = new GasRescueSwap(owner, relayer, address(weth), GasRescueSwap.CANONICAL_PERMIT2);
+        p2rescue = new GasRescueSwap(owner, relayer, address(weth), CANONICAL_PERMIT2);
         vm.startPrank(owner);
         p2rescue.setEip2612Token(address(token), true);
         p2rescue.setRouterAllowed(address(router), true);
