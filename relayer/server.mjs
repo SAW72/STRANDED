@@ -373,7 +373,14 @@ const server = http.createServer(async (req, res) => {
     }
     const url = new URL(req.url || "/", "http://127.0.0.1");
     const path = url.pathname.replace(/\/+$/, "") || "/";
-    if (req.method === "GET" && (path === "/quotes" || path === "/v1/quotes" || path === "/health")) {
+    if (
+      req.method === "GET" &&
+      (path === "/" ||
+        path === "/health" ||
+        path === "/v1/health" ||
+        path === "/quotes" ||
+        path === "/v1/quotes")
+    ) {
       json(res, req, 200, await liveStatus());
       return;
     }
