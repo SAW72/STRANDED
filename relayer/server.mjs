@@ -9,13 +9,33 @@ import {
 import { privateKeyToAccount } from "viem/accounts";
 import { arbitrumSepolia } from "viem/chains";
 
-if (!process.env.RELAYER_PRIVATE_KEY) {
-  console.error("RELAYER_PRIVATE_KEY is missing — set it in the process environment. Do not read a key file.");
-  process.exit(1);
-}
 if (process.env.RELAYER_KEY_FILE || process.env.RELAYER_PRIVATE_KEY_FILE) {
   console.error("Key files are forbidden. Export RELAYER_PRIVATE_KEY in the process environment only.");
   process.exit(1);
+}
+
+function relayerPrivateKey() {
+  const raw = String(process.env.RELAYER_PRIVATE_KEY || "")
+    .trim()
+    .replace(/^['"]|['"]$/g, "");
+  if (!raw) {
+    console.error("RELAYER_PRIVATE_KEY is missing — set it in the process environment. Do not read a key file.");
+    process.exit(1);
+  }
+  const hex = raw.startsWith("0x") || raw.startsWith("0X") ? raw.slice(2) : raw;
+  if (!/^[0-9a-fA-F]+$/.test(hex)) {
+    console.error("RELAYER_PRIVATE_KEY must be hex. Do not paste an address or mnemonic.");
+    process.exit(1);
+  }
+  if (hex.length === 40) {
+    console.error("RELAYER_PRIVATE_KEY looks like an address (20 bytes). Paste the 32-byte private key.");
+    process.exit(1);
+  }
+  if (hex.length !== 64) {
+    console.error(`RELAYER_PRIVATE_KEY must be 32 bytes (64 hex chars), got ${hex.length} hex chars.`);
+    process.exit(1);
+  }
+  return /** @type {`0x${string}`} */ (`0x${hex}`);
 }
 
 const SWAP = process.env.GAS_RESCUE_SWAP_ADDRESS;
@@ -40,9 +60,7 @@ if (!SWAP || !FEE_TO || !ROUTER) {
   process.exit(1);
 }
 
-const account = privateKeyToAccount(
-  /** @type {`0x${string}`} */ (process.env.RELAYER_PRIVATE_KEY),
-);
+const account = privateKeyToAccount(relayerPrivateKey());
 
 const transport = viemHttp(RPC_URL, {
   fetchOptions: {

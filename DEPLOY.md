@@ -23,7 +23,7 @@ That creates:
 
 On **stranded-relayer-arb**:
 
-- `RELAYER_PRIVATE_KEY` — same Arb relayer key you already use locally. Paste it in Render. Never commit it.
+- `RELAYER_PRIVATE_KEY` — 32-byte hex private key of the allowlisted relayer (`0x8240…9AF6`). Include `0x` or not; the server normalizes it. Never paste the address. Never commit it.
 - `CORS_ORIGINS` — comma-separated, no trailing slash:
 
 ```
