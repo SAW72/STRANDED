@@ -1,0 +1,14 @@
+{
+  "name": "stranded-relayer-arb-sepolia",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "viem": "^2.21.0"
+  }
+}

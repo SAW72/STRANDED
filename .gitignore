@@ -19,3 +19,7 @@ coverage/
 .vscode/
 *.swp
 .DS_Store
+# Wallet frontend / Relayer
+node_modules/
+wallet/dist/
+relayer/node_modules/

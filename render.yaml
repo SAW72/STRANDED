@@ -1,0 +1,70 @@
+# Stranded on Render — wallet (static web) + Arb Sepolia Relayer (Node web).
+# After first deploy: set RELAYER_PRIVATE_KEY and CORS_ORIGINS in the dashboard.
+# Custom domain: attach it to the `stranded` static site, then add https://your.domain to CORS_ORIGINS.
+
+services:
+  - type: web
+    name: stranded
+    runtime: static
+    buildCommand: npm ci --prefix wallet && npm run build --prefix wallet
+    staticPublishPath: wallet/dist
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    headers:
+      - path: /*
+        name: X-Frame-Options
+        value: DENY
+      - path: /*
+        name: Referrer-Policy
+        value: strict-origin-when-cross-origin
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: VITE_GAS_RESCUE_ADDRESS
+        value: "0x21A1ADf810e64B5bd1d530D31abA6856b8DEf688"
+      - key: VITE_TOKEN_ADDRESS
+        value: "0xE36c35cbF0373D77D00732f7B92dB4fB8fd37166"
+      - key: VITE_GAS_RESCUE_ADDRESS_ARB_SEPOLIA
+        value: "0x65e712222745A8FCCbF038A90Fa75caB0867993D"
+      - key: VITE_TOKEN_ADDRESS_ARB_SEPOLIA
+        value: "0x5649fF51123D534044aA7E6cBc8762698Ffed713"
+      - key: VITE_RELAYER_URL_ARB_SEPOLIA
+        fromService:
+          type: web
+          name: stranded-relayer-arb
+          envVarKey: RENDER_EXTERNAL_URL
+      # Optional: live Base Sepolia Relayer (VPS). Leave unset for sample quotes on Base.
+      - key: VITE_RELAYER_URL
+        sync: false
+
+  - type: web
+    name: stranded-relayer-arb
+    runtime: node
+    plan: starter
+    rootDir: relayer
+    buildCommand: npm ci
+    startCommand: node server.mjs
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: RELAYER_PRIVATE_KEY
+        sync: false
+      - key: GAS_RESCUE_SWAP_ADDRESS
+        value: "0x65e712222745A8FCCbF038A90Fa75caB0867993D"
+      - key: TOKEN_ADDRESS
+        value: "0x5649fF51123D534044aA7E6cBc8762698Ffed713"
+      - key: ROUTER_ADDRESS
+        value: "0x680410c7f64e06EB7e80dc7B5c149f7855e225A8"
+      - key: FEE_TO
+        value: "0x30466A210961c0C2C13AF0A9d35dfC6E8858bA9D"
+      - key: CHAIN_ID
+        value: "421614"
+      - key: RPC_URL
+        value: "https://sepolia-rollup.arbitrum.io/rpc"
+      # After the static site is live, set this to:
+      # https://stranded.onrender.com,https://YOUR.DOMAIN,http://localhost:5173
+      - key: CORS_ORIGINS
+        sync: false

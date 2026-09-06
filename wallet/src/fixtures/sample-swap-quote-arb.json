@@ -1,0 +1,20 @@
+{
+  "quoteId": "sample-swap-quote-arb",
+  "chainId": 421614,
+  "tokenIn": "0x5649fF51123D534044aA7E6cBc8762698Ffed713",
+  "tokenSymbol": "GRTT",
+  "tokenDecimals": 18,
+  "user": "0x1111111111111111111111111111111111111111",
+  "amountIn": "1000000000000000000",
+  "amountSwap": "200000000000000000",
+  "feeAmount": "10000000000000000",
+  "feeTo": "0x30466A210961c0C2C13AF0A9d35dfC6E8858bA9D",
+  "to": "0x1111111111111111111111111111111111111111",
+  "nativeTo": "0x1111111111111111111111111111111111111111",
+  "minAmountOut": "1000000000000000",
+  "amountRemainder": "790000000000000000",
+  "router": "0x680410c7f64e06EB7e80dc7B5c149f7855e225A8",
+  "pathHash": "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "deadline": "1893456000",
+  "nonce": "1"
+}
