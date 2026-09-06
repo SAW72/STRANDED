@@ -24,10 +24,14 @@ function optionalAddress(raw: string): Address | null {
 }
 
 /**
- * Public Relayer origin. Prefer VITE_RELAYER_URL (design freeze).
- * RELAYER_BASE_URL / VITE_RELAYER_BASE_URL remain as aliases.
+ * Public Relayer origin for the selected testnet.
+ * Arb uses only VITE_RELAYER_URL_ARB_SEPOLIA (empty → sample quotes).
+ * Never fall back to the Base Relayer origin — that host is a different chain.
  */
-export function relayerUrl(): string {
+export function relayerUrl(chainId?: SupportedChainId): string {
+  if (chainId === ARB_SEPOLIA_CHAIN_ID) {
+    return readEnv("VITE_RELAYER_URL_ARB_SEPOLIA").replace(/\/$/, "");
+  }
   const raw =
     readEnv("VITE_RELAYER_URL") || readEnv("RELAYER_BASE_URL") || readEnv("VITE_RELAYER_BASE_URL");
   return raw.replace(/\/$/, "");
@@ -40,7 +44,6 @@ export function relayerBaseUrl(): string {
 
 export function gasRescueAddress(chainId: SupportedChainId = BASE_SEPOLIA_CHAIN_ID): Address | null {
   if (chainId === ARB_SEPOLIA_CHAIN_ID) {
-    // No Arb deploy yet — do not reuse the Base Sepolia address.
     return optionalAddress(readEnv("VITE_GAS_RESCUE_ADDRESS_ARB_SEPOLIA"));
   }
   return optionalAddress(readEnv("VITE_GAS_RESCUE_ADDRESS"));
@@ -48,7 +51,6 @@ export function gasRescueAddress(chainId: SupportedChainId = BASE_SEPOLIA_CHAIN_
 
 export function tokenAddress(chainId: SupportedChainId = BASE_SEPOLIA_CHAIN_ID): Address | null {
   if (chainId === ARB_SEPOLIA_CHAIN_ID) {
-    // No Arb deploy yet — do not reuse the Base Sepolia address.
     return optionalAddress(readEnv("VITE_TOKEN_ADDRESS_ARB_SEPOLIA"));
   }
   return optionalAddress(readEnv("VITE_TOKEN_ADDRESS"));

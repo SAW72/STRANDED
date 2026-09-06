@@ -1,10 +1,11 @@
-import { useQuery } from "@tanstack/react-query";
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { formatUnits, type Hex } from "viem";
 import {
   useAccount,
   useConnect,
   useDisconnect,
+  usePublicClient,
   useReadContract,
   useSignTypedData,
   useSwitchChain,
@@ -19,6 +20,9 @@ import {
   CHAIN_SWITCH_HINT,
   CONFIRM_HINT,
   CONFIRMED_HINT,
+  CONNECT_HINT,
+  CONNECT_LABEL,
+  CONNECTING_LABEL,
   DEADLINE_HELPER,
   DEADLINE_LABEL,
   FEE_HELPER,
@@ -26,7 +30,6 @@ import {
   FEE_TO_HELPER,
   FEE_TO_LABEL,
   FIXTURE_BANNER,
-  FIXTURE_HELP,
   MIN_OUT_HELPER,
   MIN_OUT_LABEL,
   NATIVE_TO_HELPER,
@@ -49,6 +52,9 @@ import {
   SAMPLE_BADGE,
   SIGN_LOCKED,
   SIGN_LOCKED_MISSING,
+  SUBMIT_RESCUE_ERROR,
+  SUBMITTED_RESCUE,
+  SUBMITTING_RESCUE,
   SWITCH_TO_PREFIX,
   TOKEN_HELPER,
   TOKEN_IN_HELPER,
@@ -61,13 +67,18 @@ import {
 import { CopyAddress } from "./CopyAddress";
 import { CopyValue } from "./CopyValue";
 import {
-  BASE_SEPOLIA_CHAIN_ID,
+  ARB_SEPOLIA_CHAIN_ID,
   gasRescueAddress,
   isOnSelectedChain,
   relayerUrl,
   tokenAddress,
   type SupportedChainId,
 } from "./config";
+import {
+  connectErrorMessage,
+  createConnectGuard,
+  orderWalletConnectors,
+} from "./lib/connectors";
 import { chainLabel, SUPPORTED_CHAIN_IDS, viemChain } from "./lib/chains";
 import { sampleFixtureQuote } from "./lib/fixture";
 import {
@@ -90,7 +101,20 @@ import {
   splitPermitSignature,
 } from "./lib/order";
 import { canPromptSignatures, rescuePhase } from "./lib/processGate";
+import { readLiveHoldings, readLivePermitAuth, type LiveHoldings } from "./lib/holdings";
+import { QUOTES_QUERY_KEY, quoteSessionAfterRescueSuccess } from "./lib/quoteSession";
 import { fetchRescueQuote, hasRequiredQuoteFields, type QuoteSource, type RescueQuote } from "./lib/quotes";
+import { receiptFromSubmit, type RescueReceiptView } from "./lib/receipt";
+import { submitRescue } from "./lib/rescues";
+import { RescueReceipt } from "./RescueReceipt";
+import {
+  StrandedCelebration,
+  StrandedHero,
+  isFirstRescuePending,
+  type CelebrationKind,
+} from "./StrandedCelebration";
+import { WalletPicker } from "./WalletPicker";
+import "./stranded.css";
 
 function ReviewRow({
   label,
@@ -115,22 +139,74 @@ function dashOr(value: ReactNode, ready: boolean): ReactNode {
 }
 
 export function App() {
-  const relayer = relayerUrl();
+  const [selectedChainId, setSelectedChainId] = useState<SupportedChainId>(ARB_SEPOLIA_CHAIN_ID);
+  const relayer = relayerUrl(selectedChainId);
   const useFixture = !relayer;
-  const [selectedChainId, setSelectedChainId] = useState<SupportedChainId>(BASE_SEPOLIA_CHAIN_ID);
 
   const rescue = gasRescueAddress(selectedChainId);
   const token = tokenAddress(selectedChainId);
 
   const { address, isConnected, chainId } = useAccount();
-  const { connect, connectors, isPending: isConnecting, error: connectError } = useConnect();
+  const {
+    connectAsync,
+    connectors,
+    isPending: isConnecting,
+    error: connectError,
+    reset: resetConnect,
+    variables: connectVariables,
+  } = useConnect();
   const { disconnect } = useDisconnect();
-  const { switchChain, isPending: isSwitching } = useSwitchChain();
+  const { switchChain, switchChainAsync, isPending: isSwitching } = useSwitchChain();
   const { signTypedDataAsync } = useSignTypedData();
+  const publicClient = usePublicClient({ chainId: selectedChainId });
 
   const onSelectedChain = isOnSelectedChain(chainId, selectedChainId);
-  const injected = connectors.find((c) => c.id === "injected") ?? connectors[0];
+  const walletConnectors = useMemo(() => orderWalletConnectors(connectors), [connectors]);
   const selectedViem = viemChain(selectedChainId);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [connectBusy, setConnectBusy] = useState(false);
+  const connectGuard = useRef(createConnectGuard());
+  const pendingConnectorId =
+    isConnecting && connectVariables?.connector && "id" in connectVariables.connector
+      ? connectVariables.connector.id
+      : undefined;
+  const connectInFlight = connectBusy || isConnecting;
+
+  const closePicker = useCallback(() => {
+    setPickerOpen(false);
+  }, []);
+
+  const pickWallet = useCallback(
+    async (connector: (typeof walletConnectors)[number]) => {
+      if (!connectGuard.current.tryBegin()) return;
+      setConnectBusy(true);
+      try {
+        // Do not pass chainId here: wagmi would also try to switch chain during
+        // the same connect, which MetaMask surfaces as a second permissions request.
+        // Never auto-retry on -32002: revoke + a second connectAsync stacks popups.
+        const result = await connectAsync({ connector });
+        if (result.chainId !== selectedViem.id) {
+          await switchChainAsync({ chainId: selectedViem.id }).catch(() => {
+            /* user can switch from the Connect card */
+          });
+        }
+      } catch {
+        // Error is shown from useConnect(). Unlock so the user can try again.
+      } finally {
+        connectGuard.current.end();
+        setConnectBusy(false);
+      }
+    },
+    [connectAsync, selectedViem.id, switchChainAsync],
+  );
+
+  useEffect(() => {
+    if (isConnected) {
+      connectGuard.current.end();
+      setConnectBusy(false);
+      setPickerOpen(false);
+    }
+  }, [isConnected]);
 
   const [humanAmount, setHumanAmount] = useState("");
   const [detailsConfirmed, setDetailsConfirmed] = useState(false);
@@ -142,19 +218,24 @@ export function App() {
     permitR: Hex;
     permitS: Hex;
   } | null>(null);
+  const [submitState, setSubmitState] = useState<
+    { kind: "idle" } | { kind: "posting" } | { kind: "ok"; txHash: Hex | null } | { kind: "error"; message: string }
+  >({ kind: "idle" });
+  const [receipt, setReceipt] = useState<RescueReceiptView | null>(null);
+  const [celebration, setCelebration] = useState<CelebrationKind>(null);
+  const [awaitingFreshHoldings, setAwaitingFreshHoldings] = useState(false);
+  const queryClient = useQueryClient();
+
+  useEffect(() => {
+    const play = new URLSearchParams(window.location.search).get("play");
+    if (play === "first") setCelebration("first");
+    else if (play === "1" || play === "rescue") setCelebration("rescue");
+  }, []);
 
   const { data: tokenSymbol } = useReadContract({
     address: token ?? undefined,
     abi: erc20PermitAbi,
     functionName: "symbol",
-    chainId: selectedChainId,
-    query: { enabled: Boolean(token) },
-  });
-
-  const { data: tokenName } = useReadContract({
-    address: token ?? undefined,
-    abi: erc20PermitAbi,
-    functionName: "name",
     chainId: selectedChainId,
     query: { enabled: Boolean(token) },
   });
@@ -167,29 +248,31 @@ export function App() {
     query: { enabled: Boolean(token) },
   });
 
-  const { data: balance } = useReadContract({
-    address: token ?? undefined,
-    abi: erc20PermitAbi,
-    functionName: "balanceOf",
-    args: address ? [address] : undefined,
-    chainId: selectedChainId,
-    query: { enabled: Boolean(token && address && onSelectedChain) },
-  });
-
-  const { data: permitNonce } = useReadContract({
-    address: token ?? undefined,
-    abi: erc20PermitAbi,
-    functionName: "nonces",
-    args: address ? [address] : undefined,
-    chainId: selectedChainId,
-    query: { enabled: Boolean(token && address && onSelectedChain) },
-  });
+  const [tokenBalance, setTokenBalance] = useState<bigint | undefined>();
 
   const displayDecimals = tokenDecimals ?? 18;
+
+  const refreshHoldings = useCallback(async (): Promise<LiveHoldings | undefined> => {
+    if (!publicClient || !token || !address || !onSelectedChain) return undefined;
+    // Live eth_call — wagmi/react-query cache served pre-mint / pre-rescue GRTT.
+    const next = await readLiveHoldings(publicClient, token, address);
+    setTokenBalance(next.tokenBalance);
+    return next;
+  }, [publicClient, token, address, onSelectedChain]);
+
+  useEffect(() => {
+    if (!address || !onSelectedChain || !token) {
+      setTokenBalance(undefined);
+      return;
+    }
+    void refreshHoldings();
+  }, [address, onSelectedChain, token, selectedChainId, refreshHoldings]);
+
   const requestedAmount = parseHumanAmount(humanAmount, displayDecimals);
 
   const liveEnabled = Boolean(
     !useFixture &&
+      !receipt &&
       relayer &&
       token &&
       address &&
@@ -200,14 +283,14 @@ export function App() {
 
   const quoteQuery = useQuery({
     queryKey: [
-      "quotes",
+      QUOTES_QUERY_KEY,
       relayer,
       selectedChainId,
       token,
       address,
       requestedAmount?.toString() ?? "0",
     ],
-    enabled: liveEnabled,
+    enabled: liveEnabled && !detailsConfirmed && !signing && !signed,
     queryFn: () =>
       fetchRescueQuote(relayer, {
         user: address!,
@@ -219,6 +302,9 @@ export function App() {
         slippageBps: 100,
       }),
     retry: false,
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   });
 
   const liveQuote = quoteQuery.data?.ok ? quoteQuery.data.quote : null;
@@ -257,30 +343,22 @@ export function App() {
   });
 
   useEffect(() => {
-    document.title = `GasRescue · ${chainLabel(selectedChainId)}`;
+    document.title = `Stranded · ${chainLabel(selectedChainId)}`;
   }, [selectedChainId]);
 
   useEffect(() => {
+    if (receipt) return;
     setDetailsConfirmed(false);
     setSigned(null);
     setSignError(null);
-  }, [
-    humanAmount,
-    selectedChainId,
-    quote?.amountIn,
-    quote?.amountSwap,
-    quote?.feeAmount,
-    quote?.feeTo,
-    quote?.to,
-    quote?.nativeTo,
-    quote?.quoteId,
-  ]);
+    setSubmitState({ kind: "idle" });
+  }, [humanAmount, selectedChainId, token, receipt]);
 
   const reviewDecimals = quote?.tokenDecimals ?? displayDecimals;
   const reviewSymbol = quote?.tokenSymbol;
 
   const orderNonceHint = quote?.nonce;
-  const { data: nonceUsed } = useReadContract({
+  const { data: nonceUsed, refetch: refetchNonceUsed } = useReadContract({
     address: rescue ?? undefined,
     abi: gasRescueAbi,
     functionName: "usedNonces",
@@ -289,10 +367,12 @@ export function App() {
     query: { enabled: Boolean(rescue && address && orderNonceHint !== undefined && !useFixture) },
   });
 
-  const fillMax = useCallback(() => {
-    if (balance === undefined) return;
-    setHumanAmount(formatUnits(balance, displayDecimals));
-  }, [balance, displayDecimals]);
+  const fillMax = useCallback(async () => {
+    // Live eth_call at click — cached balanceOf filled a pre-mint / pre-rescue amount.
+    const next = await refreshHoldings();
+    if (!next) return;
+    setHumanAmount(formatUnits(next.tokenBalance, displayDecimals));
+  }, [refreshHoldings, displayDecimals]);
 
   function selectChain(next: SupportedChainId) {
     setSelectedChainId(next);
@@ -303,6 +383,24 @@ export function App() {
 
   function onCancel() {
     setSignError(null);
+    if (receipt) {
+      setAwaitingFreshHoldings(true);
+      void (async () => {
+        try {
+          // Live eth_call — cached holdings after rescue quoted the old amount / nonce.
+          await refreshHoldings();
+        } finally {
+          setReceipt(null);
+          setSubmitState({ kind: "idle" });
+          setSigned(null);
+          setDetailsConfirmed(false);
+          setHumanAmount("");
+          queryClient.removeQueries({ queryKey: [QUOTES_QUERY_KEY] });
+          setAwaitingFreshHoldings(false);
+        }
+      })();
+      return;
+    }
     if (detailsConfirmed || signed) {
       setDetailsConfirmed(false);
       setSigned(null);
@@ -312,6 +410,7 @@ export function App() {
   }
 
   async function onSign() {
+    if (signing || awaitingFreshHoldings || submitState.kind === "posting") return;
     if (!canPromptSignatures(phase) || !quoteReady || !quote || !address || !token || !rescue) return;
     if (!onSelectedChain) {
       setSignError(`Switch to ${chainLabel(selectedChainId)} (${selectedChainId}) before signing.`);
@@ -322,7 +421,18 @@ export function App() {
       return;
     }
     if (quote.nonce !== undefined && nonceUsed) {
-      setSignError("Quote nonce is already used on GasRescue. Request a fresh quote.");
+      setSignError("Quote nonce is already used on Stranded. Request a fresh quote.");
+      return;
+    }
+    if (tokenBalance !== undefined && quote.amountIn > tokenBalance) {
+      setSignError(
+        "Amount is larger than the token balance in this wallet. Lower the amount and request a fresh quote.",
+      );
+      return;
+    }
+
+    if (!publicClient) {
+      setSignError("RPC is not ready. Switch to Arb Sepolia and try again.");
       return;
     }
 
@@ -330,6 +440,8 @@ export function App() {
     setSigning(true);
     setSignError(null);
     try {
+      // Live name() + nonces() — cached "MockERC20Permit" / spent nonce → ERC2612InvalidSigner 0x4b800e46.
+      const permitAuth = await readLivePermitAuth(publicClient, token, address);
       const orderSignature = await signTypedDataAsync({
         domain: gasRescueDomain(rescue, selectedChainId),
         types: ORDER_TYPES,
@@ -337,14 +449,14 @@ export function App() {
         message: order,
       });
       const permitSignature = await signTypedDataAsync({
-        domain: permitDomain(tokenName ?? "MockERC20Permit", token, selectedChainId),
+        domain: permitDomain(permitAuth.tokenName, token, selectedChainId),
         types: PERMIT_TYPES,
         primaryType: "Permit",
         message: {
           owner: address,
           spender: rescue,
           value: order.amountIn,
-          nonce: permitNonce ?? 0n,
+          nonce: permitAuth.permitNonce,
           deadline: order.deadline,
         },
       });
@@ -355,30 +467,70 @@ export function App() {
         permitR: permit.r,
         permitS: permit.s,
       });
+      let postedOk = useFixture || !relayer;
+      if (relayer && !useFixture) {
+        setSubmitState({ kind: "posting" });
+        const submitted = await submitRescue(relayer, {
+          chainId: selectedChainId,
+          order,
+          orderSignature,
+          permitV: permit.v,
+          permitR: permit.r,
+          permitS: permit.s,
+          swapData: quote.swapData,
+        });
+        if (submitted.ok) {
+          const nextReceipt = receiptFromSubmit(quote, submitted);
+          if (nextReceipt) setReceipt(nextReceipt);
+          postedOk = true;
+          console.info("[rescue] submit ok", submitted.txHash);
+          // Spent Order (nonce/sig/minOut/deadline) must not linger — UsedNonce on replay.
+          const cleared = quoteSessionAfterRescueSuccess();
+          setSigned(cleared.signed);
+          setDetailsConfirmed(cleared.detailsConfirmed);
+          setSignError(cleared.signError);
+          setSubmitState({ kind: "ok", txHash: submitted.txHash });
+          queryClient.removeQueries({ queryKey: [QUOTES_QUERY_KEY] });
+          setAwaitingFreshHoldings(true);
+          await Promise.all([refreshHoldings(), refetchNonceUsed()]);
+          setAwaitingFreshHoldings(false);
+        } else {
+          setSubmitState({ kind: "error", message: submitted.reason });
+          setSigned(null);
+          postedOk = false;
+          console.error("[rescue] submit failed", submitted.reason);
+        }
+      }
+      if (postedOk) {
+        setCelebration(isFirstRescuePending() ? "first" : "rescue");
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : "Signature rejected.";
+      console.error("[rescue] sign/submit threw", error);
       setSignError(message);
+      setSigned(null);
     } finally {
       setSigning(false);
+      setAwaitingFreshHoldings(false);
     }
   }
 
   const configProblems = useMemo(() => {
     const issues: string[] = [];
-    if (!rescue) issues.push("VITE_GAS_RESCUE_ADDRESS is missing or not an address.");
-    if (!token) issues.push("VITE_TOKEN_ADDRESS is missing or not an address.");
-    if (!relayer) issues.push("VITE_RELAYER_URL is missing — sample quote mode is available.");
+    const onArb = selectedChainId === ARB_SEPOLIA_CHAIN_ID;
+    const rescueVar = onArb ? "VITE_GAS_RESCUE_ADDRESS_ARB_SEPOLIA" : "VITE_GAS_RESCUE_ADDRESS";
+    const tokenVar = onArb ? "VITE_TOKEN_ADDRESS_ARB_SEPOLIA" : "VITE_TOKEN_ADDRESS";
+    const relayerVar = onArb ? "VITE_RELAYER_URL_ARB_SEPOLIA" : "VITE_RELAYER_URL";
+    if (!rescue) issues.push(`${rescueVar} is missing or not an address.`);
+    if (!token) issues.push(`${tokenVar} is missing or not an address.`);
+    if (!relayer) issues.push(`${relayerVar} is missing — sample quote mode is available.`);
     return issues;
-  }, [rescue, token, relayer]);
+  }, [rescue, token, relayer, selectedChainId]);
 
   return (
     <main className="app">
-      <p className="eyebrow">Scout #1 · testnet only</p>
-      <h1>GasRescue wallet</h1>
-      <p className="lede">
-        Swap a slice of stranded tokens for native gas, then move the rest out. Base Sepolia or Arb
-        Sepolia — pick one. Mainnet is not available.
-      </p>
+      <StrandedCelebration kind={celebration} onDone={() => setCelebration(null)} />
+      <StrandedHero onPlay={() => setCelebration("rescue")} />
 
       <section className="card">
         <h2>1. Network</h2>
@@ -409,12 +561,15 @@ export function App() {
             <button
               className="btn btn-primary"
               type="button"
-              disabled={!injected || isConnecting}
-              onClick={() => injected && connect({ connector: injected, chainId: selectedViem.id })}
+              data-testid="connect-wallet"
+              disabled={connectInFlight && !connectError}
+              onClick={() => {
+                setPickerOpen(true);
+              }}
             >
-              {isConnecting ? "Connecting…" : "Connect wallet"}
+              {connectInFlight ? CONNECTING_LABEL : CONNECT_LABEL}
             </button>
-            <span className="muted">Injected wallet (MetaMask / Rabby / Coinbase).</span>
+            <span className="muted">{CONNECT_HINT}</span>
           </div>
         ) : (
           <div className="row">
@@ -437,8 +592,23 @@ export function App() {
             </button>
           </div>
         )}
-        {connectError && <p className="danger">{connectError.message}</p>}
+        {connectError && !pickerOpen && <p className="danger">{connectErrorMessage(connectError)}</p>}
       </section>
+
+      <WalletPicker
+        open={pickerOpen}
+        connectors={walletConnectors}
+        pendingId={pendingConnectorId}
+        busy={connectInFlight}
+        error={connectError ? connectErrorMessage(connectError) : null}
+        onPick={pickWallet}
+        onClose={closePicker}
+        onRetry={() => {
+          connectGuard.current.end();
+          setConnectBusy(false);
+          resetConnect();
+        }}
+      />
 
       <section className="card">
         <h2>3. Stranded token</h2>
@@ -447,8 +617,8 @@ export function App() {
           <dd>{token ? `${tokenSymbol ?? "Token"} · ${shortenAddress(token)}` : "not configured"}</dd>
           <dt>Balance</dt>
           <dd>
-            {balance !== undefined
-              ? formatTokenAmount(balance, displayDecimals)
+            {tokenBalance !== undefined
+              ? formatTokenAmount(tokenBalance, displayDecimals)
               : isConnected && onSelectedChain
                 ? "Reading…"
                 : `Connect on ${chainLabel(selectedChainId)} to read the on-chain balance.`}
@@ -470,11 +640,18 @@ export function App() {
             not invent a Relayer price.
           </p>
         )}
-        <button className="btn" type="button" disabled={balance === undefined || useFixture} onClick={fillMax}>
+        <button className="btn" type="button" disabled={tokenBalance === undefined || useFixture} onClick={() => void fillMax()}>
           Use full balance
         </button>
       </section>
 
+      {receipt ? (
+        <RescueReceipt
+          receipt={receipt}
+          onDone={awaitingFreshHoldings ? undefined : onCancel}
+        />
+      ) : (
+      <>
       <section className="card">
         <h2>4. {REVIEW_TITLE}</h2>
         <p className="subtitle">{REVIEW_SUBTITLE}</p>
@@ -620,10 +797,9 @@ export function App() {
                 {TRY_AGAIN_LABEL}
               </button>
             </div>
-            <p className="review-help">{FIXTURE_HELP}</p>
           </div>
         )}
-        {quoteStatus.kind === "idle" && !useFixture && <p className="muted">{quoteStatus.message}</p>}
+        {quoteStatus.kind === "idle" && <p className="muted">{quoteStatus.message}</p>}
 
         <p className="trust-line">{REVIEW_TRUST_LINE}</p>
 
@@ -655,8 +831,8 @@ export function App() {
       <section className="card">
         <h2>5. Sign</h2>
         <p className="muted">
-          Your wallet will ask you to sign twice: the StewardGasRescue Order (swap-for-gas +
-          move-out), then the token permit. Domain name StewardGasRescue, version 1.
+          Your wallet will ask you to sign twice: the Stranded order (swap-for-gas + move-out),
+          then the token permit. MetaMask will show domain StewardGasRescue, version 1.
         </p>
         {quoteSource === "fixture" && (
           <p className="warn">
@@ -666,10 +842,22 @@ export function App() {
         <button
           className="btn btn-primary"
           type="button"
-          disabled={!canPromptSignatures(phase) || signing || !quoteReady}
+          disabled={
+            !canPromptSignatures(phase) ||
+            signing ||
+            !quoteReady ||
+            awaitingFreshHoldings ||
+            submitState.kind === "posting"
+          }
           onClick={onSign}
         >
-          {signing ? "Waiting for signatures…" : "Sign Order and permit"}
+          {submitState.kind === "posting"
+            ? SUBMITTING_RESCUE
+            : awaitingFreshHoldings
+              ? "Rescued — fetching new quote…"
+              : signing
+                ? "Waiting for signatures…"
+                : "Sign Order and permit"}
         </button>
         {!canPromptSignatures(phase) && (
           <div className="banner banner-block">{quoteReady ? SIGN_LOCKED : SIGN_LOCKED_MISSING}</div>
@@ -677,11 +865,31 @@ export function App() {
         {signError && <p className="danger">{signError}</p>}
         {signed && (
           <div className="banner banner-ok">
-            <p>Signatures captured. Submit them with your Relayer — this UI does not broadcast.</p>
+            <p>
+              {useFixture
+                ? "Stranded did it! Sample signatures only — this UI does not send them to the Relayer."
+                : submitState.kind === "posting"
+                  ? SUBMITTING_RESCUE
+                  : submitState.kind === "ok"
+                    ? SUBMITTED_RESCUE
+                    : "Stranded did it! Signatures are ready."}
+            </p>
+            {submitState.kind === "ok" && submitState.txHash ? (
+              <p className="mono">{submitState.txHash}</p>
+            ) : null}
             <pre className="sig">{JSON.stringify(signed, null, 2)}</pre>
           </div>
         )}
+        {submitState.kind === "error" && (
+          <div className="banner banner-block" role="alert">
+            <p className="danger">
+              {SUBMIT_RESCUE_ERROR} {submitState.message}
+            </p>
+          </div>
+        )}
       </section>
+      </>
+      )}
 
       {configProblems.length > 0 && (
         <p className="footer-note">

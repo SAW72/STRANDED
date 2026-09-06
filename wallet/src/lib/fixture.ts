@@ -18,6 +18,16 @@ export const BASE_SEPOLIA_DEPLOY = {
   router: "0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4",
 } as const;
 
+/** Arb Sepolia (421614) live deploy — fixtures pin these addrs; quotes stay fixture-only unless Relayer URL is set. */
+export const ARB_SEPOLIA_DEPLOY = {
+  chainId: ARB_SEPOLIA_CHAIN_ID,
+  tokenIn: "0x5649fF51123D534044aA7E6cBc8762698Ffed713",
+  tokenSymbol: "GRTT",
+  feeTo: "0x30466A210961c0C2C13AF0A9d35dfC6E8858bA9D",
+  gasRescue: "0x65e712222745A8FCCbF038A90Fa75caB0867993D",
+  router: "0x680410c7f64e06EB7e80dc7B5c149f7855e225A8",
+} as const;
+
 /** Relayer dry-mock amounts: 1e18 in, 0.2e18 swap, 0.01e18 fee, 0.79e18 remainder. */
 export const RELAYER_DRY_AMOUNTS = {
   amountIn: 10n ** 18n,

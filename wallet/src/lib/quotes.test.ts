@@ -58,6 +58,12 @@ describe("parseQuoteResponse", () => {
     expect(quote?.nativeTo).toBe(NATIVE_TO);
     expect(quote?.tokenSymbol).toBe("mPERMIT");
     expect(quote?.pathHash).toBe(PATH);
+    expect(quote?.amountOut).toBeUndefined();
+  });
+
+  it("keeps optional amountOut when the Relayer sends it", () => {
+    const quote = parseQuoteResponse({ ...validBody, amountOut: "100000000000000" });
+    expect(quote?.amountOut).toBe(10n ** 14n);
   });
 
   it("unwraps { quote } and { quotes: [] }", () => {
@@ -208,6 +214,17 @@ describe("fetchRescueQuote POST /v1/quotes", () => {
     const result = await fetchRescueQuote("http://relayer.test", params, fetchImpl);
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.reason).toMatch(/HTTP 404/);
+  });
+
+  it("surfaces insufficient_balance from the Relayer", async () => {
+    const fetchImpl: typeof fetch = async () =>
+      new Response(JSON.stringify({ ok: false, error: "insufficient_balance" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
+    const result = await fetchRescueQuote("http://relayer.test", params, fetchImpl);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toMatch(/token balance/i);
   });
 
   it("fails closed when the body is the old fee-skim shape", async () => {

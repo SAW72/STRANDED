@@ -16,11 +16,13 @@ export type RescueQuote = {
   to: Address;
   nativeTo: Address;
   minAmountOut: bigint;
+  amountOut?: bigint;
   amountRemainder: bigint;
   router: Address;
   pathHash: Hex;
   deadline: bigint;
   nonce: bigint;
+  swapData?: Hex;
 };
 
 export type QuoteSource = "relayer" | "fixture";
@@ -143,6 +145,13 @@ function readPathHash(value: unknown): Hex | null {
   return trimmed;
 }
 
+function readBytes(value: unknown): Hex | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!isHex(trimmed) || trimmed.length < 4 || trimmed.length % 2 !== 0) return null;
+  return trimmed;
+}
+
 function readQuoteId(value: unknown): string | null {
   if (typeof value === "string" && value.trim().length > 0) return value.trim();
   if (typeof value === "number" && Number.isFinite(value)) return String(value);
@@ -248,6 +257,7 @@ export function parseQuoteResponse(data: unknown): RescueQuote | null {
   const to = readAddress(raw.to);
   const nativeTo = readAddress(raw.nativeTo);
   const minAmountOut = readBigInt(raw.minAmountOut);
+  const amountOut = raw.amountOut === undefined || raw.amountOut === null ? null : readBigInt(raw.amountOut);
   const amountRemainder = readBigInt(raw.amountRemainder);
   const router = readAddress(raw.router);
   const pathHash = readPathHash(raw.pathHash);
@@ -302,6 +312,13 @@ export function parseQuoteResponse(data: unknown): RescueQuote | null {
     deadline,
     nonce,
   };
+  if (amountOut !== null) quote.amountOut = amountOut;
+
+  if (raw.swapData !== undefined && raw.swapData !== null && raw.swapData !== "") {
+    const swapData = readBytes(raw.swapData);
+    if (!swapData) return null;
+    quote.swapData = swapData;
+  }
 
   if (!eip712Agrees(raw, quote)) return null;
   return quote;
@@ -341,7 +358,7 @@ export function quoteRequestBody(params: QuoteRequest): Record<string, string | 
 /**
  * Fetch a quote from Relayer POST /v1/quotes.
  * Fail closed: empty base URL, HTTP error, or unparsable body → not ok.
- * Never synthesizes a live quote. Fixtures are used only when VITE_RELAYER_URL is unset.
+ * Never synthesizes a live quote. Fixtures are used only when that chain’s Relayer URL is unset.
  */
 export async function fetchRescueQuote(
   relayerBase: string,
@@ -371,6 +388,21 @@ export async function fetchRescueQuote(
   }
 
   if (!response.ok) {
+    let err = "";
+    try {
+      const failed = await response.json();
+      if (failed && typeof failed === "object" && !Array.isArray(failed) && "error" in failed) {
+        err = String((failed as { error: unknown }).error);
+      }
+    } catch {
+      err = "";
+    }
+    if (err === "insufficient_balance") {
+      return {
+        ok: false,
+        reason: "Amount is larger than this wallet's token balance. Lower the amount for a fresh quote.",
+      };
+    }
     return {
       ok: false,
       reason: `Relayer POST /v1/quotes returned HTTP ${response.status}. Signing is blocked.`,

@@ -5,6 +5,7 @@ import sampleArb from "../fixtures/sample-swap-quote-arb.json";
 import sampleBase from "../fixtures/sample-swap-quote.json";
 import { ARB_SEPOLIA_CHAIN_ID, BASE_SEPOLIA_CHAIN_ID } from "./chains";
 import {
+  ARB_SEPOLIA_DEPLOY,
   BASE_SEPOLIA_DEPLOY,
   MOCK_QUOTES_RESPONSE_ARB,
   MOCK_QUOTES_RESPONSE_BASE,
@@ -22,7 +23,7 @@ describe("Relayer dry-mock fixtures", () => {
     expect(base?.chainId).toBe(84532);
     expect(arb?.chainId).toBe(421614);
     expect(base?.tokenSymbol).toBe("mPERMIT");
-    expect(arb?.tokenSymbol).toBe("mPERMIT");
+    expect(arb?.tokenSymbol).toBe("GRTT");
     expect(base?.amountIn).toBe(RELAYER_DRY_AMOUNTS.amountIn);
     expect(base?.amountSwap).toBe(RELAYER_DRY_AMOUNTS.amountSwap);
     expect(base?.feeAmount).toBe(RELAYER_DRY_AMOUNTS.feeAmount);
@@ -33,7 +34,9 @@ describe("Relayer dry-mock fixtures", () => {
     expect(base?.feeTo).toBe(BASE_SEPOLIA_DEPLOY.feeTo);
     expect(base?.router).toBe(BASE_SEPOLIA_DEPLOY.router);
     expect(base?.chainId).toBe(84532);
-    // Arb fixtures stay placeholders — do not invent an Arb deploy.
+    expect(arb?.tokenIn).toBe(ARB_SEPOLIA_DEPLOY.tokenIn);
+    expect(arb?.feeTo).toBe(ARB_SEPOLIA_DEPLOY.feeTo);
+    expect(arb?.router).toBe(ARB_SEPOLIA_DEPLOY.router);
     expect(arb?.tokenIn).not.toBe(BASE_SEPOLIA_DEPLOY.tokenIn);
     expect(arb?.router).not.toBe(BASE_SEPOLIA_DEPLOY.router);
     expect(base).not.toHaveProperty("safeRecipient");
@@ -49,6 +52,7 @@ describe("Relayer dry-mock fixtures", () => {
     expect(mockBase.eip712.domain.name).toBe("StewardGasRescue");
     expect(mockBase.eip712.domain.verifyingContract).toBe(BASE_SEPOLIA_DEPLOY.gasRescue);
     expect(mockArb.eip712.domain.version).toBe("1");
+    expect(mockArb.eip712.domain.verifyingContract).toBe(ARB_SEPOLIA_DEPLOY.gasRescue);
     expect(mockArb.eip712.domain.verifyingContract).not.toBe(BASE_SEPOLIA_DEPLOY.gasRescue);
     expect(mockBase.eip712.types.Order.map((field) => field.name)).not.toContain("safeRecipient");
     expect(MOCK_QUOTES_RESPONSE_BASE.quoteId).toMatch(/base/);
@@ -60,6 +64,8 @@ describe("Relayer dry-mock fixtures", () => {
     const arb = sampleFixtureQuote({ chainId: ARB_SEPOLIA_CHAIN_ID });
     expect(base.chainId).toBe(84532);
     expect(arb.chainId).toBe(421614);
+    expect(arb.tokenSymbol).toBe("GRTT");
+    expect(arb.tokenIn).toBe(ARB_SEPOLIA_DEPLOY.tokenIn);
     expect(base.amountIn).toBe(arb.amountIn);
     expect(displayBeforeConfirm(base).nativeTo).toBe(base.nativeTo);
     expect(String(sampleFixtureRaw().quoteId)).toMatch(/mock|sample/i);

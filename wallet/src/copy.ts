@@ -18,17 +18,17 @@ export const AMOUNT_SWAP_HELPER =
 export const REMAINDER_LABEL = "Remainder";
 export const REMAINDER_HELPER = "Tokens left after the swap slice and the rescue fee.";
 
-export const REMAINDER_TO_LABEL = "Remainder goes to";
-export const REMAINDER_TO_HELPER = "Where the leftover tokens are sent after the rescue.";
+export const REMAINDER_TO_LABEL = "Remainder destination";
+export const REMAINDER_TO_HELPER = "Destination for leftover tokens after the rescue.";
 
 export const FEE_LABEL = "Rescue fee";
 export const FEE_HELPER = "Paid in your stranded tokens to the operator, as shown on this quote.";
 
-export const FEE_TO_LABEL = "Fee goes to";
-export const FEE_TO_HELPER = "The address that receives the rescue fee.";
+export const FEE_TO_LABEL = "Fee destination";
+export const FEE_TO_HELPER = "Destination that receives the rescue fee.";
 
-export const NATIVE_TO_LABEL = "Native gas to";
-export const NATIVE_TO_HELPER = "Where the native gas from the swap is delivered.";
+export const NATIVE_TO_LABEL = "Native gas destination";
+export const NATIVE_TO_HELPER = "Destination for native gas from the swap.";
 
 export const MIN_OUT_LABEL = "Min native out";
 export const MIN_OUT_HELPER =
@@ -78,6 +78,30 @@ export const CONFIRM_HINT = "Confirm these details before any wallet signature."
 export const CONFIRMED_HINT = "Details confirmed. You can sign next.";
 export const SIGN_LOCKED = "Confirm the details above before you can sign.";
 export const SIGN_LOCKED_MISSING = "A complete rescue quote is required before you can sign.";
+export const SUBMITTING_RESCUE = "Sending the signed rescue to the Relayer…";
+export const SUBMITTED_RESCUE = "Relayer has the signed rescue.";
+export const SUBMIT_RESCUE_ERROR = "Couldn’t send the signed rescue to the Relayer.";
+
+export const RECEIPT_TITLE = "Rescue complete";
+export const RECEIPT_SUBTITLE =
+  "The rescue is on-chain. Tokens moved; native gas was delivered.";
+export const TX_HASH_LABEL = "Transaction";
+export const TX_HASH_HELPER = "The on-chain receipt for this rescue.";
+export const GAS_RECEIVED_LABEL = "Gas received";
+export const GAS_RECEIVED_HELPER = "Native gas this rescue delivered from the swap.";
+export const ANOTHER_RESCUE_LABEL = "Start another rescue";
+
+export const CONNECT_LABEL = "Connect wallet";
+export const CONNECTING_LABEL = "Connecting…";
+export const PICK_WALLET_TITLE = "Choose a wallet";
+export const PICK_WALLET_HELP =
+  "Pick the wallet you want to use. Every wallet installed in this browser is listed.";
+export const BROWSER_WALLET_LABEL = "Browser wallet";
+export const NO_WALLET_FOUND =
+  "No browser wallet found. Install MetaMask, Phantom, or another wallet, then refresh.";
+export const CONNECT_HINT = "MetaMask, Phantom, or any other wallet installed in this browser.";
+export const METAMASK_PENDING_HINT =
+  "MetaMask is waiting in the Chrome toolbar. Click the fox icon, approve or reject, then pick MetaMask again.";
 
 export const CANCEL_LABEL = "Cancel";
 export const TRY_AGAIN_LABEL = "Try again";

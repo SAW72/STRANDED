@@ -4,17 +4,23 @@ import {
   AMOUNT_LABEL,
   AMOUNT_SWAP_HELPER,
   AMOUNT_SWAP_LABEL,
+  BROWSER_WALLET_LABEL,
+  CONNECT_HINT,
   FEE_HELPER,
   FEE_LABEL,
   FEE_TO_HELPER,
   FEE_TO_LABEL,
   FIXTURE_BANNER,
+  GAS_RECEIVED_LABEL,
   MIN_OUT_LABEL,
   NATIVE_TO_LABEL,
+  PICK_WALLET_TITLE,
+  RECEIPT_TITLE,
   REMAINDER_TO_LABEL,
   REVIEW_SUBTITLE,
   REVIEW_TRUST_LINE,
   SAMPLE_BADGE,
+  TX_HASH_LABEL,
 } from "./copy";
 
 const surface = [
@@ -33,16 +39,19 @@ const surface = [
   MIN_OUT_LABEL,
   FIXTURE_BANNER,
   SAMPLE_BADGE,
+  RECEIPT_TITLE,
+  TX_HASH_LABEL,
+  GAS_RECEIVED_LABEL,
 ].join(" ");
 
 describe("review-screen copy", () => {
   it("uses human labels for swap-for-gas + move-out", () => {
     expect(AMOUNT_LABEL).toBe("Amount to rescue");
     expect(AMOUNT_SWAP_LABEL).toBe("Amount swapped for gas");
-    expect(REMAINDER_TO_LABEL).toBe("Remainder goes to");
+    expect(REMAINDER_TO_LABEL).toBe("Remainder destination");
     expect(FEE_LABEL).toBe("Rescue fee");
-    expect(FEE_TO_LABEL).toBe("Fee goes to");
-    expect(NATIVE_TO_LABEL).toBe("Native gas to");
+    expect(FEE_TO_LABEL).toBe("Fee destination");
+    expect(NATIVE_TO_LABEL).toBe("Native gas destination");
     expect(MIN_OUT_LABEL).toBe("Min native out");
     expect(AMOUNT_LABEL).not.toBe("amountIn");
     expect(FEE_LABEL).not.toMatch(/feeAmount/);
@@ -67,5 +76,14 @@ describe("review-screen copy", () => {
     expect(surface).not.toMatch(/\bfeeAmount\b/);
     expect(surface).not.toMatch(/\bnativeTo\b/);
     expect(surface).not.toMatch(/safeRecipient/i);
+  });
+});
+
+describe("wallet picker copy", () => {
+  it("does not tell the user to use a generic Injected connector", () => {
+    expect(PICK_WALLET_TITLE).toBe("Choose a wallet");
+    expect(CONNECT_HINT.toLowerCase()).toMatch(/metamask/);
+    expect(CONNECT_HINT.toLowerCase()).toMatch(/phantom/);
+    expect(`${CONNECT_HINT} ${BROWSER_WALLET_LABEL}`).not.toMatch(/\bInjected\b/);
   });
 });

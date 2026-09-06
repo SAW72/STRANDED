@@ -11,9 +11,10 @@ broadcast/
 !.env.example
 !**/.env.example
 
-# Wallet frontend
+# Wallet frontend / Relayer
 node_modules/
 wallet/dist/
+relayer/node_modules/
 
 # Coverage
 lcov.info
