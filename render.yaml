@@ -1,9 +1,11 @@
-# Stranded on Render — wallet (static) + Arb Sepolia Relayer (web).
+# Stranded on Render — wallet (static web) + Arb Sepolia Relayer (Node web).
 # After first deploy: set RELAYER_PRIVATE_KEY and CORS_ORIGINS in the dashboard.
 # Custom domain: attach it to the `stranded` static site, then add https://your.domain to CORS_ORIGINS.
 
-staticSites:
-  - name: stranded
+services:
+  - type: web
+    name: stranded
+    runtime: static
     buildCommand: npm ci --prefix wallet && npm run build --prefix wallet
     staticPublishPath: wallet/dist
     routes:
@@ -37,7 +39,6 @@ staticSites:
       - key: VITE_RELAYER_URL
         sync: false
 
-services:
   - type: web
     name: stranded-relayer-arb
     runtime: node
