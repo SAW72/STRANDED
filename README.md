@@ -132,10 +132,19 @@ script/Deploy.s.sol                # harness
 script/Rescue.s.sol                # harness
 ```
 
-## Out of scope (this slice)
+## Live (testnet)
 
-- Wallet UX / frontend (separate PR)
-- Relayer TypeScript service
+**Relayer (Arb Sepolia):** https://stranded-relayer-arb.onrender.com — live quotes/signing (`stubRpc=false`). Hot wallet `0x8240124dc78a27c80354Ca813Df12aa2888A9AF6`. Runtime `RELAYER_PRIVATE_KEY` only (never disk).
+
+| Chain | GasRescueSwap | Mock / notes |
+| --- | --- | --- |
+| Arb Sepolia `421614` | [`0x65e712222745A8FCCbF038A90Fa75caB0867993D`](https://sepolia.arbiscan.io/address/0x65e712222745A8FCCbF038A90Fa75caB0867993D) | Mock gMOCK `0x30006e29a23c713070136F56db1BDf2A8B82B318`; router `0x680410c7f64e06eb7e80dc7b5c149f7855e225a8`; WETH `0x980B62Da83eFf3D4576C647993b0c1D7faf17c73` |
+| Base Sepolia `84532` | [`0x21A1ADf810e64B5bd1d530D31abA6856b8DEf688`](https://sepolia.basescan.org/address/0x21A1ADf810e64B5bd1d530D31abA6856b8DEf688) | Mock `0xE36c35cbF0373D77D00732f7B92dB4fB8fd37166`; router `0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4`; WETH `0x4200000000000000000000000000000000000006` |
+
+Permit2 stays **disabled** on both deploys. Owner `0x30466A210961c0C2C13AF0A9d35dfC6E8858bA9D`. Demo video: YouTube link TBD.
+
+## Still out of scope
+
 - Bridge / cross-chain move-out
 - Mainnet, token launch, paid firm-audit packaging
 
