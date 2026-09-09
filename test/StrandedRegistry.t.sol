@@ -9,16 +9,22 @@ import {MockERC20} from "../src/mocks/MockERC20.sol";
 contract StrandedRegistryTest is Test {
     StrandedRegistry registry;
     MockERC20 token;
-    address owner = address(0xA11CE);
-    address poster = address(0xB0B);
-    address holder = address(0xH0LD);
-    address rescuer = address(0xC0DE);
-    address gasRescueSwap = address(0x5WAP);
+    address owner;
+    address poster;
+    address holder;
+    address rescuer;
+    address gasRescueSwap;
 
     uint256 constant ARB_SEPOLIA = 421_614;
     uint256 constant BOND = 0.001 ether;
 
     function setUp() public {
+        owner = makeAddr("owner");
+        poster = makeAddr("poster");
+        holder = makeAddr("holder");
+        rescuer = makeAddr("rescuer");
+        gasRescueSwap = makeAddr("gasRescueSwap");
+
         vm.chainId(ARB_SEPOLIA);
         registry = new StrandedRegistry(owner, gasRescueSwap);
         token = new MockERC20("MockUSDC", "mUSDC", 6);
