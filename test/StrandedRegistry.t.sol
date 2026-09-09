@@ -27,7 +27,7 @@ contract StrandedRegistryTest is Test {
 
         vm.chainId(ARB_SEPOLIA);
         registry = new StrandedRegistry(owner, gasRescueSwap);
-        token = new MockERC20("MockUSDC", "mUSDC", 6);
+        token = new MockERC20("MockUSDC", "mUSDC");
         vm.deal(poster, 1 ether);
         vm.deal(rescuer, 1 ether);
     }

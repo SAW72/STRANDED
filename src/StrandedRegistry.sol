@@ -11,7 +11,6 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 import {IStrandedRegistry} from "./interfaces/IStrandedRegistry.sol";
-import {IGasRescueSwap} from "./interfaces/IGasRescueSwap.sol";
 
 /// @title StrandedRegistry
 /// @notice Phase-2 thin registry: permissionless index of *known* stranded ERC-20
@@ -39,12 +38,12 @@ contract StrandedRegistry is IStrandedRegistry, Ownable2Step, Pausable, Reentran
     /// @dev Minimum posting bond to deter spam (refundable on valid claim).
     uint256 public constant MIN_BOND = 0.001 ether;
 
-    IGasRescueSwap public immutable gasRescueSwap;
+    address public immutable gasRescueSwap;
 
     uint256 public finderFeeBps = DEFAULT_FINDER_FEE_BPS;
     uint256 public minBond = MIN_BOND;
 
-    mapping(bytes32 findKey => Find) public finds;
+    mapping(bytes32 findKey => Find) private _finds;
     mapping(bytes32 findKey => bool) public claimed;
     mapping(address poster => uint256) public posterBond;
     mapping(address => uint256) public posterNonce;
@@ -83,21 +82,14 @@ contract StrandedRegistry is IStrandedRegistry, Ownable2Step, Pausable, Reentran
     error InvalidSignature();
     error TransferFailed();
 
-    struct Find {
-        address poster;
-        address holder;
-        address token;
-        uint256 amount;
-        uint256 bounty; // 0 = no bounty; paid by poster at claim time
-        uint256 chainId;
-        uint256 deadline;
-        uint256 nonce;
-        uint256 registeredAt;
-    }
-
     constructor(address initialOwner, address gasRescueSwap_) Ownable(initialOwner) EIP712("StrandedRegistry", "1") {
         if (initialOwner == address(0) || gasRescueSwap_ == address(0)) revert ZeroAddress();
-        gasRescueSwap = IGasRescueSwap(gasRescueSwap_);
+        gasRescueSwap = gasRescueSwap_;
+    }
+
+    /// @inheritdoc IStrandedRegistry
+    function finds(bytes32 findKey) external view returns (Find memory) {
+        return _finds[findKey];
     }
 
     receive() external payable {}
@@ -142,11 +134,11 @@ contract StrandedRegistry is IStrandedRegistry, Ownable2Step, Pausable, Reentran
 
         uint256 nonce = posterNonce[msg.sender]++;
         findKey = keccak256(abi.encode(msg.sender, holder, token, chainId, nonce));
-        if (finds[findKey].registeredAt != 0) revert InvalidFind(); // collision (should not happen)
+        if (_finds[findKey].registeredAt != 0) revert InvalidFind(); // collision (should not happen)
 
         posterBond[msg.sender] += msg.value;
 
-        finds[findKey] = Find({
+        _finds[findKey] = Find({
             poster: msg.sender,
             holder: holder,
             token: token,
@@ -172,7 +164,7 @@ contract StrandedRegistry is IStrandedRegistry, Ownable2Step, Pausable, Reentran
         bytes32 findKey,
         address rescuer
     ) external nonReentrant whenNotPaused {
-        Find storage f = finds[findKey];
+        Find storage f = _finds[findKey];
         if (f.registeredAt == 0) revert FindNotFound();
         if (claimed[findKey]) revert AlreadyClaimed();
         if (block.timestamp > f.deadline) revert ExpiredDeadline();
