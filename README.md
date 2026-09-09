@@ -1,4 +1,4 @@
-# GasRescue (Scout #1)
+Stranded
 
 **Product:** `GasRescueSwap` — stranded token → swap a slice for native gas → same-chain move-out of the remainder.
 
