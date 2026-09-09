@@ -59,10 +59,6 @@ contract StrandedRegistryTest is Test {
 
     function test_registerFind_revertsOnLowBond() public {
         vm.prank(poster);
-        vm.expectRevert(StrandedRegistry.NotAllowedTestnet.selector); // chain check first
-        // actually bond check comes after chain check; use correct chain
-        vm.chainId(ARB_SEPOLIA);
-        vm.prank(poster);
         vm.expectRevert(StrandedRegistry.BondTooLow.selector);
         registry.registerFind{value: 0.0001 ether}(holder, address(token), 1_000e6, 0, ARB_SEPOLIA, block.timestamp + 1 days);
     }
