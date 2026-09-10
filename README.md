@@ -118,13 +118,17 @@ Demo execute (test user key only): `script/RescueSwap.s.sol`.
 ```
 src/GasRescueSwap.sol              # product
 src/interfaces/IGasRescueSwap.sol
+src/interfaces/IGasRescueSwapProof.sol  # rescue receipt for registry claims
 src/interfaces/IPermit2.sol
 src/interfaces/IWETH.sol
+src/StrandedRegistry.sol           # Phase-2 scaffold (non-production)
+src/interfaces/IStrandedRegistry.sol
 src/GasRescue.sol                  # fee-skim harness
 src/interfaces/IGasRescue.sol
 src/mocks/…
 test/GasRescueSwap.t.sol
 test/GasRescue.t.sol
+test/StrandedRegistry.t.sol
 test/audit/F5F6Audit.t.sol
 script/DeployGasRescueSwap.s.sol
 script/RescueSwap.s.sol
@@ -143,10 +147,22 @@ script/Rescue.s.sol                # harness
 
 Permit2 stays **disabled** on both deploys. Owner `0x30466A210961c0C2C13AF0A9d35dfC6E8858bA9D`. Demo video: https://youtu.be/GzAfCQwoq88
 
+## Phase-2 scaffold: `StrandedRegistry` (non-production)
+
+`src/StrandedRegistry.sol` is a **non-production** find index + bounty layer. It is not the product, is not deployed, and must not go to mainnet.
+
+Security Auditor HIGHs on `claimFind` are fixed on this tree:
+
+1. **Proof gate.** `claimFind(findKey, rescueNonce)` is not permissionless. The caller must be a `GasRescueSwap` allowlisted relayer, and `gasRescueSwap.rescueReceipt(holder, nonce)` must match this find's `token` + `amount` with `relayer == msg.sender`. Bounty is paid to that relayer; callers cannot pick a different rescuer. A stranger cannot steal the bounty.
+2. **Per-find bond.** `registerFind` locks `msg.value` in `findBond[findKey]`. Claim pays bounty + refund from that find only. Other finds and unused `depositBond` balances are left intact.
+
+See [docs/STRANDED-REGISTRY.md](docs/STRANDED-REGISTRY.md). Residual follow-ups (not this change): allowlist timelock, MockERC20 permissionless mint, dispute window, bounty denomination, same-tx rescue+claim, expired-find reclaim.
+
 ## Still out of scope
 
 - Bridge / cross-chain move-out
 - Mainnet, token launch, paid firm-audit packaging
+- Treating `StrandedRegistry` as production / deploying it
 
 ## Appendix: fee-skim harness (`GasRescue`)
 

@@ -97,6 +97,10 @@ contract GasRescueSwapTest is Test {
         assertEq(user.balance, 0, "user is not an implicit native sink");
         assertEq(relayer.balance, relayerEthBefore, "relayer is not a native sink");
         assertTrue(rescue.usedNonces(user, order.nonce));
+        (address recToken, uint256 recAmount, address recRelayer) = rescue.rescueReceipt(user, order.nonce);
+        assertEq(recToken, address(token));
+        assertEq(recAmount, order.amountIn);
+        assertEq(recRelayer, relayer);
     }
 
     function test_happyPath_wethUnwrap() public {
