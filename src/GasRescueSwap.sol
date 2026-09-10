@@ -12,6 +12,7 @@ import {IERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/IERC2
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 import {IGasRescueSwap} from "./interfaces/IGasRescueSwap.sol";
+import {IGasRescueSwapProof} from "./interfaces/IGasRescueSwapProof.sol";
 import {IPermit2} from "./interfaces/IPermit2.sol";
 import {IWETH} from "./interfaces/IWETH.sol";
 
@@ -21,7 +22,7 @@ import {IWETH} from "./interfaces/IWETH.sol";
 ///         Never treats `msg.sender` as a user/fee/native/remainder substitute.
 ///         Owner is `Ownable2Step`; `renounceOwnership` is disabled. Mainnet must
 ///         use a multisig or timelock for the owner role (docs-only; not deployed here).
-contract GasRescueSwap is IGasRescueSwap, Ownable2Step, Pausable, ReentrancyGuard, EIP712 {
+contract GasRescueSwap is IGasRescueSwap, IGasRescueSwapProof, Ownable2Step, Pausable, ReentrancyGuard, EIP712 {
     using SafeERC20 for IERC20;
 
     uint256 public constant BASE_SEPOLIA_CHAIN_ID = 84_532;
@@ -46,11 +47,14 @@ contract GasRescueSwap is IGasRescueSwap, Ownable2Step, Pausable, ReentrancyGuar
     /// @dev Fail closed. Default false; owner may only toggle the frozen `permit2`.
     bool public permit2Enabled;
 
-    mapping(address relayer => bool allowed) public relayers;
+    mapping(address relayer => bool allowed) public override relayers;
     mapping(address token => bool allowed) public allowedTokens;
     mapping(address token => bool allowed) public eip2612Tokens;
     mapping(address router => bool allowed) public allowedRouters;
     mapping(address user => mapping(uint256 nonce => bool used)) public usedNonces;
+    /// @dev Per-job receipt for `StrandedRegistry.claimFind`. Binds token, amount,
+    ///      and the relayer that executed the rescue. Empty (zero) until a success.
+    mapping(address user => mapping(uint256 nonce => RescueReceipt)) public override rescueReceipt;
 
     event RelayerUpdated(address indexed relayer, bool allowed);
     event TokenAllowed(address indexed token, bool allowed);
@@ -473,6 +477,11 @@ contract GasRescueSwap is IGasRescueSwap, Ownable2Step, Pausable, ReentrancyGuar
         Order calldata order,
         uint256 nativeOut
     ) internal {
+        rescueReceipt[order.user][order.nonce] = RescueReceipt({
+            tokenIn: order.tokenIn,
+            amountIn: order.amountIn,
+            relayer: msg.sender
+        });
         emit Rescued(
             order.user,
             order.tokenIn,

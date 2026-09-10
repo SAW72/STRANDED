@@ -86,7 +86,7 @@ Modifiers: `nonReentrant`, `whenNotPaused`, `onlyRelayer`.
    - require contract holds **exactly** `amountSwap` (leftover tokenIn reverts; never forwarded to `to`),
    - call router with `swapData`; unwrap **this job's** WETH delta; credit **this job's** native delta to `nativeTo` if `>= minAmountOut`,
    - end-of-tx: `tokenIn`, WETH, and ETH on the contract must all be zero (`DustRemaining` otherwise).
-7. Emit `Rescued`.
+7. Emit `Rescued`. Persist `rescueReceipt[user][nonce] = { tokenIn, amountIn, relayer }` so `StrandedRegistry.claimFind` can prove this exact job completed (additive; does not change rescue economics or recipients).
 
 Any revert rolls back the nonce write. Bad signatures, underfunded, path mismatch, slippage — none burn the nonce.
 
@@ -102,6 +102,7 @@ Any revert rolls back the nonce write. Bad signatures, underfunded, path mismatc
 - **Mainnet must use a multisig or timelock for the owner role.** Testnet may use an EOA. Do not deploy custom multisig/timelock contracts as part of this testnet codebase.
 - Non-proxy, `ReentrancyGuard`, owner-only pause + allowlists.
 - End-of-tx dust must be zero: `tokenIn`, WETH, and ETH balances on the contract are all zero after every rescue.
+- Rescue receipt (additive, for `StrandedRegistry`): each successful job writes `rescueReceipt[user][nonce] = { tokenIn, amountIn, relayer }`. This does not change recipients or economics. The registry remains a non-production scaffold.
 - Owner-receive grief: ETH donations are wrapped to WETH and transferred to owner (option B), so a non-receiving owner cannot revert the rescue. WETH is transferred directly. No pending balance, no skim function, no stranded credits on ownership transfer.
 
 ---

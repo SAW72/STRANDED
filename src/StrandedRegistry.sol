@@ -11,16 +11,19 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 import {IStrandedRegistry} from "./interfaces/IStrandedRegistry.sol";
+import {IGasRescueSwapProof} from "./interfaces/IGasRescueSwapProof.sol";
 
 /// @title StrandedRegistry
-/// @notice Phase-2 thin registry: permissionless index of *known* stranded ERC-20
+/// @notice Phase-2 thin registry: permissionless *index* of known stranded ERC-20
 ///         balances on Gas Rescue's supported chains (Arb Sepolia + Base Sepolia).
-///         Anyone can register a find (bond + optional bounty). A rescuer claims
-///         the find, executes the existing GasRescueSwap rescue, and earns the
-///         finder's fee. No custody of user funds. No token. Testnet only.
+///         Anyone can register a find (bond + optional bounty). Claims are
+///         proof-gated: only the GasRescueSwap relayer that completed a matching
+///         rescue (holder + token + amountIn) can claim, and only that find's
+///         bond is released. No custody of user funds. No token. Testnet only.
+///         Non-production scaffold — do not deploy to mainnet.
 /// @dev This is the "search market" layer. v1 rescues tokens the owner can't reach;
 ///      this lets the owner *advertise* the stranded balance and pay a bounty to
-///      whoever brings it home. Same dog, bigger yard.
+///      the relayer that brings it home. Same dog, bigger yard.
 contract StrandedRegistry is IStrandedRegistry, Ownable2Step, Pausable, ReentrancyGuard, EIP712 {
     using SafeERC20 for IERC20;
 
@@ -45,7 +48,12 @@ contract StrandedRegistry is IStrandedRegistry, Ownable2Step, Pausable, Reentran
 
     mapping(bytes32 findKey => Find) private _finds;
     mapping(bytes32 findKey => bool) public claimed;
+    /// @dev Native bond locked to a single find at `registerFind`. Claim refunds
+    ///      only this amount (minus bounty), never the poster's entire `posterBond`.
+    mapping(bytes32 findKey => uint256) public findBond;
     mapping(address poster => uint256) public posterBond;
+    /// @dev One GasRescueSwap receipt (holder, nonce) can settle at most one find.
+    mapping(address holder => mapping(uint256 nonce => bool)) public usedRescueProof;
     mapping(address => uint256) public posterNonce;
 
     event FindRegistered(
@@ -78,6 +86,9 @@ contract StrandedRegistry is IStrandedRegistry, Ownable2Step, Pausable, Reentran
     error InsufficientBond();
     error BountyTooHigh();
     error NotHolder();
+    error NotRelayer();
+    error InvalidRescueProof();
+    error RescueProofAlreadyUsed();
     error ExpiredDeadline();
     error InvalidSignature();
     error TransferFailed();
@@ -137,6 +148,7 @@ contract StrandedRegistry is IStrandedRegistry, Ownable2Step, Pausable, Reentran
         if (_finds[findKey].registeredAt != 0) revert InvalidFind(); // collision (should not happen)
 
         posterBond[msg.sender] += msg.value;
+        findBond[findKey] = msg.value;
 
         _finds[findKey] = Find({
             poster: msg.sender,
@@ -154,39 +166,56 @@ contract StrandedRegistry is IStrandedRegistry, Ownable2Step, Pausable, Reentran
         emit BondDeposited(msg.sender, msg.value);
     }
 
-    /// @notice Rescuer claims a find: proves the balance is stranded (holder has
-    ///         token but zero native), executes GasRescueSwap rescue, earns finder fee.
-    ///         Bounty (if any) is pulled from poster's bond at claim time.
-    /// @dev In production the rescuer would call GasRescueSwap.rescueWithPermit first;
-    ///      this function records the claim + pays the finder fee. The actual rescue
-    ///      is a separate tx (keeps this contract thin and audit-small).
-    function claimFind(
-        bytes32 findKey,
-        address rescuer
-    ) external nonReentrant whenNotPaused {
+    /// @notice Relayer claims a find after a completed GasRescueSwap rescue.
+    ///         Bounty (if any) and the leftover find bond are paid from *this*
+    ///         find's `findBond` only — other finds and unused `posterBond` stay.
+    /// @param findKey Registry key from `registerFind`.
+    /// @param rescueNonce `Order.nonce` consumed by the matching rescue.
+    /// @dev Proof gate (HIGH-1):
+    ///      1. `msg.sender` must be a GasRescueSwap allowlisted relayer.
+    ///      2. `gasRescueSwap.rescueReceipt(holder, rescueNonce)` must exist and
+    ///         match this find's `token` + `amount`, and `relayer == msg.sender`.
+    ///      3. That receipt can settle at most one find (`usedRescueProof`).
+    ///      Bounty is paid to `msg.sender` (the executing relayer). Callers cannot
+    ///      choose a different rescuer. Rescue itself stays a separate tx so this
+    ///      contract remains thin.
+    function claimFind(bytes32 findKey, uint256 rescueNonce) external nonReentrant whenNotPaused {
         Find storage f = _finds[findKey];
         if (f.registeredAt == 0) revert FindNotFound();
         if (claimed[findKey]) revert AlreadyClaimed();
         if (block.timestamp > f.deadline) revert ExpiredDeadline();
-        if (rescuer == address(0)) revert ZeroAddress();
 
+        IGasRescueSwapProof swap = IGasRescueSwapProof(gasRescueSwap);
+        if (!swap.relayers(msg.sender)) revert NotRelayer();
+
+        (address tokenIn, uint256 amountIn, address receiptRelayer) = swap.rescueReceipt(f.holder, rescueNonce);
+        if (receiptRelayer == address(0) || receiptRelayer != msg.sender) revert InvalidRescueProof();
+        if (tokenIn != f.token || amountIn != f.amount) revert InvalidRescueProof();
+        if (usedRescueProof[f.holder][rescueNonce]) revert RescueProofAlreadyUsed();
+
+        usedRescueProof[f.holder][rescueNonce] = true;
         claimed[findKey] = true;
 
-        // Finder fee: % of rescued value (capped). Paid from poster's bond.
+        address rescuer = msg.sender;
+
+        // Per-find bond (HIGH-2): only this find's locked native, not posterBond[poster].
+        uint256 bond = findBond[findKey];
+        findBond[findKey] = 0;
+        if (posterBond[f.poster] < bond) revert InsufficientBond();
+
+        // Finder fee: % of rescued value (capped). Recorded for off-chain settlement.
         uint256 finderFee = (f.amount * finderFeeBps) / 10_000;
         uint256 bountyPaid = 0;
         if (f.bounty > 0) {
-            if (posterBond[f.poster] < f.bounty) revert InsufficientBond();
-            posterBond[f.poster] -= f.bounty;
+            if (bond < f.bounty) revert InsufficientBond();
+            bond -= f.bounty;
             bountyPaid = f.bounty;
             (bool ok,) = payable(rescuer).call{value: bountyPaid}("");
             if (!ok) revert TransferFailed();
         }
 
-        // Refund poster's bond (spam deterrent returned on valid claim).
-        uint256 bond = posterBond[f.poster];
+        posterBond[f.poster] -= bountyPaid + bond;
         if (bond > 0) {
-            posterBond[f.poster] = 0;
             (bool ok2,) = payable(f.poster).call{value: bond}("");
             if (!ok2) revert TransferFailed();
             emit BondRefunded(f.poster, bond);
