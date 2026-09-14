@@ -8,7 +8,7 @@ Dated commits / PRs on this file are the Hacky evidence trail. Prior work on `ma
 
 ## 2026-09-14 — Day-1 Arb Sepolia (visible, non-docs-only)
 
-**PR:** _fill after open_ (this repo, branch `cursor/buildathon-day1-arb-sepolia-ee4f`)
+**PR:** https://github.com/SAW72/STRANDED/pull/20 (branch `cursor/buildathon-day1-arb-sepolia-ee4f`)
 
 ### What shipped
 

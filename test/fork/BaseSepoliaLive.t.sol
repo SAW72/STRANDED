@@ -17,18 +17,26 @@ contract BaseSepoliaLiveTest is Test {
     address internal constant LIVE_ROUTER = 0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4;
 
     IGasRescueSwapViews internal swap;
+    bool internal forked;
 
     function setUp() public {
         string memory rpc = vm.envOr("BASE_SEPOLIA_RPC_URL", string(""));
         if (bytes(rpc).length == 0) {
-            vm.skip(true);
             return;
         }
         vm.createSelectFork(rpc);
         swap = IGasRescueSwapViews(LIVE_SWAP);
+        forked = true;
     }
 
-    function test_liveBase_immutablesAndPolicy() public view {
+    modifier onlyFork() {
+        if (!forked) {
+            vm.skip(true);
+        }
+        _;
+    }
+
+    function test_liveBase_immutablesAndPolicy() public onlyFork {
         assertEq(block.chainid, BASE_SEPOLIA_CHAIN_ID);
         assertEq(swap.owner(), LIVE_OWNER);
         assertFalse(swap.paused());

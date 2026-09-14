@@ -26,18 +26,26 @@ contract ArbSepoliaLiveTest is Test {
     );
 
     IGasRescueSwapViews internal swap;
+    bool internal forked;
 
     function setUp() public {
         string memory rpc = vm.envOr("ARB_SEPOLIA_RPC_URL", string(""));
         if (bytes(rpc).length == 0) {
-            vm.skip(true);
             return;
         }
         vm.createSelectFork(rpc);
         swap = IGasRescueSwapViews(LIVE_SWAP);
+        forked = true;
     }
 
-    function test_live_immutablesAndPolicy() public view {
+    modifier onlyFork() {
+        if (!forked) {
+            vm.skip(true);
+        }
+        _;
+    }
+
+    function test_live_immutablesAndPolicy() public onlyFork {
         assertEq(block.chainid, ARB_SEPOLIA_CHAIN_ID);
         assertEq(swap.owner(), LIVE_OWNER);
         assertEq(swap.pendingOwner(), address(0));
@@ -52,7 +60,7 @@ contract ArbSepoliaLiveTest is Test {
         assertTrue(swap.DOMAIN_SEPARATOR() != bytes32(0));
     }
 
-    function test_live_allowlists() public view {
+    function test_live_allowlists() public onlyFork {
         assertTrue(swap.allowedTokens(LIVE_GRTT), "GRTT is the demo token");
         assertTrue(swap.eip2612Tokens(LIVE_GRTT));
         assertTrue(swap.allowedTokens(LIVE_GMOCK), "gMOCK also allowlisted");
@@ -60,7 +68,7 @@ contract ArbSepoliaLiveTest is Test {
         assertTrue(swap.allowedRouters(LIVE_ROUTER));
     }
 
-    function test_live_criticalSelectors() public view {
+    function test_live_criticalSelectors() public onlyFork {
         assertTrue(_hasSelector(LIVE_SWAP, bytes4(keccak256("paused()"))));
         assertTrue(_hasSelector(LIVE_SWAP, bytes4(keccak256("permit2Enabled()"))));
         assertTrue(_hasSelector(LIVE_SWAP, bytes4(keccak256("relayers(address)"))));
@@ -71,7 +79,7 @@ contract ArbSepoliaLiveTest is Test {
         assertTrue(_hasSelector(LIVE_SWAP, bytes4(keccak256("owner()"))));
     }
 
-    function test_live_hashOrder_nonzero() public view {
+    function test_live_hashOrder_nonzero() public onlyFork {
         IGasRescueSwap.Order memory order = IGasRescueSwap.Order({
             user: LIVE_OWNER,
             tokenIn: LIVE_GRTT,
@@ -91,7 +99,7 @@ contract ArbSepoliaLiveTest is Test {
         assertTrue(swap.hashOrder(order) != bytes32(0));
     }
 
-    function test_live_bytecodeDriftsFromTip_afterF5F6() public {
+    function test_live_bytecodeDriftsFromTip_afterF5F6() public onlyFork {
         // 2026-09-14 live: F-1 immutable Permit2, but no public CANONICAL_PERMIT2 getter
         // and no rescueReceipt (added with StrandedRegistry proof-gate).
         assertFalse(_hasSelector(LIVE_SWAP, bytes4(keccak256("CANONICAL_PERMIT2()"))), "live lacks F-5 getter");
