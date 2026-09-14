@@ -74,6 +74,8 @@ forge test -vv
 
 Harness tests in `test/GasRescue.t.sol` stay green.
 
+Wallet UX: `cd wallet && npm test && npm run build` (CI job **Wallet build + test**). Relayer URLs unset → labeled fixtures, not live quotes.
+
 ## Environment
 
 Copy `.env.example` to `.env`. **Do not commit `.env` or any private key.**
@@ -146,6 +148,8 @@ script/HackQuestStatus.s.sol       # Lens consumer; HackQuest JSON; no keys
 script/RescueSwap.s.sol
 script/Deploy.s.sol                # harness
 script/Rescue.s.sol                # harness
+wallet/                            # Vite + React + wagmi/viem (Base + Arb Sepolia)
+relayer/                           # Arb Sepolia POST /v1/quotes (Render)
 ```
 
 ## Live (testnet)
@@ -162,6 +166,18 @@ script/Rescue.s.sol                # harness
 Arb demo path (live Relayer + `ArbSepoliaDemoPath`): `pathHash = keccak256(swapExact(tokenIn, amountSwap, nativeTo))` for GRTT / gMOCK. Wallet fixtures keep placeholder `0xbbb…` and must not be submitted. See [docs/BUILDATHON_PROGRESS.md](docs/BUILDATHON_PROGRESS.md) Day-2.
 
 Live Arb bytecode predates F-5/F-6 getters + `rescueReceipt` — [docs/REDEPLOY-GASRESCUESWAP.md](docs/REDEPLOY-GASRESCUESWAP.md). Permit2 stays **disabled** on both deploys. Owner `0x30466A210961c0C2C13AF0A9d35dfC6E8858bA9D`. Demo video: https://youtu.be/GzAfCQwoq88
+
+## Wallet UX
+
+Vite + React + wagmi/viem under [`wallet/`](wallet/). Testnets only: Base Sepolia (`84532`) and Arb Sepolia (`421614`). No mainnet.
+
+1. Pick a testnet and connect an injected wallet (switch if the wallet is on the other network).
+2. Read the stranded EIP-2612 token balance on that testnet (never invented).
+3. Bind a quote: Relayer `POST /v1/quotes` when that chain’s Relayer URL is set; otherwise a labeled dry-mock fixture.
+4. Review every required Order field — at least `amountIn`, `amountSwap`, `feeAmount`, `feeTo`, `to`, `nativeTo`, `minAmountOut`.
+5. Tap **Confirm details**. Only then: EIP-712 `Order` (domain `StewardGasRescue` / `1`, field `nativeTo` not `safeRecipient`) plus EIP-2612 permit.
+
+See [wallet/README.md](wallet/README.md). Copy `wallet/.env.example` to `wallet/.env`. Leave Relayer URL fields empty for fixtures. Live Arb Relayer origin (document-only; do not commit a filled `.env`): `https://stranded-relayer-arb.onrender.com`. Do not point Base at the Arb Relayer or at a dead/old VPS.
 
 ## Phase-2 scaffold: `StrandedRegistry` (non-production)
 
