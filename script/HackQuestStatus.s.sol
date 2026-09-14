@@ -17,7 +17,9 @@ import {GasRescueLens} from "../src/GasRescueLens.sol";
 ///   GAS_RESCUE_LENS_ADDRESS   if unset, constructs Lens in-script (not broadcast)
 ///   HACKQUEST_USER            readiness user (default fixture 0x1111…)
 ///   HACKQUEST_NONCE           default 0
-///   HACKQUEST_AMOUNT_IN       default 0 (skip balance check → userFunded true)
+///   HACKQUEST_AMOUNT_IN       default 0 = probe (userFunded/ready false; other
+///                             flags still populate). Set >0 for a real-rescue
+///                             preflight (`balanceOf(user) >= amountIn`).
 ///   HACKQUEST_NATIVE_TO       path-hash recipient (default fixture 0x1111…)
 ///   HACKQUEST_PATH_HASH       optional quoted hash (flags wallet dry 0xbbb…)
 contract HackQuestStatus is Script {
@@ -96,7 +98,7 @@ contract HackQuestStatus is Script {
         string memory head = string.concat(
             "{",
             '"product":"GasRescueSwap",',
-            '"buildathon":"2026-09-14-day2",',
+            '"buildathon":"2026-09-14-day3",',
             '"chainId":',
             _u(r.swapStatus.chainId),
             ",",
@@ -149,7 +151,11 @@ contract HackQuestStatus is Script {
             ',"nonceUnused":',
             _b(r.readiness.nonceUnused),
             ',"userFunded":',
-            _b(r.readiness.userFunded)
+            _b(r.readiness.userFunded),
+            ',"amountInPositive":',
+            _b(amountIn > 0),
+            ',"probeOnly":',
+            _b(amountIn == 0)
         );
         string memory receipt = string.concat(
             ',"hasCanonicalPermit2Getter":',

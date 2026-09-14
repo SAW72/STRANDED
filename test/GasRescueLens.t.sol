@@ -108,6 +108,38 @@ contract GasRescueLensTest is Test {
         assertFalse(poor.ready);
     }
 
+    /// @dev amountIn==0 is a probe: other flags still populate, but never ready.
+    ///      Day-1/Day-2 skipped the funding check (`amountIn==0 || balance`).
+    function test_readiness_zeroAmountIn_isProbeNotReady() public {
+        GasRescueLens.RescueReadiness memory probe =
+            lens.rescueReadiness(relayer, address(token), address(router), user, 1, 0);
+        assertTrue(probe.notPaused, "probe still reports pause");
+        assertTrue(probe.relayerOk, "probe still reports relayer split");
+        assertTrue(probe.tokenAllowed);
+        assertTrue(probe.tokenEip2612);
+        assertTrue(probe.routerAllowed);
+        assertTrue(probe.nonceUnused);
+        assertTrue(probe.permit2Off);
+        assertFalse(probe.userFunded, "amountIn==0 is not a funded rescue");
+        assertFalse(probe.ready, "ready requires amountIn>0 and a real balance");
+    }
+
+    function test_readiness_oneWei_checksBalance() public {
+        GasRescueLens.RescueReadiness memory funded =
+            lens.rescueReadiness(relayer, address(token), address(router), user, 1, 1);
+        assertTrue(funded.userFunded);
+        assertTrue(funded.ready);
+
+        address empty = makeAddr("emptyUser");
+        GasRescueLens.RescueReadiness memory unfunded =
+            lens.rescueReadiness(relayer, address(token), address(router), empty, 1, 1);
+        assertFalse(unfunded.userFunded);
+        assertFalse(unfunded.ready);
+        assertTrue(unfunded.notPaused);
+        assertTrue(unfunded.relayerOk);
+        assertTrue(unfunded.permit2Off);
+    }
+
     function test_hashOrder_matchesSwap() public {
         IGasRescueSwap.Order memory order = IGasRescueSwap.Order({
             user: user,
@@ -223,6 +255,7 @@ contract GasRescueLensTest is Test {
         // Local fixture relayer/token/router are not the live Arb addrs.
         assertFalse(demo.relayerOk);
         assertFalse(demo.tokenAllowed);
+        assertFalse(demo.userFunded, "amountIn 0 is a probe; never userFunded");
         assertFalse(demo.ready);
         GasRescueLens.RescueReadiness memory fundedProbe = lens.arbDemoReadiness(user, 1, 1 ether);
         assertFalse(fundedProbe.userFunded, "live GRTT has no code on the local fixture");
@@ -248,7 +281,8 @@ contract GasRescueLensTest is Test {
         bytes32 dry = ArbSepoliaDemoPath.WALLET_DRY_PATH_HASH;
         GasRescueLens.HackQuestReport memory flagged = lens.hackQuestReport(user, 1, 0, nativeTo_, dry);
         assertTrue(flagged.paths.quotedIsWalletDryPlaceholder);
-        assertTrue(flagged.readiness.userFunded, "amountIn 0 skips the balance check");
+        assertFalse(flagged.readiness.userFunded, "amountIn 0 is a probe; never funded");
+        assertFalse(flagged.readiness.ready, "probe must not look demo-ready");
     }
 
     function test_demoPathHash_matchesLibrary() public view {
@@ -272,15 +306,23 @@ contract GasRescueLensTest is Test {
 
         string memory json = script.reportJson(user, 1, 100 ether, nativeTo, bytes32(0));
         assertTrue(_contains(json, '"product":"GasRescueSwap"'));
-        assertTrue(_contains(json, '"buildathon":"2026-09-14-day2"'));
+        assertTrue(_contains(json, '"buildathon":"2026-09-14-day3"'));
         assertTrue(_contains(json, '"permit2Enabled":false'));
         assertTrue(_contains(json, '"permit2Off":true'));
         assertTrue(_contains(json, '"hasRescueReceipt":true'));
         assertTrue(_contains(json, '"rescueReceiptSupported":true'));
         assertTrue(_contains(json, '"quotedPathIsWalletDryPlaceholder":false'));
         assertTrue(_contains(json, '"lensEphemeral":false'));
+        assertTrue(_contains(json, '"amountInPositive":true'));
+        assertTrue(_contains(json, '"probeOnly":false'));
         assertTrue(_contains(json, vm.toString(address(rescue))));
         assertTrue(_contains(json, vm.toString(ArbSepoliaDemoPath.dryGrttPathHash(nativeTo))));
+
+        string memory probeJson = script.reportJson(user, 1, 0, nativeTo, bytes32(0));
+        assertTrue(_contains(probeJson, '"amountInPositive":false'));
+        assertTrue(_contains(probeJson, '"probeOnly":true'));
+        assertTrue(_contains(probeJson, '"userFunded":false'));
+        assertTrue(_contains(probeJson, '"ready":false'));
 
         vm.chainId(1);
         vm.expectRevert(bytes("HackQuestStatus: testnet only (Arb Sepolia 421614 or Base Sepolia 84532)"));

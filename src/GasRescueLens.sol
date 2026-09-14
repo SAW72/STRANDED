@@ -59,7 +59,17 @@ contract GasRescueLens {
 
     /// @notice One-call readiness for a quoted rescue. Does not verify signatures.
     ///         `ready` is fail-closed: includes `permit2Off` so an enabled Permit2
-    ///         cannot look demo-ready. Lens never toggles Permit2.
+    ///         cannot look demo-ready, and requires `amountIn > 0` plus a real
+    ///         `balanceOf(user) >= amountIn`. Lens never toggles Permit2.
+    ///
+    ///         **Probe vs real rescue:** `amountIn == 0` is an intentional probe.
+    ///         Other flags still populate (pause / allowlists / Permit2-off /
+    ///         nonce). `userFunded` is **false** and `ready` is **false**.
+    ///         Day-1/Day-2 treated `amountIn == 0` as “skip funding → funded”.
+    ///         That hid an unquoted job. GasRescueSwap itself reverts
+    ///         `InvalidOrder` on `amountIn == 0`. Callers that only want
+    ///         policy/allowlist evidence should keep `amountIn == 0` and read
+    ///         the individual flags — do not treat `ready` as a green light.
     struct RescueReadiness {
         bool notPaused;
         bool relayerOk;
@@ -160,6 +170,7 @@ contract GasRescueLens {
     }
 
     /// @notice GRTT + live relayer/router readiness (Permit2-off fail-closed).
+    ///         `amountIn == 0` is a probe: flags populate, `ready` stays false.
     function arbDemoReadiness(
         address user,
         uint256 nonce,
@@ -168,6 +179,8 @@ contract GasRescueLens {
         return rescueReadiness(LIVE_RELAYER, LIVE_ARB_GRTT, LIVE_ARB_ROUTER, user, nonce, amountIn);
     }
 
+    /// @notice Policy + allowlist + funding preflight. `amountIn == 0` is a
+    ///         probe (flags populate; `userFunded` / `ready` stay false).
     function rescueReadiness(
         address relayer,
         address token,
@@ -182,7 +195,8 @@ contract GasRescueLens {
         out.tokenEip2612 = swap.eip2612Tokens(token);
         out.routerAllowed = swap.allowedRouters(router);
         out.nonceUnused = !swap.usedNonces(user, nonce);
-        out.userFunded = amountIn == 0 || _userFunded(token, user, amountIn);
+        // Fail-closed: zero is a probe, not a funded rescue. Require amountIn>0.
+        out.userFunded = amountIn > 0 && _userFunded(token, user, amountIn);
         out.permit2Off = !swap.permit2Enabled() && _permit2Ok(swap.permit2());
         out.ready = out.notPaused && out.relayerOk && out.tokenAllowed && out.tokenEip2612 && out.routerAllowed
             && out.nonceUnused && out.userFunded && out.permit2Off;
@@ -307,6 +321,8 @@ contract GasRescueLens {
         return data.length > 0;
     }
 
+    /// @dev `balanceOf(user) >= amountIn`. Missing token code fails closed.
+    ///      Callers must pass `amountIn > 0`; zero is handled in `rescueReadiness`.
     function _userFunded(
         address token,
         address user,

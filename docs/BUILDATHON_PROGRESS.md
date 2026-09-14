@@ -114,3 +114,30 @@ Supported demo tokens: **GRTT** `0x5649…d713`, **gMOCK** `0x3000…B318`. Dest
 3. `forge script script/HackQuestStatus.s.sol:HackQuestStatus --rpc-url "$ARB_SEPOLIA_RPC_URL" --chain-id 421614` (no `--broadcast`)
 4. Lens on-chain still optional: `DeployGasRescueLens` Spencer keys only, then set `GAS_RESCUE_LENS_ADDRESS` / `VITE_GAS_RESCUE_LENS_ADDRESS`.
 5. Swap redeploy (F-5 getter + live `rescueReceipt`) still [REDEPLOY-GASRESCUESWAP.md](REDEPLOY-GASRESCUESWAP.md) — Spencer only.
+
+## 2026-09-14 — Day-3 readiness fail-closed + Arb Sepolia QA runbook (visible, non-docs-only)
+
+**PR:** _this change_ (branch `cursor/buildathon-day3-readiness-runbook-e7cd`)
+
+### What shipped
+
+- **`GasRescueLens.rescueReadiness` fail-closed on `amountIn == 0`.** Day-1/Day-2 used `userFunded = (amountIn == 0) || balanceOk`, so a zero-amount probe reported `ready=true` whenever allowlists + Permit2-off lined up. That is not a real rescue (`GasRescueSwap` reverts `InvalidOrder` on `amountIn == 0`). Day-3: `userFunded = amountIn > 0 && balanceOf(user) >= amountIn`. `ready` therefore requires a quoted positive amount **and** a funded user.
+- **Probes are preserved.** Callers may still pass `amountIn == 0` (default `HACKQUEST_AMOUNT_IN` on `HackQuestStatus`, live fork smoke, wallet `lensCallArgs` dry `0n`). Individual flags (`notPaused`, `relayerOk`, allowlists, `permit2Off`, nonce) still populate. `userFunded` and `ready` stay **false**. Documented on the Lens struct and in [QA_ARB_SEPOLIA_RESCUE.md](QA_ARB_SEPOLIA_RESCUE.md).
+- **`HackQuestStatus` JSON** tagged `2026-09-14-day3` with `amountInPositive` / `probeOnly` so a Spencer-watchable probe is not mistaken for a green job.
+- **[QA_ARB_SEPOLIA_RESCUE.md](QA_ARB_SEPOLIA_RESCUE.md)** — exact Relayer health, `InspectGasRescueSwap`, `HackQuestStatus` probe vs funded, hot-wallet **~0.10 ETH**, `SignOrder` / `RescueSwap` (Spencer keys only). Judged swap `0x65e7…993D`. Relayer https://stranded-relayer-arb.onrender.com. Permit2 off. No mainnet.
+
+### Arb Sepolia addresses (unchanged — not redeployed)
+
+Same table as Day-1. Relayer hot `0x8240…9AF6` still needs ~0.10 ETH for a live submit.
+
+### On-chain deploys performed by the agent
+
+**None.** No `--broadcast`. No keys. No HackQuest submit.
+
+### Spencer next (optional)
+
+1. `forge test -vv`
+2. Relayer health: `curl -sS https://stranded-relayer-arb.onrender.com/health`
+3. Follow [QA_ARB_SEPOLIA_RESCUE.md](QA_ARB_SEPOLIA_RESCUE.md) (Inspect + HackQuestStatus probe, then funded preflight).
+4. Live rescue: Spencer keys only (`SignOrder` then Relayer `POST /v1/rescues`, or `RescueSwap` `--broadcast`). Top up the hot wallet first if `cast balance` &lt; ~0.10 ETH.
+5. Lens on-chain / swap redeploy still optional and Spencer-only (Day-1 / Day-2 checklists).
