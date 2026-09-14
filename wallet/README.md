@@ -34,8 +34,8 @@ cp .env.example .env
 
 | Variable | Required | Purpose |
 | --- | --- | --- |
-| `VITE_RELAYER_URL` | for live Base quotes | Base Relayer origin. Leave unset for sample quotes on Base. |
-| `VITE_RELAYER_URL_ARB_SEPOLIA` | for live Arb quotes | Arb Relayer origin (local `http://127.0.0.1:8788`). Leave unset for sample quotes on Arb. **Do not** reuse the Base Relayer URL. |
+| `VITE_RELAYER_URL` | for live Base quotes | Base Relayer origin. Leave unset for sample quotes on Base. There is no in-repo live Base URL — do not point this at a dead/old VPS or at the Arb Relayer. |
+| `VITE_RELAYER_URL_ARB_SEPOLIA` | for live Arb quotes | Arb Relayer origin. Live Render host (document-only): `https://stranded-relayer-arb.onrender.com`. Local default `http://127.0.0.1:8788`. Leave unset for sample quotes on Arb. **Do not** reuse the Base Relayer URL. |
 | `VITE_GAS_RESCUE_ADDRESS` | to sign on Base | Base Sepolia GasRescueSwap `0x21A1ADf810e64B5bd1d530D31abA6856b8DEf688`. |
 | `VITE_TOKEN_ADDRESS` | to read/sign on Base | Base Sepolia MockERC20Permit `0xE36c35cbF0373D77D00732f7B92dB4fB8fd37166`. |
 | `VITE_GAS_RESCUE_ADDRESS_ARB_SEPOLIA` | to sign on Arb | Arb Sepolia GasRescueSwap `0x65e712222745A8FCCbF038A90Fa75caB0867993D`. |

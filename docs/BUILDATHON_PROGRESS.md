@@ -6,6 +6,16 @@ Dated commits / PRs on this file are the Hacky evidence trail. Prior work on `ma
 
 **Redeploy / broadcast = Spencer keys only.** Agents never hold keys, never `--broadcast`, never submit to HackQuest.
 
+## 2026-09-14 — Wallet UX rebase onto Day-2 main (PR #2)
+
+**PR:** https://github.com/SAW72/STRANDED/pull/2 (branch `cursor/wallet-ux-base-sepolia-0413`)
+
+Rebased onto `main` @ `e5905ac` (PR #21 Day-2). Ancestor includes Day-1 `1c98602` (PR #20). No merge. No duplicate PR.
+
+Day-2 content kept (`ArbSepoliaDemoPath`, `HackQuestStatus`, Lens consumer, `VITE_GAS_RESCUE_LENS_ADDRESS`). Wallet UX demo-path notes kept: live Arb Relayer origin documented with **empty** URL fields (fixture-safe), Confirm-details / `POST /v1/quotes` / `StewardGasRescue` / `nativeTo` in the root README, CI job **Wallet build + test**.
+
+No keys. No broadcast. No mainnet.
+
 ## 2026-09-14 — Day-1 Arb Sepolia (visible, non-docs-only)
 
 **PR:** https://github.com/SAW72/STRANDED/pull/20 (branch `cursor/buildathon-day1-arb-sepolia-ee4f`)
