@@ -64,7 +64,7 @@ cast balance 0x8240124dc78a27c80354Ca813Df12aa2888A9AF6 \
   --rpc-url "$ARB_SEPOLIA_RPC_URL" --ether
 ```
 
-**Expect ≥ 0.10 ETH** before a live `rescueWithPermit`. Below that, quotes may still work; the submit will fail when the hot key cannot pay gas.
+**Expect ≥ 0.10 ETH** before a live `rescueWithPermit`. Below that, quotes may still work; the submit will fail when the hot key cannot pay gas. Read 2026-09-14: **~0.015 ETH** — Spencer top-up required before a judged live job.
 
 Spencer tops up **Arb Sepolia** ETH only (not mainnet). Arbiscan: https://sepolia.arbiscan.io/address/0x8240124dc78a27c80354Ca813Df12aa2888A9AF6
 

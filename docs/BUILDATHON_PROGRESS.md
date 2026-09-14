@@ -117,7 +117,7 @@ Supported demo tokens: **GRTT** `0x5649…d713`, **gMOCK** `0x3000…B318`. Dest
 
 ## 2026-09-14 — Day-3 readiness fail-closed + Arb Sepolia QA runbook (visible, non-docs-only)
 
-**PR:** _this change_ (branch `cursor/buildathon-day3-readiness-runbook-e7cd`)
+**PR:** https://github.com/SAW72/STRANDED/pull/22 (branch `cursor/buildathon-day3-readiness-runbook-e7cd`)
 
 ### What shipped
 
@@ -125,6 +125,10 @@ Supported demo tokens: **GRTT** `0x5649…d713`, **gMOCK** `0x3000…B318`. Dest
 - **Probes are preserved.** Callers may still pass `amountIn == 0` (default `HACKQUEST_AMOUNT_IN` on `HackQuestStatus`, live fork smoke, wallet `lensCallArgs` dry `0n`). Individual flags (`notPaused`, `relayerOk`, allowlists, `permit2Off`, nonce) still populate. `userFunded` and `ready` stay **false**. Documented on the Lens struct and in [QA_ARB_SEPOLIA_RESCUE.md](QA_ARB_SEPOLIA_RESCUE.md).
 - **`HackQuestStatus` JSON** tagged `2026-09-14-day3` with `amountInPositive` / `probeOnly` so a Spencer-watchable probe is not mistaken for a green job.
 - **[QA_ARB_SEPOLIA_RESCUE.md](QA_ARB_SEPOLIA_RESCUE.md)** — exact Relayer health, `InspectGasRescueSwap`, `HackQuestStatus` probe vs funded, hot-wallet **~0.10 ETH**, `SignOrder` / `RescueSwap` (Spencer keys only). Judged swap `0x65e7…993D`. Relayer https://stranded-relayer-arb.onrender.com. Permit2 off. No mainnet.
+
+### Live Arb read (2026-09-14, no broadcast)
+
+`HackQuestStatus` default probe (`amountIn=0`) against `https://sepolia-rollup.arbitrum.io/rpc`: `paused=false`, `permit2Enabled=false`, `permit2Off=true`, allowlist flags true, **`ready=false`**, `probeOnly=true`, `userFunded=false`, `boundToLiveArb=true`, `hasRescueReceipt=false`, `liveVsTip=live-lacks-rescueReceipt-do-not-claim-redeploy`. Relayer `/health` live (`stubRpc=false`) on https://stranded-relayer-arb.onrender.com. Hot wallet `0x8240…9AF6` balance read **~0.015 ETH** — still needs ~0.10 ETH before a live submit.
 
 ### Arb Sepolia addresses (unchanged — not redeployed)
 
