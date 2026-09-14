@@ -6,6 +6,7 @@ import sampleBase from "../fixtures/sample-swap-quote.json";
 import { ARB_SEPOLIA_CHAIN_ID, BASE_SEPOLIA_CHAIN_ID, type SupportedChainId } from "./chains";
 import { parseQuoteResponse, type RescueQuote } from "./quotes";
 
+/** Dry-mock only. Live relayer hashes `swapExact(tokenIn, amountSwap, nativeTo)` — see `demoPath.ts`. */
 export const RELAYER_DRY_PATH_HASH =
   "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" as const;
 

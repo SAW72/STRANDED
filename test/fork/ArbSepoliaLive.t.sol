@@ -3,6 +3,7 @@ pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
 
+import {ArbSepoliaDemoPath} from "../../src/ArbSepoliaDemoPath.sol";
 import {GasRescueLens} from "../../src/GasRescueLens.sol";
 import {IGasRescueSwap} from "../../src/interfaces/IGasRescueSwap.sol";
 import {IGasRescueSwapViews} from "../../src/interfaces/IGasRescueSwapViews.sol";
@@ -126,6 +127,23 @@ contract ArbSepoliaLiveTest is Test {
         assertTrue(a.tokenAllowed);
         assertTrue(a.tokenEip2612);
         assertTrue(a.routerAllowed);
+
+        address dryNative = ArbSepoliaDemoPath.DRY_NATIVE_TO;
+        GasRescueLens.HackQuestReport memory hq = lens.hackQuestReport(LIVE_OWNER, 0, 0, dryNative, bytes32(0));
+        assertTrue(hq.swapStatus.boundToLiveArb);
+        assertFalse(hq.swapStatus.permit2Enabled);
+        assertTrue(hq.readiness.permit2Off);
+        assertTrue(hq.readiness.notPaused);
+        assertTrue(hq.readiness.relayerOk);
+        assertTrue(hq.readiness.tokenAllowed);
+        assertTrue(hq.readiness.tokenEip2612);
+        assertTrue(hq.readiness.routerAllowed);
+        assertTrue(hq.readiness.ready, "amountIn 0 + live allowlists + Permit2 off");
+        assertFalse(hq.bytecode.hasRescueReceipt, "live still lacks rescueReceipt - do not claim redeploy");
+        assertFalse(hq.receipt.supported);
+        assertEq(hq.paths.grttPathHash, ArbSepoliaDemoPath.dryGrttPathHash(dryNative));
+        assertEq(hq.paths.gmockPathHash, ArbSepoliaDemoPath.dryGmockPathHash(dryNative));
+        assertTrue(lens.matchesDemoPath(LIVE_GRTT, 0.2 ether, dryNative, hq.paths.grttPathHash));
     }
 
     function _hasSelector(

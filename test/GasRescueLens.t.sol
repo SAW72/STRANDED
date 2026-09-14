@@ -2,6 +2,7 @@
 pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
+import {ArbSepoliaDemoPath} from "../src/ArbSepoliaDemoPath.sol";
 import {GasRescueLens} from "../src/GasRescueLens.sol";
 import {GasRescueSwap} from "../src/GasRescueSwap.sol";
 import {IGasRescueSwap} from "../src/interfaces/IGasRescueSwap.sol";
@@ -10,6 +11,7 @@ import {MockWETH} from "../src/mocks/MockWETH.sol";
 import {MockSwapRouter} from "../src/mocks/MockSwapRouter.sol";
 import {MockPermit2} from "../src/mocks/MockPermit2.sol";
 import {DeployGasRescueLens} from "../script/DeployGasRescueLens.s.sol";
+import {HackQuestStatus} from "../script/HackQuestStatus.s.sol";
 
 contract GasRescueLensTest is Test {
     uint256 internal constant BASE_SEPOLIA_CHAIN_ID = 84_532;
@@ -214,6 +216,95 @@ contract GasRescueLensTest is Test {
         assertTrue(r.routerAllowed);
         assertTrue(r.nonceUnused);
         assertTrue(r.userFunded);
+    }
+
+    function test_arbDemoReadiness_and_hackQuestReport() public {
+        GasRescueLens.RescueReadiness memory demo = lens.arbDemoReadiness(user, 1, 0);
+        // Local fixture relayer/token/router are not the live Arb addrs.
+        assertFalse(demo.relayerOk);
+        assertFalse(demo.tokenAllowed);
+        assertFalse(demo.ready);
+        GasRescueLens.RescueReadiness memory fundedProbe = lens.arbDemoReadiness(user, 1, 1 ether);
+        assertFalse(fundedProbe.userFunded, "live GRTT has no code on the local fixture");
+
+        address nativeTo_ = address(uint160(0x1111));
+        GasRescueLens.HackQuestReport memory r = lens.hackQuestReport(user, 1, 100 ether, nativeTo_, bytes32(0));
+        assertEq(r.swapStatus.chainId, ARB_SEPOLIA_CHAIN_ID);
+        assertEq(r.swapStatus.swap, address(rescue));
+        assertEq(r.swapStatus.owner, owner);
+        assertFalse(r.swapStatus.paused);
+        assertFalse(r.swapStatus.permit2Enabled);
+        assertTrue(r.readiness.permit2Off);
+        assertFalse(r.swapStatus.boundToLiveArb);
+        assertTrue(r.bytecode.hasCanonicalPermit2Getter);
+        assertTrue(r.bytecode.hasRescueReceipt);
+        assertTrue(r.receipt.supported);
+        assertTrue(r.bytecode.setPermit2IsImmutable);
+        assertFalse(r.bytecode.tipMatchesLiveViews);
+        assertEq(r.paths.grttPathHash, ArbSepoliaDemoPath.dryGrttPathHash(nativeTo_));
+        assertEq(r.paths.gmockPathHash, ArbSepoliaDemoPath.dryGmockPathHash(nativeTo_));
+        assertFalse(r.paths.quotedIsWalletDryPlaceholder);
+
+        bytes32 dry = ArbSepoliaDemoPath.WALLET_DRY_PATH_HASH;
+        GasRescueLens.HackQuestReport memory flagged = lens.hackQuestReport(user, 1, 0, nativeTo_, dry);
+        assertTrue(flagged.paths.quotedIsWalletDryPlaceholder);
+        assertTrue(flagged.readiness.userFunded, "amountIn 0 skips the balance check");
+    }
+
+    function test_demoPathHash_matchesLibrary() public view {
+        bytes32 h = lens.demoPathHash(ArbSepoliaDemoPath.GRTT, 0.2 ether, nativeTo);
+        assertEq(h, ArbSepoliaDemoPath.pathHash(ArbSepoliaDemoPath.GRTT, 0.2 ether, nativeTo));
+        assertTrue(lens.matchesDemoPath(ArbSepoliaDemoPath.GRTT, 0.2 ether, nativeTo, h));
+        assertFalse(
+            lens.matchesDemoPath(ArbSepoliaDemoPath.GRTT, 0.2 ether, nativeTo, ArbSepoliaDemoPath.WALLET_DRY_PATH_HASH)
+        );
+    }
+
+    function test_hackQuestReport_rejectsZeroNativeTo() public {
+        vm.expectRevert(GasRescueLens.ZeroAddress.selector);
+        lens.hackQuestReport(user, 1, 0, address(0), bytes32(0));
+    }
+
+    function test_hackQuestStatus_script_printsReadyJson() public {
+        HackQuestStatus script = new HackQuestStatus();
+        vm.setEnv("GAS_RESCUE_SWAP_ADDRESS", vm.toString(address(rescue)));
+        vm.setEnv("GAS_RESCUE_LENS_ADDRESS", vm.toString(address(lens)));
+
+        string memory json = script.reportJson(user, 1, 100 ether, nativeTo, bytes32(0));
+        assertTrue(_contains(json, '"product":"GasRescueSwap"'));
+        assertTrue(_contains(json, '"buildathon":"2026-09-14-day2"'));
+        assertTrue(_contains(json, '"permit2Enabled":false'));
+        assertTrue(_contains(json, '"permit2Off":true'));
+        assertTrue(_contains(json, '"hasRescueReceipt":true'));
+        assertTrue(_contains(json, '"rescueReceiptSupported":true'));
+        assertTrue(_contains(json, '"quotedPathIsWalletDryPlaceholder":false'));
+        assertTrue(_contains(json, '"lensEphemeral":false'));
+        assertTrue(_contains(json, vm.toString(address(rescue))));
+        assertTrue(_contains(json, vm.toString(ArbSepoliaDemoPath.dryGrttPathHash(nativeTo))));
+
+        vm.chainId(1);
+        vm.expectRevert(bytes("HackQuestStatus: testnet only (Arb Sepolia 421614 or Base Sepolia 84532)"));
+        script.reportJson(user, 1, 0, nativeTo, bytes32(0));
+    }
+
+    function _contains(
+        string memory haystack,
+        string memory needle
+    ) internal pure returns (bool) {
+        bytes memory h = bytes(haystack);
+        bytes memory n = bytes(needle);
+        if (n.length > h.length) return false;
+        for (uint256 i = 0; i <= h.length - n.length; i++) {
+            bool ok = true;
+            for (uint256 j = 0; j < n.length; j++) {
+                if (h[i + j] != n[j]) {
+                    ok = false;
+                    break;
+                }
+            }
+            if (ok) return true;
+        }
+        return false;
     }
 }
 
