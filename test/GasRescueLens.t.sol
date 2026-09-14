@@ -8,6 +8,7 @@ import {IGasRescueSwap} from "../src/interfaces/IGasRescueSwap.sol";
 import {MockERC20Permit} from "../src/mocks/MockERC20Permit.sol";
 import {MockWETH} from "../src/mocks/MockWETH.sol";
 import {MockSwapRouter} from "../src/mocks/MockSwapRouter.sol";
+import {MockPermit2} from "../src/mocks/MockPermit2.sol";
 import {DeployGasRescueLens} from "../script/DeployGasRescueLens.s.sol";
 
 contract GasRescueLensTest is Test {
@@ -183,6 +184,36 @@ contract GasRescueLensTest is Test {
             lens.rescueReadiness(owner, address(token), address(router), user, 1, 1 ether);
         assertFalse(ownerAsRelayer.relayerOk);
         assertFalse(ownerAsRelayer.ready);
+    }
+
+    /// @dev Local-only: etch canonical Permit2 and owner-enable it to prove `ready`
+    ///      fail-closes. Does not change default deploy policy (Permit2 stays off).
+    function test_readiness_falseWhenPermit2Enabled() public {
+        address canonical = 0x000000000022D473030F116dDEE9F6B43aC78BA3;
+        MockPermit2 impl = new MockPermit2();
+        vm.etch(canonical, address(impl).code);
+
+        GasRescueSwap wired = new GasRescueSwap(owner, relayer, address(weth), canonical);
+        vm.startPrank(owner);
+        wired.setEip2612Token(address(token), true);
+        wired.setRouterAllowed(address(router), true);
+        wired.setPermit2Enabled(true);
+        vm.stopPrank();
+
+        GasRescueLens wiredLens = new GasRescueLens(address(wired));
+        GasRescueLens.RescueReadiness memory r =
+            wiredLens.rescueReadiness(relayer, address(token), address(router), user, 1, 100 ether);
+        assertTrue(wired.permit2Enabled(), "this instance only - default Lens swap stays off");
+        assertFalse(rescue.permit2Enabled(), "default fixture Permit2 stays disabled");
+        assertFalse(r.permit2Off);
+        assertFalse(r.ready);
+        assertTrue(r.notPaused);
+        assertTrue(r.relayerOk);
+        assertTrue(r.tokenAllowed);
+        assertTrue(r.tokenEip2612);
+        assertTrue(r.routerAllowed);
+        assertTrue(r.nonceUnused);
+        assertTrue(r.userFunded);
     }
 }
 

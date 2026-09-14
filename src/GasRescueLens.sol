@@ -57,6 +57,8 @@ contract GasRescueLens {
     }
 
     /// @notice One-call readiness for a quoted rescue. Does not verify signatures.
+    ///         `ready` is fail-closed: includes `permit2Off` so an enabled Permit2
+    ///         cannot look demo-ready. Lens never toggles Permit2.
     struct RescueReadiness {
         bool notPaused;
         bool relayerOk;
@@ -148,7 +150,7 @@ contract GasRescueLens {
         out.userFunded = amountIn == 0 || IERC20(token).balanceOf(user) >= amountIn;
         out.permit2Off = !swap.permit2Enabled() && _permit2Ok(swap.permit2());
         out.ready = out.notPaused && out.relayerOk && out.tokenAllowed && out.tokenEip2612 && out.routerAllowed
-            && out.nonceUnused && out.userFunded;
+            && out.nonceUnused && out.userFunded && out.permit2Off;
     }
 
     function hashOrder(
