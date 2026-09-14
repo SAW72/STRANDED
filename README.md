@@ -8,7 +8,7 @@ Testnet only: **Base Sepolia (84532)** and **Arb Sepolia (421614)**. No mainnet 
 
 See [docs/AUDITOR.md](docs/AUDITOR.md). Issues: [#3](https://github.com/SAW72/gas-rescue/issues/3), [#4](https://github.com/SAW72/gas-rescue/issues/4).
 
-HackQuest / Arbitrum Open House (2026-09-14): [docs/BUILDATHON_PROGRESS.md](docs/BUILDATHON_PROGRESS.md) — Day-1 Arb Sepolia Lens + live fork smokes. Judged product stays `GasRescueSwap`.
+HackQuest / Arbitrum Open House (2026-09-14): [docs/BUILDATHON_PROGRESS.md](docs/BUILDATHON_PROGRESS.md) — Day-1 Lens + Day-2 Lens consumer / Arb demo path registry. Judged product stays `GasRescueSwap`.
 
 ## Product: `GasRescueSwap`
 
@@ -70,7 +70,7 @@ forge test -vv
 
 `GasRescueSwap` coverage: happy-path mock swap (native + WETH unwrap, both testnets), exact `amountSwap` consume (leftover tokenIn reverts), job-only native credit (donated ETH/WETH not swept), end-of-tx tokenIn/WETH/ETH zeros, Permit2 Order witness binding, slippage, underfunded / path / domain / sig without nonce burn, replay, wrong `chainId` / mainnet blocked, `feeAmount + amountSwap` overflow, FoT, reentrancy (permit / transferFrom / router), non-permit and disabled Permit2 fail-closed, owner ≠ relayer, two-step `Ownable2Step` transfer + disabled `renounceOwnership`, pause.
 
-`GasRescueLens` unit tests cover status / readiness / order hash / F-1 immutability probes. `test/fork/*` hit live Sepolia and **skip** when `ARB_SEPOLIA_RPC_URL` / `BASE_SEPOLIA_RPC_URL` are unset (CI `forge test` stays offline).
+`GasRescueLens` unit tests cover status / readiness / order hash / F-1 immutability probes / `hackQuestReport`. `ArbSepoliaDemoPath` covers the live mock-router `pathHash` formula. `test/fork/*` hit live Sepolia and **skip** when `ARB_SEPOLIA_RPC_URL` / `BASE_SEPOLIA_RPC_URL` are unset (CI `forge test` stays offline).
 
 Harness tests in `test/GasRescue.t.sol` stay green.
 
@@ -122,6 +122,7 @@ Demo execute (test user key only): `script/RescueSwap.s.sol`.
 ```
 src/GasRescueSwap.sol              # product
 src/GasRescueLens.sol              # view helper (wallet / HackQuest evidence)
+src/ArbSepoliaDemoPath.sol         # GRTT/gMOCK → WETH pathHash (relayer formula)
 src/interfaces/IGasRescueSwap.sol
 src/interfaces/IGasRescueSwapViews.sol
 src/interfaces/IGasRescueSwapProof.sol  # rescue receipt for registry claims
@@ -141,6 +142,7 @@ test/audit/F5F6Audit.t.sol
 script/DeployGasRescueSwap.s.sol
 script/DeployGasRescueLens.s.sol   # testnet Lens; Spencer --broadcast only
 script/InspectGasRescueSwap.s.sol  # read-only; no keys
+script/HackQuestStatus.s.sol       # Lens consumer; HackQuest JSON; no keys
 script/RescueSwap.s.sol
 script/Deploy.s.sol                # harness
 script/Rescue.s.sol                # harness
@@ -155,7 +157,9 @@ script/Rescue.s.sol                # harness
 | Arb Sepolia `421614` | [`0x65e712222745A8FCCbF038A90Fa75caB0867993D`](https://sepolia.arbiscan.io/address/0x65e712222745A8FCCbF038A90Fa75caB0867993D) | Demo **GRTT** `0x5649fF51123D534044aA7E6cBc8762698Ffed713`; also allowlisted gMOCK `0x30006e29a23c713070136F56db1BDf2A8B82B318`; router `0x680410c7f64e06EB7e80dc7B5c149f7855e225A8`; WETH `0x980B62Da83eFf3D4576C647993b0c1D7faf17c73` |
 | Base Sepolia `84532` | [`0x21A1ADf810e64B5bd1d530D31abA6856b8DEf688`](https://sepolia.basescan.org/address/0x21A1ADf810e64B5bd1d530D31abA6856b8DEf688) | Mock `0xE36c35cbF0373D77D00732f7B92dB4fB8fd37166`; router `0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4`; WETH `0x4200000000000000000000000000000000000006` |
 
-`GasRescueLens` is **not live** until Spencer broadcasts `script/DeployGasRescueLens.s.sol` (see [docs/BUILDATHON_PROGRESS.md](docs/BUILDATHON_PROGRESS.md)). Do not list `StrandedRegistry` here.
+`GasRescueLens` is **not live** until Spencer broadcasts `script/DeployGasRescueLens.s.sol`. Day-2 `HackQuestStatus` still works without that deploy (constructs Lens in-script, no broadcast). Do not list `StrandedRegistry` here.
+
+Arb demo path (live Relayer + `ArbSepoliaDemoPath`): `pathHash = keccak256(swapExact(tokenIn, amountSwap, nativeTo))` for GRTT / gMOCK. Wallet fixtures keep placeholder `0xbbb…` and must not be submitted. See [docs/BUILDATHON_PROGRESS.md](docs/BUILDATHON_PROGRESS.md) Day-2.
 
 Live Arb bytecode predates F-5/F-6 getters + `rescueReceipt` — [docs/REDEPLOY-GASRESCUESWAP.md](docs/REDEPLOY-GASRESCUESWAP.md). Permit2 stays **disabled** on both deploys. Owner `0x30466A210961c0C2C13AF0A9d35dfC6E8858bA9D`. Demo video: https://youtu.be/GzAfCQwoq88
 

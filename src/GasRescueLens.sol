@@ -3,6 +3,7 @@ pragma solidity ^0.8.24;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
+import {ArbSepoliaDemoPath} from "./ArbSepoliaDemoPath.sol";
 import {IGasRescueSwap} from "./interfaces/IGasRescueSwap.sol";
 import {IGasRescueSwapViews} from "./interfaces/IGasRescueSwapViews.sol";
 
@@ -81,6 +82,31 @@ contract GasRescueLens {
         bool tipMatchesLiveViews;
     }
 
+    /// @notice Receipt view path. Live 2026-09-14 Arb bytecode: `supported=false`.
+    ///         Tip writes `rescueReceipt`; do not claim a live redeploy.
+    struct ReceiptView {
+        bool supported;
+        address tokenIn;
+        uint256 amountIn;
+        address relayer;
+    }
+
+    struct DemoPaths {
+        bytes32 grttPathHash;
+        bytes32 gmockPathHash;
+        bool quotedIsWalletDryPlaceholder;
+    }
+
+    /// @notice One-call HackQuest / wallet evidence. Consumes Lens read paths
+    ///         plus the Arb demo path registry. Does not verify signatures.
+    struct HackQuestReport {
+        Status swapStatus;
+        RescueReadiness readiness;
+        BytecodeHints bytecode;
+        ReceiptView receipt;
+        DemoPaths paths;
+    }
+
     error ZeroAddress();
     error WrongChain();
     error NotGasRescueSwap();
@@ -133,6 +159,15 @@ contract GasRescueLens {
         return allowlistCheck(LIVE_RELAYER, LIVE_ARB_GRTT, LIVE_ARB_ROUTER, user, nonce);
     }
 
+    /// @notice GRTT + live relayer/router readiness (Permit2-off fail-closed).
+    function arbDemoReadiness(
+        address user,
+        uint256 nonce,
+        uint256 amountIn
+    ) public view returns (RescueReadiness memory) {
+        return rescueReadiness(LIVE_RELAYER, LIVE_ARB_GRTT, LIVE_ARB_ROUTER, user, nonce, amountIn);
+    }
+
     function rescueReadiness(
         address relayer,
         address token,
@@ -147,7 +182,7 @@ contract GasRescueLens {
         out.tokenEip2612 = swap.eip2612Tokens(token);
         out.routerAllowed = swap.allowedRouters(router);
         out.nonceUnused = !swap.usedNonces(user, nonce);
-        out.userFunded = amountIn == 0 || IERC20(token).balanceOf(user) >= amountIn;
+        out.userFunded = amountIn == 0 || _userFunded(token, user, amountIn);
         out.permit2Off = !swap.permit2Enabled() && _permit2Ok(swap.permit2());
         out.ready = out.notPaused && out.relayerOk && out.tokenAllowed && out.tokenEip2612 && out.routerAllowed
             && out.nonceUnused && out.userFunded && out.permit2Off;
@@ -181,7 +216,7 @@ contract GasRescueLens {
     function rescueReceiptOrMissing(
         address user,
         uint256 nonce
-    ) external view returns (bool supported, address tokenIn, uint256 amountIn, address relayer) {
+    ) public view returns (bool supported, address tokenIn, uint256 amountIn, address relayer) {
         bytes4 selector = bytes4(keccak256("rescueReceipt(address,uint256)"));
         (bool ok, bytes memory data) = address(swap).staticcall(abi.encodeWithSelector(selector, user, nonce));
         if (!ok || data.length < 96) {
@@ -199,6 +234,57 @@ contract GasRescueLens {
         out.permit2IsCanonicalOrZero = _permit2Ok(swap.permit2());
         // Live Sepolia deploys share the F-1 view surface; tip additionally has F-5 getter + receipt.
         out.tipMatchesLiveViews = !out.hasCanonicalPermit2Getter && !out.hasRescueReceipt;
+    }
+
+    function demoPathHash(
+        address tokenIn,
+        uint256 amountSwap,
+        address nativeTo
+    ) public pure returns (bytes32) {
+        return ArbSepoliaDemoPath.pathHash(tokenIn, amountSwap, nativeTo);
+    }
+
+    function matchesDemoPath(
+        address tokenIn,
+        uint256 amountSwap,
+        address nativeTo,
+        bytes32 quotedHash
+    ) public pure returns (bool) {
+        return ArbSepoliaDemoPath.matches(tokenIn, amountSwap, nativeTo, quotedHash);
+    }
+
+    /// @notice Wallet/relayer evidence bundle. `quotedPathHash` is optional
+    ///         (zero skips the dry-placeholder flag). `nativeTo` required for
+    ///         GRTT/gMOCK dry-amount path hashes.
+    function hackQuestReport(
+        address user,
+        uint256 nonce,
+        uint256 amountIn,
+        address nativeTo,
+        bytes32 quotedPathHash
+    ) public view returns (HackQuestReport memory out) {
+        if (nativeTo == address(0)) revert ZeroAddress();
+        out.swapStatus = status();
+        out.readiness = arbDemoReadiness(user, nonce, amountIn);
+        out.bytecode = bytecodeHints();
+        out.receipt = _receiptView(user, nonce);
+        out.paths = _demoPaths(nativeTo, quotedPathHash);
+    }
+
+    function _receiptView(
+        address user,
+        uint256 nonce
+    ) internal view returns (ReceiptView memory out) {
+        (out.supported, out.tokenIn, out.amountIn, out.relayer) = rescueReceiptOrMissing(user, nonce);
+    }
+
+    function _demoPaths(
+        address nativeTo,
+        bytes32 quotedPathHash
+    ) internal pure returns (DemoPaths memory out) {
+        out.grttPathHash = ArbSepoliaDemoPath.dryGrttPathHash(nativeTo);
+        out.gmockPathHash = ArbSepoliaDemoPath.dryGmockPathHash(nativeTo);
+        out.quotedIsWalletDryPlaceholder = ArbSepoliaDemoPath.isWalletDryPlaceholder(quotedPathHash);
     }
 
     function _setPermit2IsImmutable() internal view returns (bool) {
@@ -219,6 +305,19 @@ contract GasRescueLens {
         (bool ok, bytes memory data) = target.staticcall(abi.encodeWithSelector(selector, address(0), uint256(0)));
         if (ok) return true;
         return data.length > 0;
+    }
+
+    function _userFunded(
+        address token,
+        address user,
+        uint256 amountIn
+    ) internal view returns (bool) {
+        if (token.code.length == 0) return false;
+        try IERC20(token).balanceOf(user) returns (uint256 bal) {
+            return bal >= amountIn;
+        } catch {
+            return false;
+        }
     }
 
     function _permit2Ok(

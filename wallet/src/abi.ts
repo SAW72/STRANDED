@@ -36,6 +36,8 @@ export const erc20PermitAbi = [
   },
 ] as const;
 
+export { gasRescueLensAbi } from "./lib/lens";
+
 export const gasRescueAbi = [
   {
     type: "function",

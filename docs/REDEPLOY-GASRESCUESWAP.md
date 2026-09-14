@@ -15,6 +15,8 @@ No agent has broadcast a replacement. Do not write a new address into README Liv
 | EIP-2612 user-drop (F-6) | Not a public getter | `_requireExactUserDrop` on both pulls |
 | `rescueReceipt` | **Missing** | Written on success (registry proof) |
 
+Day-2 adds a **view path** only: `GasRescueLens.rescueReceiptOrMissing` / `hackQuestReport.rescueReceiptSupported`. On live Arb that flag is `false`. Do not treat the view helper as a live swap redeploy.
+
 Base `0x21A1…` is older still: `setPermit2` is `onlyOwner` (pre-F-1), not `Permit2Immutable`. Same Permit2-off policy. Optional to redeploy; Day-1 primary is Arb.
 
 Judged v1 rescue (`rescueWithPermit`, allowlists, pause, EIP-712) still works on live Arb. Redeploy is for F-5 constructor hardening, F-6 user-drop on-chain, and Phase-2 receipts — **not** to replace Gas Rescue with `StrandedRegistry`.

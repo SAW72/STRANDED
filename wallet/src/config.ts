@@ -49,6 +49,11 @@ export function gasRescueAddress(chainId: SupportedChainId = BASE_SEPOLIA_CHAIN_
   return optionalAddress(readEnv("VITE_GAS_RESCUE_ADDRESS"));
 }
 
+/** Optional. Empty until Spencer broadcasts `DeployGasRescueLens` on Arb Sepolia. */
+export function gasRescueLensAddress(): Address | null {
+  return optionalAddress(readEnv("VITE_GAS_RESCUE_LENS_ADDRESS"));
+}
+
 export function tokenAddress(chainId: SupportedChainId = BASE_SEPOLIA_CHAIN_ID): Address | null {
   if (chainId === ARB_SEPOLIA_CHAIN_ID) {
     return optionalAddress(readEnv("VITE_TOKEN_ADDRESS_ARB_SEPOLIA"));

@@ -183,6 +183,7 @@ function readBody(req) {
   });
 }
 
+/** Same `swapExact` encoding as `src/ArbSepoliaDemoPath.sol`. pathHash = keccak256(swapData). */
 function encodeSwapData(tokenIn, amountSwap, nativeTo) {
   return encodeFunctionData({
     abi: mockRouterAbi,

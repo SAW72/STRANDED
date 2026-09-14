@@ -50,3 +50,57 @@ Live read (2026-09-14): `paused=false`, `permit2=address(0)`, `permit2Enabled=fa
 3. Inspect live: `forge script script/InspectGasRescueSwap.s.sol:InspectGasRescueSwap --rpc-url "$ARB_SEPOLIA_RPC_URL" --chain-id 421614`
 4. If Lens should be on-chain for wallet/HackQuest: `prepare()` then `--broadcast` with Spencer keys only (`DeployGasRescueLens`, chain 421614). Paste the new address into README Live (Lens row only — do not move Registry into Live).
 5. If F-5/F-6 + `rescueReceipt` must be on the judged swap: follow [REDEPLOY-GASRESCUESWAP.md](REDEPLOY-GASRESCUESWAP.md). Do not claim a swap redeploy until it is broadcast and the Live table is updated.
+
+## 2026-09-14 — Day-2 Lens consumer + Arb demo path registry (visible, non-docs-only)
+
+**PR:** https://github.com/SAW72/STRANDED/pull/21 (branch `cursor/buildathon-day2-arb-sepolia-45f3`)
+
+### What shipped
+
+- **`ArbSepoliaDemoPath`** — known-good Arb Sepolia mock-router path for **GRTT / gMOCK → WETH/native**. Same formula as the live Relayer: `pathHash = keccak256(abi.encodeWithSelector(swapExact, tokenIn, amountSwap, nativeTo))`. Wallet dry `0xbbb…` is labeled a placeholder and rejected as a live path.
+- **`GasRescueLens.hackQuestReport`** — one-call consumer of Day-1 Lens read paths: status, GRTT demo readiness (Permit2-off fail-closed), `rescueReceiptOrMissing` (view path; live bytecode still lacks the getter), F-1/F-5 hints, and computed GRTT/gMOCK demo `pathHash`es.
+- **`script/HackQuestStatus.s.sol`** — read-only Foundry script. Prints HackQuest-ready JSON. Constructs Lens in-script when `GAS_RESCUE_LENS_ADDRESS` is unset. **No keys. No `--broadcast`.**
+- Wallet helpers only (`wallet/src/lib/demoPath.ts`, `wallet/src/lib/lens.ts`): same path formula + Lens ABI. No UI rewrite. Fixtures stay dry `0xbbb…`.
+- Tests: `test/ArbSepoliaDemoPath.t.sol`, Lens/script unit tests, optional live fork assertion that live still lacks `rescueReceipt`.
+
+### RescueReceipt (tip vs live — do not claim redeploy)
+
+| Surface | Live Arb `0x65e7…` (2026-09-14) | Tip `src/GasRescueSwap.sol` |
+| --- | --- | --- |
+| `rescueReceipt(user, nonce)` | **Missing** (empty revert) | Written on success |
+| Lens `rescueReceiptOrMissing` | `supported=false` | `supported=true` (empty until a job) |
+| `HackQuestStatus` JSON `liveVsTip` | `live-lacks-rescueReceipt-do-not-claim-redeploy` | `tip-has-rescueReceipt` |
+
+Judges can cite the **view path** and the documented gap. The judged swap was **not** redeployed in this PR.
+
+### Arb Sepolia path (relayer / wallet)
+
+Encoding (live mock router `0x6804…` = `MockSwapRouter.swapExact`):
+
+```
+swapData = abi.encodeWithSelector(swapExact(address,uint256,address), tokenIn, amountSwap, nativeTo)
+pathHash = keccak256(swapData)
+```
+
+Dry-mock amounts (same as wallet fixtures): `amountIn=1e18`, `amountSwap=0.2e18`, `fee=0.01e18`, remainder `0.79e18`. `pathHash` binds `nativeTo` — compute per quote. Print hashes via `HackQuestStatus` (`HACKQUEST_NATIVE_TO`).
+
+Fixture `nativeTo=0x1111…1111` hashes (read-only `HackQuestStatus` on Arb RPC, **no broadcast**; Lens address in that run is ephemeral):
+
+| Token | pathHash |
+| --- | --- |
+| GRTT | `0xf2fa57d446a79240cf3043e9e9f82fd28d8719d264bc89de7d81b8eb167b3c47` |
+| gMOCK | `0x8b4de67c75e10145cd31889f5f4bb75938d269e2147e0a00ad9b82bc2c9a8665` |
+
+Supported demo tokens: **GRTT** `0x5649…d713`, **gMOCK** `0x3000…B318`. Destination of the swap slice is native/WETH `0x980B…7c73` (router `payAmount`), remainder ERC-20 still goes to signed `to` (move-out).
+
+### On-chain deploys performed by the agent
+
+**None.** No `--broadcast`. No keys. No HackQuest submit.
+
+### Spencer next (optional)
+
+1. `forge test -vv`
+2. `ARB_SEPOLIA_RPC_URL=https://sepolia-rollup.arbitrum.io/rpc forge test --match-path 'test/fork/*' -vv`
+3. `forge script script/HackQuestStatus.s.sol:HackQuestStatus --rpc-url "$ARB_SEPOLIA_RPC_URL" --chain-id 421614` (no `--broadcast`)
+4. Lens on-chain still optional: `DeployGasRescueLens` Spencer keys only, then set `GAS_RESCUE_LENS_ADDRESS` / `VITE_GAS_RESCUE_LENS_ADDRESS`.
+5. Swap redeploy (F-5 getter + live `rescueReceipt`) still [REDEPLOY-GASRESCUESWAP.md](REDEPLOY-GASRESCUESWAP.md) — Spencer only.

@@ -40,6 +40,7 @@ cp .env.example .env
 | `VITE_TOKEN_ADDRESS` | to read/sign on Base | Base Sepolia MockERC20Permit `0xE36c35cbF0373D77D00732f7B92dB4fB8fd37166`. |
 | `VITE_GAS_RESCUE_ADDRESS_ARB_SEPOLIA` | to sign on Arb | Arb Sepolia GasRescueSwap `0x65e712222745A8FCCbF038A90Fa75caB0867993D`. |
 | `VITE_TOKEN_ADDRESS_ARB_SEPOLIA` | to read/sign on Arb | Arb Sepolia MockERC20Permit **GRTT** `0x5649fF51123D534044aA7E6cBc8762698Ffed713`. |
+| `VITE_GAS_RESCUE_LENS_ADDRESS` | no | Optional Day-2 Lens. Leave empty until Spencer broadcasts `DeployGasRescueLens`. |
 | `VITE_BASE_SEPOLIA_RPC_URL` | no | Defaults to `https://sepolia.base.org` |
 | `VITE_ARB_SEPOLIA_RPC_URL` | no | Defaults to `https://sepolia-rollup.arbitrum.io/rpc` |
 
