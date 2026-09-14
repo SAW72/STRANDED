@@ -8,6 +8,8 @@ Testnet only: **Base Sepolia (84532)** and **Arb Sepolia (421614)**. No mainnet 
 
 See [docs/AUDITOR.md](docs/AUDITOR.md). Issues: [#3](https://github.com/SAW72/gas-rescue/issues/3), [#4](https://github.com/SAW72/gas-rescue/issues/4).
 
+HackQuest / Arbitrum Open House (2026-09-14): [docs/BUILDATHON_PROGRESS.md](docs/BUILDATHON_PROGRESS.md) — Day-1 Arb Sepolia Lens + live fork smokes. Judged product stays `GasRescueSwap`.
+
 ## Product: `GasRescueSwap`
 
 A user who holds an allowlisted ERC-20 but has **zero native ETH** signs an EIP-712 `Order` plus gasless auth (EIP-2612 permit, or Permit2 if owner-enabled). An allowlisted relayer pays gas. The contract:
@@ -68,6 +70,8 @@ forge test -vv
 
 `GasRescueSwap` coverage: happy-path mock swap (native + WETH unwrap, both testnets), exact `amountSwap` consume (leftover tokenIn reverts), job-only native credit (donated ETH/WETH not swept), end-of-tx tokenIn/WETH/ETH zeros, Permit2 Order witness binding, slippage, underfunded / path / domain / sig without nonce burn, replay, wrong `chainId` / mainnet blocked, `feeAmount + amountSwap` overflow, FoT, reentrancy (permit / transferFrom / router), non-permit and disabled Permit2 fail-closed, owner ≠ relayer, two-step `Ownable2Step` transfer + disabled `renounceOwnership`, pause.
 
+`GasRescueLens` unit tests cover status / readiness / order hash / F-1 immutability probes. `test/fork/*` hit live Sepolia and **skip** when `ARB_SEPOLIA_RPC_URL` / `BASE_SEPOLIA_RPC_URL` are unset (CI `forge test` stays offline).
+
 Harness tests in `test/GasRescue.t.sol` stay green.
 
 ## Environment
@@ -117,7 +121,9 @@ Demo execute (test user key only): `script/RescueSwap.s.sol`.
 
 ```
 src/GasRescueSwap.sol              # product
+src/GasRescueLens.sol              # view helper (wallet / HackQuest evidence)
 src/interfaces/IGasRescueSwap.sol
+src/interfaces/IGasRescueSwapViews.sol
 src/interfaces/IGasRescueSwapProof.sol  # rescue receipt for registry claims
 src/interfaces/IPermit2.sol
 src/interfaces/IWETH.sol
@@ -127,10 +133,14 @@ src/GasRescue.sol                  # fee-skim harness
 src/interfaces/IGasRescue.sol
 src/mocks/…
 test/GasRescueSwap.t.sol
+test/GasRescueLens.t.sol
+test/fork/                         # live Sepolia smokes; skip if RPC unset
 test/GasRescue.t.sol
 test/StrandedRegistry.t.sol
 test/audit/F5F6Audit.t.sol
 script/DeployGasRescueSwap.s.sol
+script/DeployGasRescueLens.s.sol   # testnet Lens; Spencer --broadcast only
+script/InspectGasRescueSwap.s.sol  # read-only; no keys
 script/RescueSwap.s.sol
 script/Deploy.s.sol                # harness
 script/Rescue.s.sol                # harness
@@ -140,12 +150,14 @@ script/Rescue.s.sol                # harness
 
 **Relayer (Arb Sepolia):** https://stranded-relayer-arb.onrender.com — live quotes/signing (`stubRpc=false`). Hot wallet `0x8240124dc78a27c80354Ca813Df12aa2888A9AF6`. Runtime `RELAYER_PRIVATE_KEY` only (never disk).
 
-| Chain | GasRescueSwap | Mock / notes |
+| Chain | GasRescueSwap (judged) | Mock / notes |
 | --- | --- | --- |
-| Arb Sepolia `421614` | [`0x65e712222745A8FCCbF038A90Fa75caB0867993D`](https://sepolia.arbiscan.io/address/0x65e712222745A8FCCbF038A90Fa75caB0867993D) | Mock gMOCK `0x30006e29a23c713070136F56db1BDf2A8B82B318`; router `0x680410c7f64e06eb7e80dc7b5c149f7855e225a8`; WETH `0x980B62Da83eFf3D4576C647993b0c1D7faf17c73` |
+| Arb Sepolia `421614` | [`0x65e712222745A8FCCbF038A90Fa75caB0867993D`](https://sepolia.arbiscan.io/address/0x65e712222745A8FCCbF038A90Fa75caB0867993D) | Demo **GRTT** `0x5649fF51123D534044aA7E6cBc8762698Ffed713`; also allowlisted gMOCK `0x30006e29a23c713070136F56db1BDf2A8B82B318`; router `0x680410c7f64e06EB7e80dc7B5c149f7855e225A8`; WETH `0x980B62Da83eFf3D4576C647993b0c1D7faf17c73` |
 | Base Sepolia `84532` | [`0x21A1ADf810e64B5bd1d530D31abA6856b8DEf688`](https://sepolia.basescan.org/address/0x21A1ADf810e64B5bd1d530D31abA6856b8DEf688) | Mock `0xE36c35cbF0373D77D00732f7B92dB4fB8fd37166`; router `0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4`; WETH `0x4200000000000000000000000000000000000006` |
 
-Permit2 stays **disabled** on both deploys. Owner `0x30466A210961c0C2C13AF0A9d35dfC6E8858bA9D`. Demo video: https://youtu.be/GzAfCQwoq88
+`GasRescueLens` is **not live** until Spencer broadcasts `script/DeployGasRescueLens.s.sol` (see [docs/BUILDATHON_PROGRESS.md](docs/BUILDATHON_PROGRESS.md)). Do not list `StrandedRegistry` here.
+
+Live Arb bytecode predates F-5/F-6 getters + `rescueReceipt` — [docs/REDEPLOY-GASRESCUESWAP.md](docs/REDEPLOY-GASRESCUESWAP.md). Permit2 stays **disabled** on both deploys. Owner `0x30466A210961c0C2C13AF0A9d35dfC6E8858bA9D`. Demo video: https://youtu.be/GzAfCQwoq88
 
 ## Phase-2 scaffold: `StrandedRegistry` (non-production)
 

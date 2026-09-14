@@ -8,6 +8,11 @@ import {GasRescueSwap} from "../src/GasRescueSwap.sol";
 /// @notice Deploy GasRescueSwap to Base Sepolia (84532) or Arb Sepolia (421614).
 ///         Refuses every other chain — no mainnet default.
 ///
+///         2026-09-14: live Arb `0x65e712222745A8FCCbF038A90Fa75caB0867993D` predates
+///         F-5 `CANONICAL_PERMIT2` getter + F-6 user-drop + `rescueReceipt`.
+///         Redeploy checklist: docs/REDEPLOY-GASRESCUESWAP.md
+///         Broadcast = Spencer keys only. Agents must never pass --broadcast.
+///
 /// Required env:
 ///   PRIVATE_KEY          deployer / owner key (must not equal RELAYER_ADDRESS)
 ///   RELAYER_ADDRESS      first allowlisted relayer (hot key ≠ owner)
