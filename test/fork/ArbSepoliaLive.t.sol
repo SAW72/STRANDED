@@ -138,7 +138,8 @@ contract ArbSepoliaLiveTest is Test {
         assertTrue(hq.readiness.tokenAllowed);
         assertTrue(hq.readiness.tokenEip2612);
         assertTrue(hq.readiness.routerAllowed);
-        assertTrue(hq.readiness.ready, "amountIn 0 + live allowlists + Permit2 off");
+        assertFalse(hq.readiness.userFunded, "amountIn 0 is a probe; never funded");
+        assertFalse(hq.readiness.ready, "ready requires amountIn>0 plus a real GRTT balance");
         assertFalse(hq.bytecode.hasRescueReceipt, "live still lacks rescueReceipt - do not claim redeploy");
         assertFalse(hq.receipt.supported);
         assertEq(hq.paths.grttPathHash, ArbSepoliaDemoPath.dryGrttPathHash(dryNative));

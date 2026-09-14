@@ -23,13 +23,25 @@ describe("GasRescueLens wallet consumer", () => {
   it("accepts HackQuestStatus JSON and rejects Permit2-on blobs", () => {
     const ok = JSON.stringify({
       product: "GasRescueSwap",
-      buildathon: "2026-09-14-day2",
+      buildathon: "2026-09-14-day3",
       permit2Enabled: false,
       hasRescueReceipt: false,
       lensEphemeral: true,
       grttDemoPathHash: "0x01",
     });
     expect(isHackQuestStatusJson(ok)).toBe(true);
+    expect(
+      isHackQuestStatusJson(
+        JSON.stringify({
+          product: "GasRescueSwap",
+          buildathon: "2026-09-14-day2",
+          permit2Enabled: false,
+          hasRescueReceipt: false,
+          lensEphemeral: true,
+          grttDemoPathHash: "0x01",
+        }),
+      ),
+    ).toBe(true);
     expect(isHackQuestStatusJson('{"product":"GasRescueSwap","permit2Enabled":true}')).toBe(false);
     expect(isHackQuestStatusJson("not-json")).toBe(false);
 
