@@ -53,7 +53,7 @@ Live read (2026-09-14): `paused=false`, `permit2=address(0)`, `permit2Enabled=fa
 
 ## 2026-09-14 — Day-2 Lens consumer + Arb demo path registry (visible, non-docs-only)
 
-**PR:** (opened against `main` from `cursor/buildathon-day2-arb-sepolia-45f3`)
+**PR:** https://github.com/SAW72/STRANDED/pull/21 (branch `cursor/buildathon-day2-arb-sepolia-45f3`)
 
 ### What shipped
 
