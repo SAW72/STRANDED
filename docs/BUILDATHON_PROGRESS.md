@@ -158,7 +158,9 @@ Same table as Day-1. Relayer hot `0x8240…9AF6` still needs ~0.10 ETH for a liv
 - **Arb-first docs** — README Live, this file, and the QA runbook state the 2026-09-17 KNOW snapshot: Relayer live, hot-wallet underfund, fee posture, live-vs-tip drift, Lens not on-chain, Registry not judged.
 - **`HackQuestStatus` JSON tagged `2026-09-17-day4`.** Read-only fields (no keys, no broadcast):
   - `hotWallet` / `hotWalletWei` / `hotWalletMinWei` / `hotWalletUnderfunded` — live hot `0x8240…9AF6` vs **0.10 ETH** floor.
-  - `feePostureNote` — issue #24 / Tokenomics **MATCH**: keep Relayer **1% of `tokenIn`**, **~20%** swapped for gas (not a fee), **100 bps** slip fail-closed. USD floor/cap/skip is **deferred** (not a live Relayer bug). **Relayer Backend owns** any future rewrite; this script does not implement it.
+  - `feePostureNote` — issue #24 / Tokenomics **MATCH** with current Relayer math (not a mismatch). Keep `feeAmount = amountIn / 100` (1%), `amountSwap` default `amountIn / 5` (~20% gas top-up, **not** a fee), 100 bps slip fail-closed. USD floor/cap/skip is **deferred** until real USD quotes exist — do not invent Sepolia prices and do **not** treat that deferral as a live Relayer bug. Relayer Backend owns any future rewrite; this script does not implement it.
+
+**Plain English (Tokenomics):** “We take 1% of the tokens you’re rescuing as the service fee. About 20% is swapped into ETH so you have gas after. The rest goes to your chosen wallet. If the swap would slip more than 1%, the job cancels and nothing moves.”
   - `liveVsTip` — names both missing tip surfaces (`rescueReceipt` + `CANONICAL_PERMIT2()`). Live judged v1 `rescueWithPermit` is still OK. Do not claim a swap redeploy.
 
 ### Live Arb read (2026-09-17, no broadcast)
@@ -171,7 +173,7 @@ Same table as Day-1. Relayer hot `0x8240…9AF6` still needs ~0.10 ETH for a liv
 | --- | --- |
 | Relayer https://stranded-relayer-arb.onrender.com | **Healthy** — `ok`, `live`, `stubRpc=false`, chainId `421614`, swap `0x65e712222745A8FCCbF038A90Fa75caB0867993D` |
 | Hot wallet `0x8240124dc78a27c80354Ca813Df12aa2888A9AF6` | **~0.015 ETH** — needs **~0.10 ETH** before a live submit (Spencer / Chain Ops) |
-| Fee quote | **MATCH** Relayer math: 1% of `tokenIn`; ~20% gas top-up (not a fee); 100 bps fail-closed. USD-hybrid deferred — **not** a Relayer bug. Do not rewrite here |
+| Fee quote | **MATCH** current Relayer math (not a mismatch): 1% of `tokenIn`; ~20% gas top-up (not a fee); 100 bps fail-closed. USD floor/cap/skip deferred until real USD quotes. Do not rewrite here |
 | Live swap `0x65e7…993D` | Lacks tip `rescueReceipt` / `CANONICAL_PERMIT2()` getter. Judged v1 `rescueWithPermit` still OK |
 | `GasRescueLens` | **Not on-chain.** `HackQuestStatus` constructs Lens in-script (`lensEphemeral=true`) |
 | `StrandedRegistry` | Merged; **not** judged product |
