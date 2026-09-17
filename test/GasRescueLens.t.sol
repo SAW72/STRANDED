@@ -306,7 +306,7 @@ contract GasRescueLensTest is Test {
 
         string memory json = script.reportJson(user, 1, 100 ether, nativeTo, bytes32(0));
         assertTrue(_contains(json, '"product":"GasRescueSwap"'));
-        assertTrue(_contains(json, '"buildathon":"2026-09-17-day4"'));
+        assertTrue(_contains(json, '"buildathon":"2026-09-17-day5"'));
         assertTrue(_contains(json, '"permit2Enabled":false'));
         assertTrue(_contains(json, '"permit2Off":true'));
         assertTrue(_contains(json, '"hasRescueReceipt":true'));
@@ -325,17 +325,38 @@ contract GasRescueLensTest is Test {
         assertTrue(_contains(json, string.concat('"hotWallet":"', vm.toString(address(0x8240124dc78a27c80354Ca813Df12aa2888A9AF6)), '"')));
         assertTrue(_contains(json, '"hotWalletMinWei":"100000000000000000"'));
         assertTrue(_contains(json, '"hotWalletUnderfunded":true'), "anvil hot wallet starts at 0");
+        assertTrue(_contains(json, '"liveSubmitBlocked":true'));
+        assertTrue(_contains(json, '"recommendedJudgePath":"fixture-demo-no-top-up"'));
+        assertTrue(_contains(json, '"demoVideoExists":true'));
+        assertTrue(
+            _contains(
+                json,
+                '"judgeNote":"hot-wallet-underfunded-Spencer-blocked; recommended=fixture-demo-without-top-up; demo-video-exists-do-not-remake"'
+            )
+        );
         assertTrue(_contains(json, vm.toString(address(rescue))));
         assertTrue(_contains(json, vm.toString(ArbSepoliaDemoPath.dryGrttPathHash(nativeTo))));
 
         vm.deal(0x8240124dc78a27c80354Ca813Df12aa2888A9AF6, 0.015 ether);
         string memory lowHot = script.reportJson(user, 1, 100 ether, nativeTo, bytes32(0));
         assertTrue(_contains(lowHot, '"hotWalletUnderfunded":true'), "0.015 ETH is below the 0.10 live-submit floor");
+        assertTrue(_contains(lowHot, '"liveSubmitBlocked":true'));
+        assertTrue(_contains(lowHot, '"recommendedJudgePath":"fixture-demo-no-top-up"'));
 
         vm.deal(0x8240124dc78a27c80354Ca813Df12aa2888A9AF6, 0.10 ether);
         string memory fundedHot = script.reportJson(user, 1, 100 ether, nativeTo, bytes32(0));
         assertTrue(_contains(fundedHot, '"hotWalletUnderfunded":false'));
+        assertTrue(_contains(fundedHot, '"liveSubmitBlocked":false'));
         assertTrue(_contains(fundedHot, '"hotWalletWei":"100000000000000000"'));
+        assertTrue(_contains(fundedHot, '"recommendedJudgePath":"live-submit-ok-if-user-funded"'));
+        assertTrue(
+            _contains(
+                fundedHot,
+                '"judgeNote":"hot-wallet-meets-0.10-ETH-floor; live-submit-still-Spencer-keys-only; fixture-demo-remains-valid"'
+            )
+        );
+        assertEq(script.recommendedJudgePath(true), "fixture-demo-no-top-up");
+        assertEq(script.recommendedJudgePath(false), "live-submit-ok-if-user-funded");
 
         string memory probeJson = script.reportJson(user, 1, 0, nativeTo, bytes32(0));
         assertTrue(_contains(probeJson, '"amountInPositive":false'));

@@ -23,10 +23,10 @@ import {GasRescueLens} from "../src/GasRescueLens.sol";
 ///   HACKQUEST_NATIVE_TO       path-hash recipient (default fixture 0x1111…)
 ///   HACKQUEST_PATH_HASH       optional quoted hash (flags wallet dry 0xbbb…)
 ///
-/// Day-4 JSON (no keys, no broadcast): `hotWalletUnderfunded` (live hot ETH
-/// vs ~0.10), `feePostureNote` (issue #24 MATCH: keep Relayer 1% / 20%
-/// gas top-up / 100 bps slip; USD-hybrid deferred, not a Relayer bug),
-/// `liveVsTip` (rescueReceipt + CANONICAL_PERMIT2 getter).
+/// Day-5 JSON (no keys, no broadcast): Day-4 fields plus judge fixture path.
+/// When the live hot wallet is underfunded (~0.015 vs 0.10 ETH),
+/// `recommendedJudgePath=fixture-demo-no-top-up` and `liveSubmitBlocked=true`.
+/// Do not remake the demo video. Do not rewrite Relayer fee math (#26 owns that).
 contract HackQuestStatus is Script {
     uint256 internal constant BASE_SEPOLIA_CHAIN_ID = 84_532;
     uint256 internal constant ARB_SEPOLIA_CHAIN_ID = 421_614;
@@ -40,6 +40,12 @@ contract HackQuestStatus is Script {
     ///      deferred (not a live Relayer bug). Do not rewrite fee math here.
     string internal constant FEE_POSTURE_NOTE =
         "match=flat-1pct-tokenIn; amountSwap=20pct-gas-topup-not-fee; slip=100bps-fail-closed; usd-hybrid=deferred-not-a-relayer-bug; owner=Relayer-Backend-do-not-rewrite";
+    string internal constant JUDGE_PATH_FIXTURE = "fixture-demo-no-top-up";
+    string internal constant JUDGE_PATH_LIVE = "live-submit-ok-if-user-funded";
+    string internal constant JUDGE_NOTE_UNDERFUNDED =
+        "hot-wallet-underfunded-Spencer-blocked; recommended=fixture-demo-without-top-up; demo-video-exists-do-not-remake";
+    string internal constant JUDGE_NOTE_FUNDED =
+        "hot-wallet-meets-0.10-ETH-floor; live-submit-still-Spencer-keys-only; fixture-demo-remains-valid";
 
     function run() external {
         _requireTestnet();
@@ -111,7 +117,7 @@ contract HackQuestStatus is Script {
         string memory head = string.concat(
             "{",
             '"product":"GasRescueSwap",',
-            '"buildathon":"2026-09-17-day4",',
+            '"buildathon":"2026-09-17-day5",',
             '"chainId":',
             _u(r.swapStatus.chainId),
             ",",
@@ -179,7 +185,14 @@ contract HackQuestStatus is Script {
             _u(HOT_WALLET_MIN_WEI),
             '","hotWalletUnderfunded":',
             _b(hotUnderfunded),
-            ',"feePostureNote":"',
+            ',"liveSubmitBlocked":',
+            _b(hotUnderfunded),
+            ',"recommendedJudgePath":"',
+            recommendedJudgePath(hotUnderfunded),
+            '","demoVideoExists":true',
+            ',"judgeNote":"',
+            judgeNote(hotUnderfunded),
+            '","feePostureNote":"',
             FEE_POSTURE_NOTE,
             '"'
         );
@@ -217,6 +230,20 @@ contract HackQuestStatus is Script {
             '"}'
         );
         return string.concat(head, policy, ops, receipt, paths);
+    }
+
+    /// @notice Fixture/demo is the judge path while the hot wallet is underfunded.
+    function recommendedJudgePath(
+        bool hotUnderfunded
+    ) public pure returns (string memory) {
+        return hotUnderfunded ? JUDGE_PATH_FIXTURE : JUDGE_PATH_LIVE;
+    }
+
+    /// @notice ASCII-only note so solc / CI stay green (no Unicode dashes).
+    function judgeNote(
+        bool hotUnderfunded
+    ) public pure returns (string memory) {
+        return hotUnderfunded ? JUDGE_NOTE_UNDERFUNDED : JUDGE_NOTE_FUNDED;
     }
 
     /// @notice Live Arb `0x65e7…` (2026-09-17) lacks tip `rescueReceipt` and

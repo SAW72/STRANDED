@@ -1,6 +1,6 @@
 # QA runbook — Arb Sepolia rescue (Spencer-watchable)
 
-**Arb-first.** HackQuest / buildathon judged product is **GasRescueSwap only** on Arbitrum Sepolia `421614`. Base Sepolia is secondary. Tracking: [issue #24](https://github.com/SAW72/STRANDED/issues/24). Progress: [BUILDATHON_PROGRESS.md](BUILDATHON_PROGRESS.md) Day-4.
+**Arb-first.** HackQuest / buildathon judged product is **GasRescueSwap only** on Arbitrum Sepolia `421614`. Base Sepolia is secondary. Tracking: [issue #24](https://github.com/SAW72/STRANDED/issues/24). Progress: [BUILDATHON_PROGRESS.md](BUILDATHON_PROGRESS.md) Day-5.
 
 Scripted **read-only** checks first, then optional **Spencer-keys-only** sign / broadcast. No agent keys. No `--broadcast` from CI or Cursor. No HackQuest submit. No mainnet. Permit2 stays **off**. Do not treat `StrandedRegistry` as the demo.
 
@@ -19,6 +19,29 @@ Scripted **read-only** checks first, then optional **Spencer-keys-only** sign / 
 | Live vs tip | Live lacks `rescueReceipt` + `CANONICAL_PERMIT2()`. Judged v1 `rescueWithPermit` still OK | Optional Spencer redeploy |
 | Lens | Not on-chain. `HackQuestStatus` constructs in-script | Optional Spencer `DeployGasRescueLens` |
 | Registry | Merged (PR #23); **not** judged | — |
+| Demo video | Exists (README Live). **Do not remake** | — |
+
+---
+
+## Fixture / demo without top-up (recommended judge path)
+
+**Do not wait for a hot-wallet top-up.** Spencer / Chain Ops owns `0x8240…9AF6` (~0.015 ETH vs ~0.10). Live `rescueWithPermit` submit stays blocked until that top-up. The judged product already works. The demo video already exists — **do not remake**.
+
+Judges and QA should use this path (no keys, no `--broadcast`, no Relayer `POST /v1/rescues`):
+
+1. `forge test -vv` — offline units + script JSON (CI). Also `forge build` (SignOrder must compile).
+2. Wallet: leave Relayer URL empty → labeled **Sample · not live** fixture. Confirm-details still gates. Do not POST fixture signatures.
+3. Read-only `HackQuestStatus` (section 4a): expect `buildathon=2026-09-17-day5`, `hotWalletUnderfunded=true`, `liveSubmitBlocked=true`, `recommendedJudgePath=fixture-demo-no-top-up`, `demoVideoExists=true`, `judgeNote` as below.
+4. Read-only `InspectGasRescueSwap` (section 3): Permit2 off, allowlists, drift line, plus the same underfunded / fixture recommendation.
+5. Cite the existing demo video in README Live. Do not remake it.
+
+Live Relayer `/health` and a `POST /v1/quotes` (section 5) are optional evidence. They do **not** require a top-up. Skip section 6 (sign / submit) unless Spencer has topped up the hot wallet and is running keys locally.
+
+`HackQuestStatus` / Inspect `judgeNote` when underfunded:
+
+```
+hot-wallet-underfunded-Spencer-blocked; recommended=fixture-demo-without-top-up; demo-video-exists-do-not-remake
+```
 
 ---
 
@@ -77,7 +100,9 @@ cast balance 0x8240124dc78a27c80354Ca813Df12aa2888A9AF6 \
   --rpc-url "$ARB_SEPOLIA_RPC_URL" --ether
 ```
 
-**Expect ≥ 0.10 ETH** before a live `rescueWithPermit`. Below that, quotes may still work; the submit will fail when the hot key cannot pay gas. Read 2026-09-14: **~0.015 ETH** — Spencer top-up required before a judged live job.
+**Expect ≥ 0.10 ETH** before a live `rescueWithPermit`. Below that, quotes may still work; the submit will fail when the hot key cannot pay gas. Read 2026-09-17: **~0.015 ETH** — Spencer top-up required before a judged live job.
+
+**Judges do not wait here.** Use [Fixture / demo without top-up](#fixture--demo-without-top-up-recommended-judge-path). `HackQuestStatus` reports `liveSubmitBlocked=true` and `recommendedJudgePath=fixture-demo-no-top-up` until Spencer tops up.
 
 Spencer tops up **Arb Sepolia** ETH only (not mainnet). Arbiscan: https://sepolia.arbiscan.io/address/0x8240124dc78a27c80354Ca813Df12aa2888A9AF6
 
@@ -103,6 +128,8 @@ forge script script/InspectGasRescueSwap.s.sol:InspectGasRescueSwap \
 | `permit2` | `0x0000…0000` |
 | `permit2Enabled` | `false` |
 | `relayer allowed` | `true` (hot `0x8240…9AF6`) |
+| `hot underfunded` / `live submit blocked` | **`true`** while hot ETH &lt; 0.10 |
+| `recommended path` | `fixture-demo-no-top-up` while underfunded |
 | `GRTT allowed` / `eip2612` | `true` (`0x5649fF51123D534044aA7E6cBc8762698Ffed713`) |
 | `gMOCK allowed` | `true` |
 | `router allowed` | `true` (`0x680410c7f64e06EB7e80dc7B5c149f7855e225A8`) |
@@ -128,7 +155,7 @@ forge script script/HackQuestStatus.s.sol:HackQuestStatus \
 | Field | Probe (`amountIn` 0) |
 | --- | --- |
 | `product` | `GasRescueSwap` |
-| `buildathon` | `2026-09-17-day4` |
+| `buildathon` | `2026-09-17-day5` |
 | `chainId` | `421614` |
 | `swap` | `0x65e7…993D` |
 | `boundToLiveArb` | `true` |
@@ -141,6 +168,10 @@ forge script script/HackQuestStatus.s.sol:HackQuestStatus \
 | `ready` | **`false`** (fail-closed; do not treat as a green rescue) |
 | `hotWallet` | `0x8240124dc78a27c80354Ca813Df12aa2888A9AF6` |
 | `hotWalletUnderfunded` | **`true`** while hot ETH &lt; 0.10 (`hotWalletMinWei=1e17`) |
+| `liveSubmitBlocked` | **`true`** while underfunded (same predicate) |
+| `recommendedJudgePath` | `fixture-demo-no-top-up` while underfunded |
+| `demoVideoExists` | `true` (do not remake) |
+| `judgeNote` | `hot-wallet-underfunded-Spencer-blocked; recommended=fixture-demo-without-top-up; demo-video-exists-do-not-remake` |
 | `feePostureNote` | `match=flat-1pct-tokenIn; amountSwap=20pct-gas-topup-not-fee; slip=100bps-fail-closed; usd-hybrid=deferred-not-a-relayer-bug; owner=Relayer-Backend-do-not-rewrite` |
 | `hasRescueReceipt` / `rescueReceiptSupported` / `hasCanonicalPermit2Getter` | `false` on live |
 | `liveVsTip` | `live-lacks-rescueReceipt-and-canonicalPermit2-do-not-claim-redeploy` |
@@ -242,14 +273,14 @@ Required extra env: `PRIVATE_KEY` = **relayer** hot key (`0x8240…9AF6`), `USER
 | Check | Pass |
 | --- | --- |
 | Relayer `/health` | `ok`, `421614`, `stubRpc=false`, swap + hot wallet match |
-| Hot wallet ETH | ≥ ~0.10 |
-| `InspectGasRescueSwap` | Permit2 off, not paused, GRTT + router + relayer allowlisted |
-| Probe `HackQuestStatus` | flags green, **`ready=false`**, `probeOnly=true` |
+| Hot wallet ETH | ≥ ~0.10 for a **live submit only**. Fixture/demo **passes** while ~0.015 and `liveSubmitBlocked=true` |
+| `InspectGasRescueSwap` | Permit2 off, not paused, GRTT + router + relayer allowlisted; prints fixture recommendation when underfunded |
+| Probe `HackQuestStatus` | flags green, **`ready=false`**, `probeOnly=true`, Day-5 `recommendedJudgePath=fixture-demo-no-top-up` while underfunded |
 | Funded `HackQuestStatus` | `ready=true` only with `amountIn>0` and a real GRTT balance |
 | Live quote | nonzero `amountIn`; path is `swapExact`, not `0xbbb…`; fee MATCH 1% / 20% gas top-up / 100 bps (do not rewrite) |
 | Sign / broadcast | Spencer machine only; testnet `421614`; Permit2 never enabled |
 
-Live still **lacks** `rescueReceipt` / `CANONICAL_PERMIT2()`. Day-4 `HackQuestStatus` `liveVsTip` names both. Cite the view path + this gap. Do not claim a swap redeploy. `StrandedRegistry` is not the judged product.
+Live still **lacks** `rescueReceipt` / `CANONICAL_PERMIT2()`. Day-5 `HackQuestStatus` `liveVsTip` names both. Cite the view path + this gap. Do not claim a swap redeploy. `StrandedRegistry` is not the judged product. Do not remake the demo video.
 
 ---
 
@@ -276,5 +307,7 @@ Live still **lacks** `rescueReceipt` / `CANONICAL_PERMIT2()`. Day-4 `HackQuestSt
 - Submit to HackQuest from an agent
 - Fund or sign with keys that are not Spencer’s
 - Treat `amountIn=0` `ready` as a go (it is never ready after Day-3)
-- Rewrite Relayer fee quote math (issue #24 MATCH: keep 1% / 20% gas top-up / 100 bps; USD-hybrid deferred, not a Relayer bug)
+- Rewrite Relayer fee quote math (issue #24 MATCH: keep 1% / 20% gas top-up / 100 bps; USD-hybrid deferred, not a Relayer bug). Relayer control plane is PR #26 — do not open a competing Relayer PR
 - Treat `StrandedRegistry` as the judged product
+- Remake the demo video
+- Wait for a hot-wallet top-up before judging — use the fixture/demo path

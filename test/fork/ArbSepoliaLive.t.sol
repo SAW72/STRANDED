@@ -148,17 +148,18 @@ contract ArbSepoliaLiveTest is Test {
         assertTrue(lens.matchesDemoPath(LIVE_GRTT, 0.2 ether, dryNative, hq.paths.grttPathHash));
     }
 
-    function test_live_hackQuestStatus_day4Fields() public onlyFork {
+    function test_live_hackQuestStatus_day5Fields() public onlyFork {
         HackQuestStatus script = new HackQuestStatus();
         vm.setEnv("GAS_RESCUE_SWAP_ADDRESS", vm.toString(LIVE_SWAP));
 
         string memory json = script.reportJson(LIVE_OWNER, 0, 0, ArbSepoliaDemoPath.DRY_NATIVE_TO, bytes32(0));
         assertTrue(_contains(json, '"product":"GasRescueSwap"'));
-        assertTrue(_contains(json, '"buildathon":"2026-09-17-day4"'));
+        assertTrue(_contains(json, '"buildathon":"2026-09-17-day5"'));
         assertTrue(_contains(json, '"boundToLiveArb":true'));
         assertTrue(_contains(json, '"probeOnly":true'));
         assertTrue(_contains(json, '"ready":false'));
         assertTrue(_contains(json, '"permit2Enabled":false'));
+        assertTrue(_contains(json, '"demoVideoExists":true'));
         assertTrue(
             _contains(json, '"liveVsTip":"live-lacks-rescueReceipt-and-canonicalPermit2-do-not-claim-redeploy"'),
             "live still lacks tip getters - do not claim redeploy"
@@ -171,8 +172,18 @@ contract ArbSepoliaLiveTest is Test {
         );
         if (LIVE_RELAYER.balance < 0.10 ether) {
             assertTrue(_contains(json, '"hotWalletUnderfunded":true'), "KNOW: hot wallet still below ~0.10 ETH");
+            assertTrue(_contains(json, '"liveSubmitBlocked":true'));
+            assertTrue(_contains(json, '"recommendedJudgePath":"fixture-demo-no-top-up"'));
+            assertTrue(
+                _contains(
+                    json,
+                    '"judgeNote":"hot-wallet-underfunded-Spencer-blocked; recommended=fixture-demo-without-top-up; demo-video-exists-do-not-remake"'
+                )
+            );
         } else {
             assertTrue(_contains(json, '"hotWalletUnderfunded":false'));
+            assertTrue(_contains(json, '"liveSubmitBlocked":false'));
+            assertTrue(_contains(json, '"recommendedJudgePath":"live-submit-ok-if-user-funded"'));
         }
     }
 

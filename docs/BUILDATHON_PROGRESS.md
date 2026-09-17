@@ -189,3 +189,43 @@ Same table as Day-1. Relayer hot `0x8240…9AF6` still needs ~0.10 ETH for a liv
 3. `forge script script/HackQuestStatus.s.sol:HackQuestStatus --rpc-url "$ARB_SEPOLIA_RPC_URL" --chain-id 421614` (no `--broadcast`) — expect `hotWalletUnderfunded=true` until the hot wallet is topped up, `feePostureNote` present, `liveVsTip=live-lacks-rescueReceipt-and-canonicalPermit2-do-not-claim-redeploy`
 4. Follow [QA_ARB_SEPOLIA_RESCUE.md](QA_ARB_SEPOLIA_RESCUE.md). Top up the hot wallet (~0.10 ETH Arb Sepolia) before any live submit.
 5. Lens on-chain / swap redeploy still optional and Spencer-only.
+
+## 2026-09-17 — Day-5 Arb Sepolia improvements (visible, non-docs-only)
+
+**Issue:** [#24](https://github.com/SAW72/STRANDED/issues/24) — improvements phase (product already works; demo video exists — do not remake).  
+**QA:** [QA_ARB_SEPOLIA_RESCUE.md](QA_ARB_SEPOLIA_RESCUE.md) — **fixture/demo without top-up** is the recommended judge path.
+
+**Judged product remains `GasRescueSwap`.** Relayer control plane landed on `main` as PR #26 — this PR does **not** rewrite Relayer fee math (`feeAmount = amountIn/100`, `amountSwap` default `amountIn/5`, 100 bps). No competing Relayer control-plane PR.
+
+### What shipped
+
+- **`forge build` gate.** `script/SignOrder.s.sol` logged `pathHash` as `console2.log(string, bytes32)`, which has no overload and broke full-tree `forge build`. Day-5 logs `vm.toString(order.pathHash)`. A unit test instantiates `SignOrder` so `forge test` keeps the compile gate.
+- **Judge-facing dry-run / HackQuest / QA.** Hot wallet `0x8240…9AF6` remains **~0.015 ETH** (Spencer-blocked). Fixture/demo is the recommended path **without** a top-up. `HackQuestStatus` JSON tagged `2026-09-17-day5` adds:
+  - `liveSubmitBlocked` — true while hot ETH &lt; 0.10
+  - `recommendedJudgePath` — `fixture-demo-no-top-up` when underfunded, else `live-submit-ok-if-user-funded`
+  - `demoVideoExists=true` — do not remake https://youtu.be/GzAfCQwoq88
+  - `judgeNote` — ASCII `hot-wallet-underfunded-Spencer-blocked; recommended=fixture-demo-without-top-up; demo-video-exists-do-not-remake`
+- **`InspectGasRescueSwap`** prints the same underfunded / fixture recommendation (`judgeNotes()` is unit-tested).
+- Day-4 fields kept: `hotWalletUnderfunded`, `feePostureNote` MATCH, `liveVsTip` (do not claim redeploy).
+
+### KNOW snapshot (2026-09-17 evening, no broadcast)
+
+| Item | Status |
+| --- | --- |
+| Relayer https://stranded-relayer-arb.onrender.com | **Healthy** — control plane on `main` (PR #26). Fee math **untouched** (1% / 20% gas top-up / 100 bps) |
+| Hot wallet `0x8240124dc78a27c80354Ca813Df12aa2888A9AF6` | **~0.015 ETH** — live submit blocked. **Use fixture/demo. Do not wait for top-up.** |
+| Demo video | Exists — **do not remake** |
+| Live swap `0x65e7…993D` | Unchanged. Lacks tip `rescueReceipt` / `CANONICAL_PERMIT2()`. Do not claim redeploy |
+| `GasRescueLens` | **Not deployed.** Do not deploy Lens from this PR |
+| `StrandedRegistry` | Merged; **not** judged product |
+
+### On-chain deploys performed by the agent
+
+**None.** No `--broadcast`. No keys. No Relayer fee rewrite. No Permit2 enable. No mainnet. No Lens deploy. No HackQuest submit. No video remake.
+
+### Spencer next (optional)
+
+1. `forge test -vv` and `forge build` (SignOrder must compile).
+2. Follow [QA_ARB_SEPOLIA_RESCUE.md](QA_ARB_SEPOLIA_RESCUE.md) **fixture/demo without top-up**. Do not top up from an agent.
+3. `forge script script/HackQuestStatus.s.sol:HackQuestStatus --rpc-url "$ARB_SEPOLIA_RPC_URL" --chain-id 421614` (no `--broadcast`) — expect `buildathon=2026-09-17-day5`, `hotWalletUnderfunded=true`, `liveSubmitBlocked=true`, `recommendedJudgePath=fixture-demo-no-top-up`.
+4. Hot-wallet top-up (~0.10 ETH) remains Spencer / Chain Ops. Lens / swap redeploy still optional and Spencer-only.

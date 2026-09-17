@@ -84,7 +84,8 @@ contract SignOrder is Script {
         console2.log("router      ", order.router);
         console2.log("nonce       ", order.nonce);
         console2.log("deadline    ", order.deadline);
-        console2.log("pathHash    ", order.pathHash);
+        // console2 has no log(string, bytes32); vm.toString keeps full-tree `forge build` green.
+        console2.log("pathHash    ", vm.toString(order.pathHash));
     }
 
     function _signOrder(
