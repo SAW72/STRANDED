@@ -201,7 +201,9 @@ export function isHackQuestStatusJson(text: string): boolean {
     const parsed = JSON.parse(text) as Record<string, unknown>;
     return (
       parsed.product === "GasRescueSwap" &&
-      (parsed.buildathon === "2026-09-14-day3" || parsed.buildathon === "2026-09-14-day2") &&
+      (parsed.buildathon === "2026-09-17-day4" ||
+        parsed.buildathon === "2026-09-14-day3" ||
+        parsed.buildathon === "2026-09-14-day2") &&
       parsed.permit2Enabled === false &&
       typeof parsed.grttDemoPathHash === "string" &&
       typeof parsed.hasRescueReceipt === "boolean" &&

@@ -19,7 +19,7 @@ Day-2 adds a **view path** only: `GasRescueLens.rescueReceiptOrMissing` / `hackQ
 
 Base `0x21A1…` is older still: `setPermit2` is `onlyOwner` (pre-F-1), not `Permit2Immutable`. Same Permit2-off policy. Optional to redeploy; Day-1 primary is Arb.
 
-Judged v1 rescue (`rescueWithPermit`, allowlists, pause, EIP-712) still works on live Arb. Redeploy is for F-5 constructor hardening, F-6 user-drop on-chain, and Phase-2 receipts — **not** to replace Gas Rescue with `StrandedRegistry`.
+Judged v1 rescue (`rescueWithPermit`, allowlists, pause, EIP-712) still works on live Arb. Day-4 `HackQuestStatus` `liveVsTip` reports `live-lacks-rescueReceipt-and-canonicalPermit2-do-not-claim-redeploy` until Spencer broadcasts a replacement. Redeploy is for F-5 constructor hardening, F-6 user-drop on-chain, and Phase-2 receipts — **not** to replace Gas Rescue with `StrandedRegistry`.
 
 ## Script (no agent broadcast)
 

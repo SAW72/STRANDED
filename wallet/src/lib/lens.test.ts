@@ -23,11 +23,14 @@ describe("GasRescueLens wallet consumer", () => {
   it("accepts HackQuestStatus JSON and rejects Permit2-on blobs", () => {
     const ok = JSON.stringify({
       product: "GasRescueSwap",
-      buildathon: "2026-09-14-day3",
+      buildathon: "2026-09-17-day4",
       permit2Enabled: false,
       hasRescueReceipt: false,
       lensEphemeral: true,
       grttDemoPathHash: "0x01",
+      hotWalletUnderfunded: true,
+      feePostureNote: "match=flat-1pct-tokenIn; amountSwap=20pct-gas-topup-not-fee; slip=100bps-fail-closed; usd-hybrid=deferred-not-a-relayer-bug; owner=Relayer-Backend-do-not-rewrite",
+      liveVsTip: "live-lacks-rescueReceipt-and-canonicalPermit2-do-not-claim-redeploy",
     });
     expect(isHackQuestStatusJson(ok)).toBe(true);
     expect(

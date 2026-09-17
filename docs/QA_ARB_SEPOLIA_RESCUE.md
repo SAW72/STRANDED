@@ -1,11 +1,24 @@
 # QA runbook — Arb Sepolia rescue (Spencer-watchable)
 
-Scripted **read-only** checks first, then optional **Spencer-keys-only** sign / broadcast. No agent keys. No `--broadcast` from CI or Cursor. No HackQuest submit. No mainnet. Permit2 stays **off**.
+**Arb-first.** HackQuest / buildathon judged product is **GasRescueSwap only** on Arbitrum Sepolia `421614`. Base Sepolia is secondary. Tracking: [issue #24](https://github.com/SAW72/STRANDED/issues/24). Progress: [BUILDATHON_PROGRESS.md](BUILDATHON_PROGRESS.md) Day-4.
+
+Scripted **read-only** checks first, then optional **Spencer-keys-only** sign / broadcast. No agent keys. No `--broadcast` from CI or Cursor. No HackQuest submit. No mainnet. Permit2 stays **off**. Do not treat `StrandedRegistry` as the demo.
 
 **Judged product:** `GasRescueSwap` v1 at [`0x65e712222745A8FCCbF038A90Fa75caB0867993D`](https://sepolia.arbiscan.io/address/0x65e712222745A8FCCbF038A90Fa75caB0867993D) (Arb Sepolia `421614`).
 
-**Relayer:** https://stranded-relayer-arb.onrender.com  
-**Relayer hot wallet:** `0x8240124dc78a27c80354Ca813Df12aa2888A9AF6` — needs **~0.10 ETH** on Arb Sepolia to pay gas for a live demo.
+**Relayer:** https://stranded-relayer-arb.onrender.com — **KNOW** healthy (`live`, `stubRpc=false`) as of 2026-09-17.  
+**Relayer hot wallet:** `0x8240124dc78a27c80354Ca813Df12aa2888A9AF6` — **KNOW** ~**0.015 ETH**; needs **~0.10 ETH** on Arb Sepolia before a live submit (Spencer / Chain Ops).
+
+### KNOW gaps (2026-09-17)
+
+| Item | Status | Owner |
+| --- | --- | --- |
+| Relayer health | Live, `stubRpc=false`, chain `421614`, swap `0x65e7…993D` | — |
+| Hot wallet ETH | ~0.015 vs ~0.10 — live submit blocked | Spencer / Chain Ops |
+| Fee quote | **MATCH** current Relayer math: **1% of `tokenIn`** service fee; **~20%** swapped for gas (not a fee); **100 bps** slip fail-closed. USD floor/cap/skip is deferred — **not** a live Relayer bug. Do **not** invent Sepolia USD prices. | Relayer Backend (do not rewrite fee math here) |
+| Live vs tip | Live lacks `rescueReceipt` + `CANONICAL_PERMIT2()`. Judged v1 `rescueWithPermit` still OK | Optional Spencer redeploy |
+| Lens | Not on-chain. `HackQuestStatus` constructs in-script | Optional Spencer `DeployGasRescueLens` |
+| Registry | Merged (PR #23); **not** judged | — |
 
 ---
 
@@ -115,7 +128,7 @@ forge script script/HackQuestStatus.s.sol:HackQuestStatus \
 | Field | Probe (`amountIn` 0) |
 | --- | --- |
 | `product` | `GasRescueSwap` |
-| `buildathon` | `2026-09-14-day3` |
+| `buildathon` | `2026-09-17-day4` |
 | `chainId` | `421614` |
 | `swap` | `0x65e7…993D` |
 | `boundToLiveArb` | `true` |
@@ -126,8 +139,11 @@ forge script script/HackQuestStatus.s.sol:HackQuestStatus \
 | `probeOnly` | `true` |
 | `userFunded` | `false` |
 | `ready` | **`false`** (fail-closed; do not treat as a green rescue) |
-| `hasRescueReceipt` / `rescueReceiptSupported` | `false` on live |
-| `liveVsTip` | `live-lacks-rescueReceipt-do-not-claim-redeploy` |
+| `hotWallet` | `0x8240124dc78a27c80354Ca813Df12aa2888A9AF6` |
+| `hotWalletUnderfunded` | **`true`** while hot ETH &lt; 0.10 (`hotWalletMinWei=1e17`) |
+| `feePostureNote` | `match=flat-1pct-tokenIn; amountSwap=20pct-gas-topup-not-fee; slip=100bps-fail-closed; usd-hybrid=deferred-not-a-relayer-bug; owner=Relayer-Backend-do-not-rewrite` |
+| `hasRescueReceipt` / `rescueReceiptSupported` / `hasCanonicalPermit2Getter` | `false` on live |
+| `liveVsTip` | `live-lacks-rescueReceipt-and-canonicalPermit2-do-not-claim-redeploy` |
 | Fixture `nativeTo=0x1111…1111` `grttDemoPathHash` | `0xf2fa57d446a79240cf3043e9e9f82fd28d8719d264bc89de7d81b8eb167b3c47` |
 
 Default `HACKQUEST_USER` is fixture `0x1111…1111` (not a live EOA). That is fine for a probe.
@@ -167,6 +183,8 @@ curl -sS -X POST https://stranded-relayer-arb.onrender.com/v1/quotes \
     "nativeTo": "0xYourNativeRecipient"
   }'
 ```
+
+Quote-time fee **MATCH**es issue #24 / Tokenomics: **1% of the tokens you’re rescuing** as the service fee (`feeAmount = amountIn / 100`). About **20%** is swapped into ETH so you have gas after (`amountSwap` default `amountIn / 5` — not a fee). The rest goes to the signed wallet. If the swap would slip more than **1%**, the job cancels and nothing moves. USD floor/cap/skip is **deferred** until real USD quotes exist — not a live Relayer bug. Do not invent Sepolia prices and do not change Relayer fee math from this runbook.
 
 `amountIn=0` is rejected by the Relayer (`insufficient` / request fail) and by the wallet client. Use step 4a for a Lens probe instead.
 
@@ -228,10 +246,10 @@ Required extra env: `PRIVATE_KEY` = **relayer** hot key (`0x8240…9AF6`), `USER
 | `InspectGasRescueSwap` | Permit2 off, not paused, GRTT + router + relayer allowlisted |
 | Probe `HackQuestStatus` | flags green, **`ready=false`**, `probeOnly=true` |
 | Funded `HackQuestStatus` | `ready=true` only with `amountIn>0` and a real GRTT balance |
-| Live quote | nonzero `amountIn`; path is `swapExact`, not `0xbbb…` |
+| Live quote | nonzero `amountIn`; path is `swapExact`, not `0xbbb…`; fee MATCH 1% / 20% gas top-up / 100 bps (do not rewrite) |
 | Sign / broadcast | Spencer machine only; testnet `421614`; Permit2 never enabled |
 
-Live still **lacks** `rescueReceipt` / `CANONICAL_PERMIT2()`. Cite the view path + this gap. Do not claim a swap redeploy.
+Live still **lacks** `rescueReceipt` / `CANONICAL_PERMIT2()`. Day-4 `HackQuestStatus` `liveVsTip` names both. Cite the view path + this gap. Do not claim a swap redeploy. `StrandedRegistry` is not the judged product.
 
 ---
 
@@ -258,3 +276,5 @@ Live still **lacks** `rescueReceipt` / `CANONICAL_PERMIT2()`. Cite the view path
 - Submit to HackQuest from an agent
 - Fund or sign with keys that are not Spencer’s
 - Treat `amountIn=0` `ready` as a go (it is never ready after Day-3)
+- Rewrite Relayer fee quote math (issue #24 MATCH: keep 1% / 20% gas top-up / 100 bps; USD-hybrid deferred, not a Relayer bug)
+- Treat `StrandedRegistry` as the judged product

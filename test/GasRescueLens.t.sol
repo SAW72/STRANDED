@@ -306,7 +306,7 @@ contract GasRescueLensTest is Test {
 
         string memory json = script.reportJson(user, 1, 100 ether, nativeTo, bytes32(0));
         assertTrue(_contains(json, '"product":"GasRescueSwap"'));
-        assertTrue(_contains(json, '"buildathon":"2026-09-14-day3"'));
+        assertTrue(_contains(json, '"buildathon":"2026-09-17-day4"'));
         assertTrue(_contains(json, '"permit2Enabled":false'));
         assertTrue(_contains(json, '"permit2Off":true'));
         assertTrue(_contains(json, '"hasRescueReceipt":true'));
@@ -315,8 +315,27 @@ contract GasRescueLensTest is Test {
         assertTrue(_contains(json, '"lensEphemeral":false'));
         assertTrue(_contains(json, '"amountInPositive":true'));
         assertTrue(_contains(json, '"probeOnly":false'));
+        assertTrue(_contains(json, '"liveVsTip":"tip-has-rescueReceipt-and-canonicalPermit2"'));
+        assertTrue(
+            _contains(
+                json,
+                '"feePostureNote":"match=flat-1pct-tokenIn; amountSwap=20pct-gas-topup-not-fee; slip=100bps-fail-closed; usd-hybrid=deferred-not-a-relayer-bug; owner=Relayer-Backend-do-not-rewrite"'
+            )
+        );
+        assertTrue(_contains(json, string.concat('"hotWallet":"', vm.toString(address(0x8240124dc78a27c80354Ca813Df12aa2888A9AF6)), '"')));
+        assertTrue(_contains(json, '"hotWalletMinWei":"100000000000000000"'));
+        assertTrue(_contains(json, '"hotWalletUnderfunded":true'), "anvil hot wallet starts at 0");
         assertTrue(_contains(json, vm.toString(address(rescue))));
         assertTrue(_contains(json, vm.toString(ArbSepoliaDemoPath.dryGrttPathHash(nativeTo))));
+
+        vm.deal(0x8240124dc78a27c80354Ca813Df12aa2888A9AF6, 0.015 ether);
+        string memory lowHot = script.reportJson(user, 1, 100 ether, nativeTo, bytes32(0));
+        assertTrue(_contains(lowHot, '"hotWalletUnderfunded":true'), "0.015 ETH is below the 0.10 live-submit floor");
+
+        vm.deal(0x8240124dc78a27c80354Ca813Df12aa2888A9AF6, 0.10 ether);
+        string memory fundedHot = script.reportJson(user, 1, 100 ether, nativeTo, bytes32(0));
+        assertTrue(_contains(fundedHot, '"hotWalletUnderfunded":false'));
+        assertTrue(_contains(fundedHot, '"hotWalletWei":"100000000000000000"'));
 
         string memory probeJson = script.reportJson(user, 1, 0, nativeTo, bytes32(0));
         assertTrue(_contains(probeJson, '"amountInPositive":false'));

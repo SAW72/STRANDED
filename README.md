@@ -8,7 +8,7 @@ Testnet only: **Base Sepolia (84532)** and **Arb Sepolia (421614)**. No mainnet 
 
 See [docs/AUDITOR.md](docs/AUDITOR.md). Issues: [#3](https://github.com/SAW72/gas-rescue/issues/3), [#4](https://github.com/SAW72/gas-rescue/issues/4).
 
-HackQuest / Arbitrum Open House (2026-09-14): [docs/BUILDATHON_PROGRESS.md](docs/BUILDATHON_PROGRESS.md) — Day-1 Lens, Day-2 Lens consumer / Arb demo path, Day-3 readiness fail-closed + [QA runbook](docs/QA_ARB_SEPOLIA_RESCUE.md). Judged product stays `GasRescueSwap`.
+HackQuest / Arbitrum Open House — **Arb Sepolia first** (`421614`; Base secondary). [docs/BUILDATHON_PROGRESS.md](docs/BUILDATHON_PROGRESS.md) Day-4 + [issue #24](https://github.com/SAW72/STRANDED/issues/24). Day-1 Lens, Day-2 demo path, Day-3 fail-closed readiness, Day-4 Arb KNOW snapshot + `HackQuestStatus` hot-wallet / fee-posture / live-vs-tip fields. Judged product stays `GasRescueSwap`. `StrandedRegistry` is merged and is **not** the deliverable. Live QA: [docs/QA_ARB_SEPOLIA_RESCUE.md](docs/QA_ARB_SEPOLIA_RESCUE.md).
 
 ## Product: `GasRescueSwap`
 
@@ -155,18 +155,22 @@ relayer/                           # Arb Sepolia POST /v1/quotes (Render)
 
 ## Live (testnet)
 
-**Relayer (Arb Sepolia):** https://stranded-relayer-arb.onrender.com — live quotes/signing (`stubRpc=false`). Hot wallet `0x8240124dc78a27c80354Ca813Df12aa2888A9AF6`. Runtime `RELAYER_PRIVATE_KEY` only (never disk).
+**Arb Sepolia is the judged / HackQuest chain.** Base Sepolia is documented and secondary.
+
+**Relayer (Arb Sepolia):** https://stranded-relayer-arb.onrender.com — **KNOW** healthy 2026-09-17 (`ok`, `live`, `stubRpc=false`, chainId `421614`). Hot wallet `0x8240124dc78a27c80354Ca813Df12aa2888A9AF6` still **~0.015 ETH** — needs **~0.10 ETH** before a live submit (Spencer / Chain Ops). Runtime `RELAYER_PRIVATE_KEY` only (never disk).
+
+**Fee posture (issue #24, Tokenomics MATCH):** keep current Relayer numbers. Service fee is **1% of the tokens being rescued** (`feeAmount = amountIn / 100`). About **20%** is swapped into ETH so the user has gas after (`amountSwap = amountIn / 5` — gas top-up, not a fee). The rest goes to the signed wallet. If the swap would slip more than **1%** (100 bps), the job cancels and nothing moves. USD floor/cap/skip is **deferred** until real USD quotes exist — not a live Relayer bug; do not invent Sepolia prices. Relayer Backend owns any future rewrite. Do not change Relayer fee math from this repo’s Builder lane.
 
 | Chain | GasRescueSwap (judged) | Mock / notes |
 | --- | --- | --- |
 | Arb Sepolia `421614` | [`0x65e712222745A8FCCbF038A90Fa75caB0867993D`](https://sepolia.arbiscan.io/address/0x65e712222745A8FCCbF038A90Fa75caB0867993D) | Demo **GRTT** `0x5649fF51123D534044aA7E6cBc8762698Ffed713`; also allowlisted gMOCK `0x30006e29a23c713070136F56db1BDf2A8B82B318`; router `0x680410c7f64e06EB7e80dc7B5c149f7855e225A8`; WETH `0x980B62Da83eFf3D4576C647993b0c1D7faf17c73` |
 | Base Sepolia `84532` | [`0x21A1ADf810e64B5bd1d530D31abA6856b8DEf688`](https://sepolia.basescan.org/address/0x21A1ADf810e64B5bd1d530D31abA6856b8DEf688) | Mock `0xE36c35cbF0373D77D00732f7B92dB4fB8fd37166`; router `0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4`; WETH `0x4200000000000000000000000000000000000006` |
 
-`GasRescueLens` is **not live** until Spencer broadcasts `script/DeployGasRescueLens.s.sol`. Day-2 `HackQuestStatus` still works without that deploy (constructs Lens in-script, no broadcast). Do not list `StrandedRegistry` here.
+`GasRescueLens` is **not on-chain** (KNOW). Day-4 `HackQuestStatus` still works without that deploy — it constructs Lens in-script (`lensEphemeral=true`, no broadcast) and prints `hotWalletUnderfunded`, `feePostureNote`, and `liveVsTip`. Do not list `StrandedRegistry` here (merged Phase-2 scaffold; not judged).
 
-Arb demo path (live Relayer + `ArbSepoliaDemoPath`): `pathHash = keccak256(swapExact(tokenIn, amountSwap, nativeTo))` for GRTT / gMOCK. Wallet fixtures keep placeholder `0xbbb…` and must not be submitted. See [docs/BUILDATHON_PROGRESS.md](docs/BUILDATHON_PROGRESS.md) Day-2 / Day-3. Live QA: [docs/QA_ARB_SEPOLIA_RESCUE.md](docs/QA_ARB_SEPOLIA_RESCUE.md).
+Arb demo path (live Relayer + `ArbSepoliaDemoPath`): `pathHash = keccak256(swapExact(tokenIn, amountSwap, nativeTo))` for GRTT / gMOCK. Wallet fixtures keep placeholder `0xbbb…` and must not be submitted. See [docs/BUILDATHON_PROGRESS.md](docs/BUILDATHON_PROGRESS.md) Day-4. Live QA: [docs/QA_ARB_SEPOLIA_RESCUE.md](docs/QA_ARB_SEPOLIA_RESCUE.md).
 
-Live Arb bytecode predates F-5/F-6 getters + `rescueReceipt` — [docs/REDEPLOY-GASRESCUESWAP.md](docs/REDEPLOY-GASRESCUESWAP.md). Permit2 stays **disabled** on both deploys. Owner `0x30466A210961c0C2C13AF0A9d35dfC6E8858bA9D`. Demo video: https://youtu.be/GzAfCQwoq88
+Live Arb bytecode **lacks** tip `CANONICAL_PERMIT2()` and `rescueReceipt` — judged v1 `rescueWithPermit` is still OK. Redeploy is Spencer-only: [docs/REDEPLOY-GASRESCUESWAP.md](docs/REDEPLOY-GASRESCUESWAP.md). Permit2 stays **disabled** on both deploys. Owner `0x30466A210961c0C2C13AF0A9d35dfC6E8858bA9D`. Demo video: https://youtu.be/GzAfCQwoq88
 
 ## Wallet UX
 

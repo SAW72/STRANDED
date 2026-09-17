@@ -2,7 +2,7 @@
 
 Dated commits / PRs on this file are the Hacky evidence trail. Prior work on `main` alone does not count.
 
-**Judged product:** `GasRescueSwap` (Gas Rescue v1). `StrandedRegistry` remains Phase 2 / optional tease — not in README Live as the deliverable.
+**Judged product:** `GasRescueSwap` (Gas Rescue v1) on **Arb Sepolia `421614`**. Base Sepolia is secondary. `StrandedRegistry` remains Phase 2 / optional tease — merged, not judged, not in README Live as the deliverable. Tracking: [issue #24](https://github.com/SAW72/STRANDED/issues/24).
 
 **Redeploy / broadcast = Spencer keys only.** Agents never hold keys, never `--broadcast`, never submit to HackQuest.
 
@@ -145,3 +145,47 @@ Same table as Day-1. Relayer hot `0x8240…9AF6` still needs ~0.10 ETH for a liv
 3. Follow [QA_ARB_SEPOLIA_RESCUE.md](QA_ARB_SEPOLIA_RESCUE.md) (Inspect + HackQuestStatus probe, then funded preflight).
 4. Live rescue: Spencer keys only (`SignOrder` then Relayer `POST /v1/rescues`, or `RescueSwap` `--broadcast`). Top up the hot wallet first if `cast balance` &lt; ~0.10 ETH.
 5. Lens on-chain / swap redeploy still optional and Spencer-only (Day-1 / Day-2 checklists).
+
+## 2026-09-17 — Day-4 Arb Sepolia HackQuest readiness (visible, non-docs-only)
+
+**Issue:** [#24](https://github.com/SAW72/STRANDED/issues/24) — Arb Sepolia buildathon readiness (HackQuest).  
+**QA:** [QA_ARB_SEPOLIA_RESCUE.md](QA_ARB_SEPOLIA_RESCUE.md)
+
+**Judged product remains `GasRescueSwap`.** `StrandedRegistry` is merged on `main` (PR #23 @ `035d841`) and is **not** the judged deliverable.
+
+### What shipped
+
+- **Arb-first docs** — README Live, this file, and the QA runbook state the 2026-09-17 KNOW snapshot: Relayer live, hot-wallet underfund, fee posture, live-vs-tip drift, Lens not on-chain, Registry not judged.
+- **`HackQuestStatus` JSON tagged `2026-09-17-day4`.** Read-only fields (no keys, no broadcast):
+  - `hotWallet` / `hotWalletWei` / `hotWalletMinWei` / `hotWalletUnderfunded` — live hot `0x8240…9AF6` vs **0.10 ETH** floor.
+  - `feePostureNote` — issue #24 / Tokenomics **MATCH** with current Relayer math (not a mismatch). Keep `feeAmount = amountIn / 100` (1%), `amountSwap` default `amountIn / 5` (~20% gas top-up, **not** a fee), 100 bps slip fail-closed. USD floor/cap/skip is **deferred** until real USD quotes exist — do not invent Sepolia prices and do **not** treat that deferral as a live Relayer bug. Relayer Backend owns any future rewrite; this script does not implement it.
+
+**Plain English (Tokenomics):** “We take 1% of the tokens you’re rescuing as the service fee. About 20% is swapped into ETH so you have gas after. The rest goes to your chosen wallet. If the swap would slip more than 1%, the job cancels and nothing moves.”
+  - `liveVsTip` — names both missing tip surfaces (`rescueReceipt` + `CANONICAL_PERMIT2()`). Live judged v1 `rescueWithPermit` is still OK. Do not claim a swap redeploy.
+
+### Live Arb read (2026-09-17, no broadcast)
+
+`HackQuestStatus` default probe (`amountIn=0`) against `https://sepolia-rollup.arbitrum.io/rpc`: `paused=false`, `permit2Enabled=false`, `permit2Off=true`, allowlist flags true, **`ready=false`**, `probeOnly=true`, `userFunded=false`, `boundToLiveArb=true`, `hasRescueReceipt=false`, `hasCanonicalPermit2Getter=false`, `liveVsTip=live-lacks-rescueReceipt-and-canonicalPermit2-do-not-claim-redeploy`, `hotWalletUnderfunded=true` (`hotWalletWei=14957321211204000` ≈ 0.015 ETH vs `hotWalletMinWei=0.10`), `feePostureNote` MATCH 1% / 20% gas top-up / 100 bps. Relayer `/health` live (`stubRpc=false`) on https://stranded-relayer-arb.onrender.com.
+
+### KNOW snapshot (2026-09-17, no broadcast)
+
+| Item | Status |
+| --- | --- |
+| Relayer https://stranded-relayer-arb.onrender.com | **Healthy** — `ok`, `live`, `stubRpc=false`, chainId `421614`, swap `0x65e712222745A8FCCbF038A90Fa75caB0867993D` |
+| Hot wallet `0x8240124dc78a27c80354Ca813Df12aa2888A9AF6` | **~0.015 ETH** — needs **~0.10 ETH** before a live submit (Spencer / Chain Ops) |
+| Fee quote | **MATCH** current Relayer math (not a mismatch): 1% of `tokenIn`; ~20% gas top-up (not a fee); 100 bps fail-closed. USD floor/cap/skip deferred until real USD quotes. Do not rewrite here |
+| Live swap `0x65e7…993D` | Lacks tip `rescueReceipt` / `CANONICAL_PERMIT2()` getter. Judged v1 `rescueWithPermit` still OK |
+| `GasRescueLens` | **Not on-chain.** `HackQuestStatus` constructs Lens in-script (`lensEphemeral=true`) |
+| `StrandedRegistry` | Merged; **not** judged product |
+
+### On-chain deploys performed by the agent
+
+**None.** No `--broadcast`. No keys. No Relayer fee rewrite. No Permit2 enable. No mainnet. No HackQuest submit.
+
+### Spencer next (optional)
+
+1. `forge test -vv`
+2. Relayer health: `curl -sS https://stranded-relayer-arb.onrender.com/health`
+3. `forge script script/HackQuestStatus.s.sol:HackQuestStatus --rpc-url "$ARB_SEPOLIA_RPC_URL" --chain-id 421614` (no `--broadcast`) — expect `hotWalletUnderfunded=true` until the hot wallet is topped up, `feePostureNote` present, `liveVsTip=live-lacks-rescueReceipt-and-canonicalPermit2-do-not-claim-redeploy`
+4. Follow [QA_ARB_SEPOLIA_RESCUE.md](QA_ARB_SEPOLIA_RESCUE.md). Top up the hot wallet (~0.10 ETH Arb Sepolia) before any live submit.
+5. Lens on-chain / swap redeploy still optional and Spencer-only.
