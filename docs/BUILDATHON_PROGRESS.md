@@ -161,6 +161,10 @@ Same table as Day-1. Relayer hot `0x8240…9AF6` still needs ~0.10 ETH for a liv
   - `feePostureNote` — issue #24 / Tokenomics **MATCH**: keep Relayer **1% of `tokenIn`**, **~20%** swapped for gas (not a fee), **100 bps** slip fail-closed. USD floor/cap/skip is **deferred** (not a live Relayer bug). **Relayer Backend owns** any future rewrite; this script does not implement it.
   - `liveVsTip` — names both missing tip surfaces (`rescueReceipt` + `CANONICAL_PERMIT2()`). Live judged v1 `rescueWithPermit` is still OK. Do not claim a swap redeploy.
 
+### Live Arb read (2026-09-17, no broadcast)
+
+`HackQuestStatus` default probe (`amountIn=0`) against `https://sepolia-rollup.arbitrum.io/rpc`: `paused=false`, `permit2Enabled=false`, `permit2Off=true`, allowlist flags true, **`ready=false`**, `probeOnly=true`, `userFunded=false`, `boundToLiveArb=true`, `hasRescueReceipt=false`, `hasCanonicalPermit2Getter=false`, `liveVsTip=live-lacks-rescueReceipt-and-canonicalPermit2-do-not-claim-redeploy`, `hotWalletUnderfunded=true` (`hotWalletWei=14957321211204000` ≈ 0.015 ETH vs `hotWalletMinWei=0.10`), `feePostureNote` MATCH 1% / 20% gas top-up / 100 bps. Relayer `/health` live (`stubRpc=false`) on https://stranded-relayer-arb.onrender.com.
+
 ### KNOW snapshot (2026-09-17, no broadcast)
 
 | Item | Status |

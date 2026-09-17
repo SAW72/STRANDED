@@ -161,7 +161,7 @@ contract ArbSepoliaLiveTest is Test {
         assertTrue(_contains(json, '"permit2Enabled":false'));
         assertTrue(
             _contains(json, '"liveVsTip":"live-lacks-rescueReceipt-and-canonicalPermit2-do-not-claim-redeploy"'),
-            "live still lacks tip getters — do not claim redeploy"
+            "live still lacks tip getters - do not claim redeploy"
         );
         assertTrue(
             _contains(
