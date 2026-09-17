@@ -484,26 +484,22 @@ contract StrandedRegistryTest is Test {
         script.run();
     }
 
-    function test_deployScript_rejectsZeroSwap() public {
+    /// @dev Env writes are process-global; keep zero-address + happy-path sequential.
+    function test_deployScript_envHygiene_rejectsZeroAndDeploys() public {
         DeployStrandedRegistry script = new DeployStrandedRegistry();
-        vm.setEnv("PRIVATE_KEY", vm.toString(uint256(0xA11CE)));
-        vm.setEnv("GAS_RESCUE_SWAP", vm.toString(address(0)));
-        vm.expectRevert(bytes("GAS_RESCUE_SWAP required"));
-        script.run();
-    }
-
-    function test_deployScript_deploysOnArbSepolia() public {
         uint256 key = uint256(0xB0B);
         address deployer = vm.addr(key);
         vm.deal(deployer, 1 ether);
         vm.setEnv("PRIVATE_KEY", vm.toString(key));
-        vm.setEnv("GAS_RESCUE_SWAP", vm.toString(address(mockSwap)));
-
-        address predicted = vm.computeCreateAddress(deployer, vm.getNonce(deployer));
-        DeployStrandedRegistry script = new DeployStrandedRegistry();
+        vm.setEnv("GAS_RESCUE_SWAP", vm.toString(address(0)));
+        vm.expectRevert(bytes("GAS_RESCUE_SWAP required"));
         script.run();
 
-        StrandedRegistry deployed = StrandedRegistry(predicted);
+        vm.setEnv("GAS_RESCUE_SWAP", vm.toString(address(mockSwap)));
+        address predicted = vm.computeCreateAddress(deployer, vm.getNonce(deployer));
+        script.run();
+
+        StrandedRegistry deployed = StrandedRegistry(payable(predicted));
         assertEq(deployed.owner(), deployer);
         assertEq(deployed.gasRescueSwap(), address(mockSwap));
     }

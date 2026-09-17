@@ -129,6 +129,7 @@ Auditor IDs:
 | M-3 | `test_M3_receiveCreditsPosterBond`, `test_M3_receiveDoesNotUnlockFindBond` |
 | M-4 | `test_M4_reclaimExpired_*` |
 | L-4 | `test_L4_claimFind_requiresChainIdMatch` |
+| Deploy (9) | `test_deployScript_refusesMainnet`, `test_deployScript_envHygiene_rejectsZeroAndDeploys` |
 
 ---
 
