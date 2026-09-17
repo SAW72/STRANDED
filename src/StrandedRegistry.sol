@@ -6,9 +6,6 @@ import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {EIP712} from "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
-import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
-import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 import {IStrandedRegistry} from "./interfaces/IStrandedRegistry.sol";
 import {IGasRescueSwapProof} from "./interfaces/IGasRescueSwapProof.sol";
@@ -26,8 +23,6 @@ import {IGasRescueSwapProof} from "./interfaces/IGasRescueSwapProof.sol";
 ///      this lets the owner *advertise* the stranded balance and pay a bounty to
 ///      the relayer that brings it home. Same dog, bigger yard.
 contract StrandedRegistry is IStrandedRegistry, Ownable2Step, Pausable, ReentrancyGuard, EIP712 {
-    using SafeERC20 for IERC20;
-
     uint256 public constant BASE_SEPOLIA_CHAIN_ID = 84_532;
     uint256 public constant ARB_SEPOLIA_CHAIN_ID = 421_614;
 

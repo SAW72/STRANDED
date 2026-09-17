@@ -102,6 +102,18 @@ Expired finds stay locked against `withdrawBond` until this path runs. That keep
 - Token launch.
 - Mainnet deploy.
 
+## Deploy (testnet only)
+
+`script/DeployStrandedRegistry.s.sol` mirrors `DeployGasRescueSwap` hygiene:
+
+- Refuses every chain except Base Sepolia 84532 and Arb Sepolia 421614
+- `PRIVATE_KEY` + `GAS_RESCUE_SWAP` from env only (no committed / test keys, no hardcoded swap)
+- Rejects zero addresses
+- Logs `StrandedRegistry`, owner, and bound swap
+- Constructor: `StrandedRegistry(initialOwner = deployer, gasRescueSwap_)`
+
+Broadcast is Spencer keys only. Agents must never pass `--broadcast`. Mainnet remains rejected.
+
 ## Tests
 
 `forge test --match-contract StrandedRegistryTest`

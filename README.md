@@ -143,6 +143,7 @@ test/StrandedRegistry.t.sol
 test/audit/F5F6Audit.t.sol
 script/DeployGasRescueSwap.s.sol
 script/DeployGasRescueLens.s.sol   # testnet Lens; Spencer --broadcast only
+script/DeployStrandedRegistry.s.sol  # testnet registry; Spencer --broadcast only
 script/InspectGasRescueSwap.s.sol  # read-only; no keys
 script/HackQuestStatus.s.sol       # Lens consumer; HackQuest JSON; no keys
 script/RescueSwap.s.sol

@@ -7,6 +7,7 @@ import {StrandedRegistry} from "../src/StrandedRegistry.sol";
 import {IStrandedRegistry} from "../src/interfaces/IStrandedRegistry.sol";
 import {MockERC20} from "../src/mocks/MockERC20.sol";
 import {MockGasRescueSwap} from "../src/mocks/MockGasRescueSwap.sol";
+import {DeployStrandedRegistry} from "../script/DeployStrandedRegistry.s.sol";
 
 contract StrandedRegistryTest is Test {
     StrandedRegistry registry;
@@ -470,6 +471,41 @@ contract StrandedRegistryTest is Test {
         vm.prank(poster);
         vm.expectRevert(StrandedRegistry.ChainIdMismatch.selector);
         registry.reclaimExpired(key);
+    }
+
+    // --- Verifier checklist (9): deploy script sanity --------------------------------
+
+    function test_deployScript_refusesMainnet() public {
+        DeployStrandedRegistry script = new DeployStrandedRegistry();
+        vm.chainId(1);
+        vm.expectRevert(
+            bytes("DeployStrandedRegistry: testnet only (Base Sepolia 84532 or Arb Sepolia 421614)")
+        );
+        script.run();
+    }
+
+    function test_deployScript_rejectsZeroSwap() public {
+        DeployStrandedRegistry script = new DeployStrandedRegistry();
+        vm.setEnv("PRIVATE_KEY", vm.toString(uint256(0xA11CE)));
+        vm.setEnv("GAS_RESCUE_SWAP", vm.toString(address(0)));
+        vm.expectRevert(bytes("GAS_RESCUE_SWAP required"));
+        script.run();
+    }
+
+    function test_deployScript_deploysOnArbSepolia() public {
+        uint256 key = uint256(0xB0B);
+        address deployer = vm.addr(key);
+        vm.deal(deployer, 1 ether);
+        vm.setEnv("PRIVATE_KEY", vm.toString(key));
+        vm.setEnv("GAS_RESCUE_SWAP", vm.toString(address(mockSwap)));
+
+        address predicted = vm.computeCreateAddress(deployer, vm.getNonce(deployer));
+        DeployStrandedRegistry script = new DeployStrandedRegistry();
+        script.run();
+
+        StrandedRegistry deployed = StrandedRegistry(predicted);
+        assertEq(deployed.owner(), deployer);
+        assertEq(deployed.gasRescueSwap(), address(mockSwap));
     }
 
     function _register(uint256 amount, uint256 bounty) internal returns (bytes32 key) {
