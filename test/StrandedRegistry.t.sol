@@ -2,6 +2,7 @@
 pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
+import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {StrandedRegistry} from "../src/StrandedRegistry.sol";
 import {IStrandedRegistry} from "../src/interfaces/IStrandedRegistry.sol";
 import {MockERC20} from "../src/mocks/MockERC20.sol";
@@ -241,7 +242,7 @@ contract StrandedRegistryTest is Test {
         vm.prank(owner);
         registry.pause();
         vm.prank(poster);
-        vm.expectRevert("EnforcedPause()");
+        vm.expectRevert(Pausable.EnforcedPause.selector);
         registry.registerFind{value: BOND}(holder, address(token), FIND_AMOUNT, 0, ARB_SEPOLIA, block.timestamp + 1 days);
     }
 
