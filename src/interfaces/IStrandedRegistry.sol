@@ -6,6 +6,7 @@ pragma solidity ^0.8.24;
 ///         Claims are NOT permissionless: `claimFind` requires a completed
 ///         GasRescueSwap rescue receipt bound to the find (holder, token, amount)
 ///         and may only be submitted by the relayer that executed that rescue.
+///         `Find.bounty` is native wei, paid from that find's locked bond.
 ///         Testnet only (Base Sepolia 84532, Arb Sepolia 421614).
 ///         Non-production scaffold — do not deploy to mainnet.
 interface IStrandedRegistry {
@@ -14,6 +15,7 @@ interface IStrandedRegistry {
         address holder;
         address token;
         uint256 amount;
+        /// @dev Native wei paid to the claiming relayer from `findBond`. Never token units.
         uint256 bounty;
         uint256 chainId;
         uint256 deadline;
@@ -34,7 +36,11 @@ interface IStrandedRegistry {
     /// @param findKey Registry key from `registerFind`.
     /// @param rescueNonce `Order.nonce` of the completed rescue (receipt key).
     /// @dev Bounty is paid to `msg.sender`, who must be the receipt's relayer.
+    ///      Reverts unless `find.chainId == block.chainid`.
     function claimFind(bytes32 findKey, uint256 rescueNonce) external;
+
+    /// @notice Poster reclaims the locked find bond after `deadline` if unclaimed.
+    function reclaimExpired(bytes32 findKey) external;
 
     function depositBond() external payable;
     function withdrawBond(uint256 amount) external;
@@ -48,6 +54,8 @@ interface IStrandedRegistry {
     function claimed(bytes32 findKey) external view returns (bool);
     function findBond(bytes32 findKey) external view returns (uint256);
     function posterBond(address poster) external view returns (uint256);
+    function lockedBond(address poster) external view returns (uint256);
+    function availableBond(address poster) external view returns (uint256);
     function usedRescueProof(address holder, uint256 nonce) external view returns (bool);
     function finderFeeBps() external view returns (uint256);
     function minBond() external view returns (uint256);

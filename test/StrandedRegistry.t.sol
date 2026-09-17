@@ -2,10 +2,12 @@
 pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
+import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {StrandedRegistry} from "../src/StrandedRegistry.sol";
 import {IStrandedRegistry} from "../src/interfaces/IStrandedRegistry.sol";
 import {MockERC20} from "../src/mocks/MockERC20.sol";
 import {MockGasRescueSwap} from "../src/mocks/MockGasRescueSwap.sol";
+import {DeployStrandedRegistry} from "../script/DeployStrandedRegistry.s.sol";
 
 contract StrandedRegistryTest is Test {
     StrandedRegistry registry;
@@ -18,10 +20,13 @@ contract StrandedRegistryTest is Test {
     address stranger;
 
     uint256 constant ARB_SEPOLIA = 421_614;
+    uint256 constant BASE_SEPOLIA = 84_532;
     uint256 constant BOND = 0.001 ether;
+    /// @dev Native-wei bounty (H-2). Must be <= BOND and is intentionally larger
+    ///      than `FIND_AMOUNT / 10` so a token-unit cap would reject it.
+    uint256 constant BOUNTY = 0.0004 ether;
     uint256 constant RESCUE_NONCE = 1;
     uint256 constant FIND_AMOUNT = 1_000e6;
-    uint256 constant BOUNTY = 50e6;
 
     function setUp() public {
         owner = makeAddr("owner");
@@ -57,6 +62,8 @@ contract StrandedRegistryTest is Test {
         assertFalse(registry.claimed(key));
         assertEq(registry.posterBond(poster), BOND);
         assertEq(registry.findBond(key), BOND);
+        assertEq(registry.lockedBond(poster), BOND);
+        assertEq(registry.availableBond(poster), 0);
     }
 
     function test_registerFind_revertsOnWrongChain() public {
@@ -64,6 +71,14 @@ contract StrandedRegistryTest is Test {
         vm.prank(poster);
         vm.expectRevert(StrandedRegistry.NotAllowedTestnet.selector);
         registry.registerFind{value: BOND}(holder, address(token), FIND_AMOUNT, 0, 1, block.timestamp + 1 days);
+    }
+
+    function test_registerFind_revertsOnOtherAllowedTestnet() public {
+        vm.prank(poster);
+        vm.expectRevert(StrandedRegistry.ChainIdMismatch.selector);
+        registry.registerFind{value: BOND}(
+            holder, address(token), FIND_AMOUNT, 0, BASE_SEPOLIA, block.timestamp + 1 days
+        );
     }
 
     function test_registerFind_revertsOnLowBond() public {
@@ -86,7 +101,7 @@ contract StrandedRegistryTest is Test {
         assertTrue(registry.claimed(key));
         assertTrue(registry.usedRescueProof(holder, RESCUE_NONCE));
         assertEq(registry.findBond(key), 0);
-        // bounty paid in native from this find's bond (scaffold denomination)
+        assertEq(registry.lockedBond(poster), 0);
         assertEq(rescuer.balance, rescuerBefore + BOUNTY);
         assertEq(poster.balance, posterBefore + (BOND - BOUNTY));
         assertEq(registry.posterBond(poster), 0);
@@ -175,6 +190,8 @@ contract StrandedRegistryTest is Test {
         registry.depositBond{value: extra}();
 
         assertEq(registry.posterBond(poster), BOND + BOND + extra);
+        assertEq(registry.lockedBond(poster), BOND + BOND);
+        assertEq(registry.availableBond(poster), extra);
         assertEq(registry.findBond(keyA), BOND);
         assertEq(registry.findBond(keyB), BOND);
 
@@ -187,7 +204,7 @@ contract StrandedRegistryTest is Test {
         assertFalse(registry.claimed(keyB));
         assertEq(registry.findBond(keyA), 0);
         assertEq(registry.findBond(keyB), BOND);
-        // find A: bounty to rescuer, leftover bond to poster; find B + extra deposit untouched
+        assertEq(registry.lockedBond(poster), BOND);
         assertEq(registry.posterBond(poster), BOND + extra);
         assertEq(poster.balance, posterBefore + (BOND - BOUNTY));
 
@@ -196,6 +213,7 @@ contract StrandedRegistryTest is Test {
         registry.claimFind(keyB, 2);
         assertTrue(registry.claimed(keyB));
         assertEq(registry.findBond(keyB), 0);
+        assertEq(registry.lockedBond(poster), 0);
         assertEq(registry.posterBond(poster), extra);
     }
 
@@ -225,8 +243,265 @@ contract StrandedRegistryTest is Test {
         vm.prank(owner);
         registry.pause();
         vm.prank(poster);
-        vm.expectRevert("EnforcedPause()");
+        vm.expectRevert(Pausable.EnforcedPause.selector);
         registry.registerFind{value: BOND}(holder, address(token), FIND_AMOUNT, 0, ARB_SEPOLIA, block.timestamp + 1 days);
+    }
+
+    // --- H-1 withdrawBond must respect findBond locks --------------------------------
+
+    function test_H1_withdrawBond_revertsWhenFindBondLocked() public {
+        bytes32 key = _register(FIND_AMOUNT, BOUNTY);
+        assertEq(registry.availableBond(poster), 0);
+
+        vm.prank(poster);
+        vm.expectRevert(StrandedRegistry.BondLocked.selector);
+        registry.withdrawBond(BOND);
+
+        assertEq(registry.findBond(key), BOND);
+        assertEq(registry.lockedBond(poster), BOND);
+        assertEq(registry.posterBond(poster), BOND);
+        assertEq(address(registry).balance, BOND);
+    }
+
+    function test_H1_withdrawBond_allowsUnusedDeposit_claimStaysSolvent() public {
+        bytes32 key = _register(FIND_AMOUNT, BOUNTY);
+        uint256 extra = 0.005 ether;
+        vm.prank(poster);
+        registry.depositBond{value: extra}();
+
+        vm.prank(poster);
+        vm.expectRevert(StrandedRegistry.BondLocked.selector);
+        registry.withdrawBond(BOND + extra);
+
+        uint256 posterBeforeWithdraw = poster.balance;
+        vm.prank(poster);
+        registry.withdrawBond(extra);
+        assertEq(poster.balance, posterBeforeWithdraw + extra);
+        assertEq(registry.availableBond(poster), 0);
+        assertEq(registry.findBond(key), BOND);
+        assertEq(address(registry).balance, BOND);
+
+        _recordRescue(RESCUE_NONCE, FIND_AMOUNT);
+        uint256 rescuerBefore = rescuer.balance;
+        uint256 posterBeforeClaim = poster.balance;
+        vm.prank(rescuer);
+        registry.claimFind(key, RESCUE_NONCE);
+
+        assertEq(rescuer.balance, rescuerBefore + BOUNTY);
+        assertEq(poster.balance, posterBeforeClaim + (BOND - BOUNTY));
+        assertEq(registry.lockedBond(poster), 0);
+        assertEq(address(registry).balance, 0);
+    }
+
+    function test_H1_withdrawBond_revertsIfAmountExceedsPosterBond() public {
+        vm.prank(poster);
+        vm.expectRevert(StrandedRegistry.InsufficientBond.selector);
+        registry.withdrawBond(1);
+    }
+
+    // --- H-2 bounty is native wei, capped by the find bond ---------------------------
+
+    function test_H2_bountyIsNativeWei_notCappedByTokenAmount() public {
+        // Pre-fix `bounty > amount / 10` treated bounty as token units and would
+        // revert a valid wei bounty (BOUNTY = 4e14, FIND_AMOUNT / 10 = 1e8).
+        assertGt(BOUNTY, FIND_AMOUNT / 10);
+        assertLe(BOUNTY, BOND);
+
+        bytes32 key = _register(FIND_AMOUNT, BOUNTY);
+        assertEq(registry.finds(key).bounty, BOUNTY);
+
+        _recordRescue(RESCUE_NONCE, FIND_AMOUNT);
+        uint256 rescuerBefore = rescuer.balance;
+        vm.prank(rescuer);
+        registry.claimFind(key, RESCUE_NONCE);
+        assertEq(rescuer.balance, rescuerBefore + BOUNTY);
+    }
+
+    function test_H2_bountyGreaterThanBondReverts() public {
+        vm.prank(poster);
+        vm.expectRevert(StrandedRegistry.BountyTooHigh.selector);
+        registry.registerFind{value: BOND}(
+            holder, address(token), FIND_AMOUNT, BOND + 1, ARB_SEPOLIA, block.timestamp + 1 days
+        );
+    }
+
+    function test_H2_fullBondBountyIsSolvent() public {
+        bytes32 key = _register(FIND_AMOUNT, BOND);
+        _recordRescue(RESCUE_NONCE, FIND_AMOUNT);
+
+        uint256 rescuerBefore = rescuer.balance;
+        uint256 posterBefore = poster.balance;
+        vm.prank(rescuer);
+        registry.claimFind(key, RESCUE_NONCE);
+
+        assertEq(rescuer.balance, rescuerBefore + BOND);
+        assertEq(poster.balance, posterBefore);
+        assertEq(registry.posterBond(poster), 0);
+        assertEq(address(registry).balance, 0);
+    }
+
+    // --- M-3 receive credits unused posterBond --------------------------------------
+
+    function test_M3_receiveCreditsPosterBond() public {
+        uint256 gift = 0.002 ether;
+        vm.prank(poster);
+        (bool ok,) = address(registry).call{value: gift}("");
+        assertTrue(ok);
+
+        assertEq(registry.posterBond(poster), gift);
+        assertEq(registry.lockedBond(poster), 0);
+        assertEq(registry.availableBond(poster), gift);
+
+        uint256 posterBefore = poster.balance;
+        vm.prank(poster);
+        registry.withdrawBond(gift);
+        assertEq(poster.balance, posterBefore + gift);
+        assertEq(address(registry).balance, 0);
+    }
+
+    function test_M3_receiveDoesNotUnlockFindBond() public {
+        bytes32 key = _register(FIND_AMOUNT, BOUNTY);
+        uint256 gift = 0.002 ether;
+        vm.prank(poster);
+        (bool ok,) = address(registry).call{value: gift}("");
+        assertTrue(ok);
+
+        assertEq(registry.availableBond(poster), gift);
+        vm.prank(poster);
+        vm.expectRevert(StrandedRegistry.BondLocked.selector);
+        registry.withdrawBond(BOND + gift);
+        assertEq(registry.findBond(key), BOND);
+    }
+
+    // --- M-4 reclaimExpired ----------------------------------------------------------
+
+    function test_M4_reclaimExpired_returnsBondToPoster() public {
+        bytes32 key = _register(FIND_AMOUNT, BOUNTY);
+        vm.warp(block.timestamp + 2 days);
+
+        vm.prank(poster);
+        vm.expectRevert(StrandedRegistry.BondLocked.selector);
+        registry.withdrawBond(BOND);
+
+        uint256 posterBefore = poster.balance;
+        vm.prank(poster);
+        registry.reclaimExpired(key);
+
+        assertTrue(registry.claimed(key));
+        assertEq(registry.findBond(key), 0);
+        assertEq(registry.lockedBond(poster), 0);
+        assertEq(registry.posterBond(poster), 0);
+        assertEq(poster.balance, posterBefore + BOND);
+        assertEq(address(registry).balance, 0);
+    }
+
+    function test_M4_reclaimExpired_revertsBeforeDeadline() public {
+        bytes32 key = _register(FIND_AMOUNT, 0);
+        vm.prank(poster);
+        vm.expectRevert(StrandedRegistry.FindNotExpired.selector);
+        registry.reclaimExpired(key);
+    }
+
+    function test_M4_reclaimExpired_onlyPoster() public {
+        bytes32 key = _register(FIND_AMOUNT, 0);
+        vm.warp(block.timestamp + 2 days);
+        vm.prank(stranger);
+        vm.expectRevert(StrandedRegistry.NotPoster.selector);
+        registry.reclaimExpired(key);
+        assertEq(registry.findBond(key), BOND);
+    }
+
+    function test_M4_reclaimExpired_blocksLaterClaim() public {
+        bytes32 key = _register(FIND_AMOUNT, BOUNTY);
+        _recordRescue(RESCUE_NONCE, FIND_AMOUNT);
+        vm.warp(block.timestamp + 2 days);
+
+        vm.prank(poster);
+        registry.reclaimExpired(key);
+
+        vm.prank(rescuer);
+        vm.expectRevert(StrandedRegistry.AlreadyClaimed.selector);
+        registry.claimFind(key, RESCUE_NONCE);
+        assertEq(registry.usedRescueProof(holder, RESCUE_NONCE), false);
+    }
+
+    function test_M4_reclaimExpired_revertsIfAlreadyClaimed() public {
+        bytes32 key = _register(FIND_AMOUNT, 0);
+        _recordRescue(RESCUE_NONCE, FIND_AMOUNT);
+        vm.prank(rescuer);
+        registry.claimFind(key, RESCUE_NONCE);
+
+        vm.warp(block.timestamp + 2 days);
+        vm.prank(poster);
+        vm.expectRevert(StrandedRegistry.AlreadyClaimed.selector);
+        registry.reclaimExpired(key);
+    }
+
+    function test_M4_reclaimExpired_worksWhilePaused() public {
+        bytes32 key = _register(FIND_AMOUNT, 0);
+        vm.prank(owner);
+        registry.pause();
+        vm.warp(block.timestamp + 2 days);
+
+        uint256 posterBefore = poster.balance;
+        vm.prank(poster);
+        registry.reclaimExpired(key);
+        assertEq(poster.balance, posterBefore + BOND);
+    }
+
+    // --- L-4 claimFind requires find.chainId == block.chainid ------------------------
+
+    function test_L4_claimFind_requiresChainIdMatch() public {
+        bytes32 key = _register(FIND_AMOUNT, BOUNTY);
+        _recordRescue(RESCUE_NONCE, FIND_AMOUNT);
+
+        vm.chainId(BASE_SEPOLIA);
+        vm.prank(rescuer);
+        vm.expectRevert(StrandedRegistry.ChainIdMismatch.selector);
+        registry.claimFind(key, RESCUE_NONCE);
+
+        assertFalse(registry.claimed(key));
+        assertEq(registry.findBond(key), BOND);
+    }
+
+    function test_L4_reclaimExpired_requiresChainIdMatch() public {
+        bytes32 key = _register(FIND_AMOUNT, 0);
+        vm.warp(block.timestamp + 2 days);
+        vm.chainId(BASE_SEPOLIA);
+        vm.prank(poster);
+        vm.expectRevert(StrandedRegistry.ChainIdMismatch.selector);
+        registry.reclaimExpired(key);
+    }
+
+    // --- Verifier checklist (9): deploy script sanity --------------------------------
+
+    function test_deployScript_refusesMainnet() public {
+        DeployStrandedRegistry script = new DeployStrandedRegistry();
+        vm.chainId(1);
+        vm.expectRevert(
+            bytes("DeployStrandedRegistry: testnet only (Base Sepolia 84532 or Arb Sepolia 421614)")
+        );
+        script.run();
+    }
+
+    /// @dev Env writes are process-global; keep zero-address + happy-path sequential.
+    function test_deployScript_envHygiene_rejectsZeroAndDeploys() public {
+        DeployStrandedRegistry script = new DeployStrandedRegistry();
+        uint256 key = uint256(0xB0B);
+        address deployer = vm.addr(key);
+        vm.deal(deployer, 1 ether);
+        vm.setEnv("PRIVATE_KEY", vm.toString(key));
+        vm.setEnv("GAS_RESCUE_SWAP", vm.toString(address(0)));
+        vm.expectRevert(bytes("GAS_RESCUE_SWAP required"));
+        script.run();
+
+        vm.setEnv("GAS_RESCUE_SWAP", vm.toString(address(mockSwap)));
+        address predicted = vm.computeCreateAddress(deployer, vm.getNonce(deployer));
+        script.run();
+
+        StrandedRegistry deployed = StrandedRegistry(payable(predicted));
+        assertEq(deployed.owner(), deployer);
+        assertEq(deployed.gasRescueSwap(), address(mockSwap));
     }
 
     function _register(uint256 amount, uint256 bounty) internal returns (bytes32 key) {
