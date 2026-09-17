@@ -183,12 +183,14 @@ See [wallet/README.md](wallet/README.md). Copy `wallet/.env.example` to `wallet/
 
 `src/StrandedRegistry.sol` is a **non-production** find index + bounty layer. It is not the product, is not deployed, and must not go to mainnet.
 
-Security Auditor HIGHs on `claimFind` are fixed on this tree:
+Security Auditor items on `StrandedRegistry` (H-1, H-2, M-3, M-4, L-4) are fixed on this tree:
 
-1. **Proof gate.** `claimFind(findKey, rescueNonce)` is not permissionless. The caller must be a `GasRescueSwap` allowlisted relayer, and `gasRescueSwap.rescueReceipt(holder, nonce)` must match this find's `token` + `amount` with `relayer == msg.sender`. Bounty is paid to that relayer; callers cannot pick a different rescuer. A stranger cannot steal the bounty.
-2. **Per-find bond.** `registerFind` locks `msg.value` in `findBond[findKey]`. Claim pays bounty + refund from that find only. Other finds and unused `depositBond` balances are left intact.
+1. **Proof gate.** `claimFind(findKey, rescueNonce)` is not permissionless. The caller must be a `GasRescueSwap` allowlisted relayer, and `gasRescueSwap.rescueReceipt(holder, nonce)` must match this find's `token` + `amount` with `relayer == msg.sender`. `find.chainId` must equal `block.chainid`. Bounty is paid to that relayer; callers cannot pick a different rescuer.
+2. **Per-find locked bond.** `registerFind` locks `msg.value` in `findBond[findKey]` and `lockedBond[poster]`. `withdrawBond` can take only `posterBond - lockedBond`. Claim pays bounty + refund from that find only.
+3. **Bounty is native wei**, capped by the find bond (`bounty <= msg.value`). Not token units.
+4. **`receive()` credits** `posterBond[msg.sender]`. **`reclaimExpired`** returns an unclaimed expired find's bond to the poster.
 
-See [docs/STRANDED-REGISTRY.md](docs/STRANDED-REGISTRY.md). Residual follow-ups (not this change): allowlist timelock, MockERC20 permissionless mint, dispute window, bounty denomination, same-tx rescue+claim, expired-find reclaim.
+See [docs/STRANDED-REGISTRY.md](docs/STRANDED-REGISTRY.md). Residual follow-ups (not this change): allowlist timelock, MockERC20 permissionless mint, dispute window, same-tx rescue+claim.
 
 ## Still out of scope
 
