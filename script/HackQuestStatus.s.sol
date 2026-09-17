@@ -22,12 +22,24 @@ import {GasRescueLens} from "../src/GasRescueLens.sol";
 ///                             preflight (`balanceOf(user) >= amountIn`).
 ///   HACKQUEST_NATIVE_TO       path-hash recipient (default fixture 0x1111…)
 ///   HACKQUEST_PATH_HASH       optional quoted hash (flags wallet dry 0xbbb…)
+///
+/// Day-4 JSON (no keys, no broadcast): `hotWalletUnderfunded` (live hot ETH
+/// vs ~0.10), `feePostureNote` (issue #24 MATCH: keep Relayer 1% / 20%
+/// gas top-up / 100 bps slip; USD-hybrid deferred, not a Relayer bug),
+/// `liveVsTip` (rescueReceipt + CANONICAL_PERMIT2 getter).
 contract HackQuestStatus is Script {
     uint256 internal constant BASE_SEPOLIA_CHAIN_ID = 84_532;
     uint256 internal constant ARB_SEPOLIA_CHAIN_ID = 421_614;
     address internal constant LIVE_ARB_SWAP = 0x65e712222745A8FCCbF038A90Fa75caB0867993D;
     address internal constant LIVE_BASE_SWAP = 0x21A1ADf810e64B5bd1d530D31abA6856b8DEf688;
+    address internal constant LIVE_RELAYER = 0x8240124dc78a27c80354Ca813Df12aa2888A9AF6;
     address internal constant DRY_NATIVE_TO = 0x1111111111111111111111111111111111111111;
+    /// @dev Spencer / Chain Ops target before a live `rescueWithPermit` submit.
+    uint256 internal constant HOT_WALLET_MIN_WEI = 0.10 ether;
+    /// @dev Issue #24 Tokenomics: MATCH current Relayer numbers. USD-hybrid is
+    ///      deferred (not a live Relayer bug). Do not rewrite fee math here.
+    string internal constant FEE_POSTURE_NOTE =
+        "match=flat-1pct-tokenIn; amountSwap=20pct-gas-topup-not-fee; slip=100bps-fail-closed; usd-hybrid=deferred-not-a-relayer-bug; owner=Relayer-Backend-do-not-rewrite";
 
     function run() external {
         _requireTestnet();
@@ -92,13 +104,14 @@ contract HackQuestStatus is Script {
         uint256 amountIn,
         address nativeTo
     ) internal view returns (string memory) {
-        string memory drift =
-            r.bytecode.hasRescueReceipt ? "tip-has-rescueReceipt" : "live-lacks-rescueReceipt-do-not-claim-redeploy";
+        uint256 hotWei = LIVE_RELAYER.balance;
+        bool hotUnderfunded = hotWei < HOT_WALLET_MIN_WEI;
+        string memory drift = _liveVsTip(r);
 
         string memory head = string.concat(
             "{",
             '"product":"GasRescueSwap",',
-            '"buildathon":"2026-09-14-day3",',
+            '"buildathon":"2026-09-17-day4",',
             '"chainId":',
             _u(r.swapStatus.chainId),
             ",",
@@ -157,6 +170,19 @@ contract HackQuestStatus is Script {
             ',"probeOnly":',
             _b(amountIn == 0)
         );
+        string memory ops = string.concat(
+            ',"hotWallet":"',
+            _a(LIVE_RELAYER),
+            '","hotWalletWei":"',
+            _u(hotWei),
+            '","hotWalletMinWei":"',
+            _u(HOT_WALLET_MIN_WEI),
+            '","hotWalletUnderfunded":',
+            _b(hotUnderfunded),
+            ',"feePostureNote":"',
+            FEE_POSTURE_NOTE,
+            '"'
+        );
         string memory receipt = string.concat(
             ',"hasCanonicalPermit2Getter":',
             _b(r.bytecode.hasCanonicalPermit2Getter),
@@ -190,7 +216,22 @@ contract HackQuestStatus is Script {
             drift,
             '"}'
         );
-        return string.concat(head, policy, receipt, paths);
+        return string.concat(head, policy, ops, receipt, paths);
+    }
+
+    /// @notice Live Arb `0x65e7…` (2026-09-17) lacks tip `rescueReceipt` and
+    ///         `CANONICAL_PERMIT2()`. Judged v1 `rescueWithPermit` still OK.
+    function _liveVsTip(
+        GasRescueLens.HackQuestReport memory r
+    ) internal pure returns (string memory) {
+        bool receipt = r.bytecode.hasRescueReceipt;
+        bool getter = r.bytecode.hasCanonicalPermit2Getter;
+        if (receipt && getter) return "tip-has-rescueReceipt-and-canonicalPermit2";
+        if (!receipt && !getter) {
+            return "live-lacks-rescueReceipt-and-canonicalPermit2-do-not-claim-redeploy";
+        }
+        if (!receipt) return "live-lacks-rescueReceipt-do-not-claim-redeploy";
+        return "live-lacks-canonicalPermit2-do-not-claim-redeploy";
     }
 
     function _b(
