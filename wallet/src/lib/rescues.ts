@@ -79,6 +79,9 @@ export function publicSubmitError(status: number, body: unknown): string {
   if (error === "used_nonce") {
     return "This quote was already used on-chain. Request a fresh quote.";
   }
+  if (error === "relayer_paused") {
+    return "Rescue is paused right now. The signed quote was not broadcast.";
+  }
   if (error === "simulation_failed" && /0x4b800e46|ERC2612InvalidSigner/i.test(revert)) {
     return "Permit signature does not match this token (wrong name or nonce). Sign again.";
   }

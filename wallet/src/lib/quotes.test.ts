@@ -216,6 +216,17 @@ describe("fetchRescueQuote POST /v1/quotes", () => {
     if (!result.ok) expect(result.reason).toMatch(/HTTP 404/);
   });
 
+  it("surfaces relayer_paused from the Relayer", async () => {
+    const fetchImpl: typeof fetch = async () =>
+      new Response(JSON.stringify({ ok: false, error: "relayer_paused" }), {
+        status: 503,
+        headers: { "Content-Type": "application/json" },
+      });
+    const result = await fetchRescueQuote("http://relayer.test", params, fetchImpl);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toMatch(/paused/i);
+  });
+
   it("surfaces insufficient_balance from the Relayer", async () => {
     const fetchImpl: typeof fetch = async () =>
       new Response(JSON.stringify({ ok: false, error: "insufficient_balance" }), {

@@ -403,6 +403,12 @@ export async function fetchRescueQuote(
         reason: "Amount is larger than this wallet's token balance. Lower the amount for a fresh quote.",
       };
     }
+    if (err === "relayer_paused") {
+      return {
+        ok: false,
+        reason: "Rescue quotes are paused right now. Try again later.",
+      };
+    }
     return {
       ok: false,
       reason: `Relayer POST /v1/quotes returned HTTP ${response.status}. Signing is blocked.`,

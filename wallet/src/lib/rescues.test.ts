@@ -89,6 +89,14 @@ describe("submitRescue POST /v1/rescues", () => {
     if (!result.ok) expect(result.reason).toMatch(/remaining balance/i);
   });
 
+  it("surfaces relayer_paused instead of a generic 503", async () => {
+    const fetchImpl: typeof fetch = async () =>
+      new Response(JSON.stringify({ ok: false, error: "relayer_paused" }), { status: 503 });
+    const result = await submitRescue("http://relayer.test", input, fetchImpl);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toMatch(/paused/i);
+  });
+
   it("surfaces used_nonce as a fresh-quote error", async () => {
     const fetchImpl: typeof fetch = async () =>
       new Response(JSON.stringify({ ok: false, error: "used_nonce" }), { status: 400 });
