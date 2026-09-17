@@ -38,6 +38,15 @@ https://stranded.onrender.com,https://YOUR.DOMAIN,http://localhost:5173
 
 Then **restart** the Relayer (CORS is read at boot).
 
+Optional control-plane vars on **stranded-relayer-arb** (see `relayer/.env.example`):
+
+- `KILL_SWITCH` — `1`/`true` refuses new quotes and rescues. `/health` stays HTTP 200 with `paused: true` so Render does not recycle the service.
+- `ADMIN_SECRET` — if set, `POST /v1/admin/pause` and `/v1/admin/unpause` with header `x-admin-secret` (or `Authorization: Bearer`). Leave unset to 404 those routes. Never commit the secret.
+- `DATA_DIR` — append-only `rescues.jsonl` (quote id, order summary, txHash or error). No private keys or permit/order signatures. Render disk is ephemeral unless you attach one.
+- `BROADCAST_MAX_ATTEMPTS` / `BROADCAST_RETRY_BASE_MS` — bounded retry after simulate-ok for transient RPC / account-nonce / replacement only.
+
+Contract `pause()` remains owner-only and is unchanged. `FEE_TO` is unchanged.
+
 On **stranded** (static site):
 
 - `VITE_RELAYER_URL_ARB_SEPOLIA` is filled from the Relayer URL at **build** time.

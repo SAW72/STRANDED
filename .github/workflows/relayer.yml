@@ -64,6 +64,40 @@ jobs:
           fi
           echo "stub_ok: no live RPC, no broadcast, no key in this job"
 
+  # Offline unit tests for nonce reserve / kill switch / retry / rescue log.
+  # This job must not receive RELAYER_PRIVATE_KEY or hit live RPC.
+  unit:
+    name: Relayer unit tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: relayer
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: relayer/package-lock.json
+
+      - name: Assert no relayer key in this job
+        shell: bash
+        run: |
+          set +x
+          if [ -n "${RELAYER_PRIVATE_KEY+x}" ]; then
+            echo "RELAYER_PRIVATE_KEY must not be wired into relayer unit tests"
+            exit 1
+          fi
+
+      - name: Install
+        run: npm ci
+
+      - name: Test
+        run: npm test
+
   # Manual run only: inject the secret at runtime via step env (masking-safe).
   runtime:
     name: Runtime secret wiring

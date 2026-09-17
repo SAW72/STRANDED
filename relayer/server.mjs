@@ -1,4 +1,3 @@
-import http from "node:http";
 import {
   createPublicClient,
   createWalletClient,
@@ -8,6 +7,12 @@ import {
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { arbitrumSepolia } from "viem/chains";
+import { createRelayerApp } from "./app.mjs";
+import { createKillSwitch, parseEnvFlag } from "./killSwitch.mjs";
+import { createNonceStore } from "./nonceStore.mjs";
+import { createRescueLog, orderLogSummary } from "./rescueLog.mjs";
+import { DEFAULT_BASE_DELAY_MS, DEFAULT_MAX_ATTEMPTS, withBroadcastRetry } from "./retry.mjs";
+import { slipMinAmountOut, splitRescueAmounts } from "./quoteMath.mjs";
 
 if (process.env.RELAYER_KEY_FILE || process.env.RELAYER_PRIVATE_KEY_FILE) {
   console.error("Key files are forbidden. Export RELAYER_PRIVATE_KEY in the process environment only.");
@@ -46,6 +51,10 @@ const FEE_TO = process.env.FEE_TO;
 const ROUTER = process.env.ROUTER_ADDRESS;
 const CHAIN_ID = Number(process.env.CHAIN_ID || 421614);
 const TOKEN = process.env.TOKEN_ADDRESS;
+const DATA_DIR = process.env.DATA_DIR || "./data";
+const ADMIN_SECRET = String(process.env.ADMIN_SECRET || "").trim();
+const BROADCAST_MAX_ATTEMPTS = Number(process.env.BROADCAST_MAX_ATTEMPTS || DEFAULT_MAX_ATTEMPTS);
+const BROADCAST_RETRY_BASE_MS = Number(process.env.BROADCAST_RETRY_BASE_MS || DEFAULT_BASE_DELAY_MS);
 const ALLOWED_ORIGINS = [
   process.env.CORS_ORIGINS || "http://localhost:5173,http://127.0.0.1:5173",
   process.env.APP_ORIGIN || "",
@@ -107,6 +116,19 @@ const erc20Abi = [
   },
 ];
 
+const usedNoncesAbi = [
+  {
+    type: "function",
+    name: "usedNonces",
+    stateMutability: "view",
+    inputs: [
+      { name: "user", type: "address" },
+      { name: "nonce", type: "uint256" },
+    ],
+    outputs: [{ name: "used", type: "bool" }],
+  },
+];
+
 const rescueAbi = [
   {
     type: "function",
@@ -143,45 +165,17 @@ const rescueAbi = [
   },
 ];
 
-function corsHeaders(req) {
-  const origin = req.headers.origin;
-  const headers = {
-    "access-control-allow-headers": "content-type",
-    "access-control-allow-methods": "GET,POST,OPTIONS",
-    vary: "Origin",
-  };
-  const normalized = origin ? origin.replace(/\/$/, "") : "";
-  if (normalized && ALLOWED_ORIGINS.includes(normalized)) {
-    headers["access-control-allow-origin"] = origin;
-  }
-  return headers;
-}
-
-function json(res, req, status, body) {
-  res.writeHead(status, {
-    "content-type": "application/json; charset=utf-8",
-    "cache-control": "no-store",
-    ...corsHeaders(req),
-  });
-  res.end(JSON.stringify(body));
-}
-
-function readBody(req) {
-  return new Promise((resolve, reject) => {
-    const chunks = [];
-    req.on("data", (c) => chunks.push(c));
-    req.on("end", () => {
-      const raw = Buffer.concat(chunks).toString("utf8");
-      if (!raw) return resolve({});
-      try {
-        resolve(JSON.parse(raw));
-      } catch {
-        reject(Object.assign(new Error("invalid_json"), { status: 400 }));
-      }
-    });
-    req.on("error", reject);
-  });
-}
+const killSwitch = createKillSwitch({ initial: parseEnvFlag(process.env.KILL_SWITCH) });
+const rescueLog = createRescueLog({ dataDir: DATA_DIR });
+const nonceStore = createNonceStore({
+  isNonceUsed: async (user, nonce) =>
+    publicClient.readContract({
+      address: /** @type {`0x${string}`} */ (SWAP),
+      abi: usedNoncesAbi,
+      functionName: "usedNonces",
+      args: [/** @type {`0x${string}`} */ (user), nonce],
+    }),
+});
 
 /** Same `swapExact` encoding as `src/ArbSepoliaDemoPath.sol`. pathHash = keccak256(swapData). */
 function encodeSwapData(tokenIn, amountSwap, nativeTo) {
@@ -243,12 +237,10 @@ async function buildQuote(body) {
       functionName: "decimals",
     }),
   ]);
-  const amountSwap = body.amountSwap !== undefined ? BigInt(body.amountSwap) : amountIn / 5n;
-  const feeAmount = amountIn / 100n;
-  if (amountSwap + feeAmount >= amountIn) {
-    throw Object.assign(new Error("amountSwap + feeAmount must be < amountIn"), { status: 400 });
-  }
-  const amountRemainder = amountIn - amountSwap - feeAmount;
+  const { amountSwap, feeAmount, amountRemainder } = splitRescueAmounts(
+    amountIn,
+    body.amountSwap !== undefined ? BigInt(body.amountSwap) : undefined,
+  );
   const to = body.to || user;
   const nativeTo = body.nativeTo || user;
   const swapData = encodeSwapData(tokenIn, amountSwap, nativeTo);
@@ -267,11 +259,11 @@ async function buildQuote(body) {
   if (routerEth < payAmount) {
     throw Object.assign(new Error("quote_unavailable"), { status: 502 });
   }
-  const bps = 100n;
-  const minAmountOut = (payAmount * (10000n - bps)) / 10000n;
+  const minAmountOut = slipMinAmountOut(payAmount);
+  const slippageBps = 100;
   const deadline = BigInt(Math.floor(Date.now() / 1000) + 30 * 60);
-  const nonce = BigInt(Date.now());
-  return {
+  const nonce = await nonceStore.reserve(user, { ttlMs: 30 * 60 * 1000 });
+  const quote = {
     quoteId: keccak256(swapData).slice(0, 18),
     chainId,
     tokenIn,
@@ -286,7 +278,7 @@ async function buildQuote(body) {
     nativeTo,
     amountOut: payAmount.toString(),
     minAmountOut: minAmountOut.toString(),
-    slippageBps: 100,
+    slippageBps,
     quoteSource: "mock-swap-router",
     amountRemainder: amountRemainder.toString(),
     router: ROUTER,
@@ -294,11 +286,14 @@ async function buildQuote(body) {
     swapData,
     deadline: deadline.toString(),
     nonce: nonce.toString(),
+    nonceReserved: true,
     live: true,
     stubRpc: false,
     swap: SWAP,
     relayer: account.address,
   };
+  await rescueLog.append({ event: "quote", ...quote });
+  return quote;
 }
 
 function asOrder(raw) {
@@ -320,103 +315,115 @@ function asOrder(raw) {
   };
 }
 
-async function submitRescue(body) {
-  const order = asOrder(body.order);
-  const swapData =
-    body.swapData || encodeSwapData(order.tokenIn, order.amountSwap, order.nativeTo);
-  if (keccak256(swapData) !== order.pathHash) {
-    throw Object.assign(new Error("PathMismatch"), { status: 400, error: "path_mismatch" });
-  }
-  if (order.router.toLowerCase() !== ROUTER.toLowerCase()) {
-    throw Object.assign(new Error("RouterNotAllowed"), { status: 400, error: "router_not_allowed" });
-  }
-  const args = [
-    order,
-    body.orderSignature,
-    Number(body.v ?? body.permitV),
-    body.r ?? body.permitR,
-    body.s ?? body.permitS,
-    swapData,
-  ];
-  try {
-    await publicClient.simulateContract({
-      account,
-      address: /** @type {`0x${string}`} */ (SWAP),
-      abi: rescueAbi,
-      functionName: "rescueWithPermit",
-      args,
-    });
-  } catch (err) {
-    const name = err && (err.shortMessage || err.name || err.message);
-    const revert = err && (err.data?.errorName || err.errorName || "");
-    console.error("relayer_error simulation_failed", name, revert);
-    throw Object.assign(new Error("simulation_failed"), {
-      status: 502,
-      error: "simulation_failed",
-      revert: String(revert || name || "unknown"),
-    });
-  }
-  const txHash = await walletClient.writeContract({
-    address: /** @type {`0x${string}`} */ (SWAP),
-    abi: rescueAbi,
-    functionName: "rescueWithPermit",
-    args,
-  });
-  return { ok: true, txHash, stubRpc: false };
+function retryLog(info) {
+  console.error(
+    "broadcast_retry",
+    `attempt=${info.attempt}/${info.maxAttempts}`,
+    `transient=${info.transient}`,
+    `delayMs=${info.delayMs}`,
+    info.message,
+  );
 }
 
-const server = http.createServer(async (req, res) => {
+async function submitRescue(body) {
+  const started = Date.now();
+  const summary = orderLogSummary(body);
+  let attempts = 0;
   try {
-    if (req.method === "OPTIONS") {
-      res.writeHead(204, corsHeaders(req));
-      res.end();
-      return;
+    const order = asOrder(body.order);
+    const swapData =
+      body.swapData || encodeSwapData(order.tokenIn, order.amountSwap, order.nativeTo);
+    if (keccak256(swapData) !== order.pathHash) {
+      throw Object.assign(new Error("PathMismatch"), { status: 400, error: "path_mismatch" });
     }
-    const url = new URL(req.url || "/", "http://127.0.0.1");
-    const path = url.pathname.replace(/\/+$/, "") || "/";
-    if (
-      req.method === "GET" &&
-      (path === "/" ||
-        path === "/health" ||
-        path === "/v1/health" ||
-        path === "/quotes" ||
-        path === "/v1/quotes")
-    ) {
-      json(res, req, 200, await liveStatus());
-      return;
+    if (order.router.toLowerCase() !== ROUTER.toLowerCase()) {
+      throw Object.assign(new Error("RouterNotAllowed"), { status: 400, error: "router_not_allowed" });
     }
-    if (req.method === "POST" && (path === "/quotes" || path === "/v1/quotes")) {
-      const body = await readBody(req);
-      try {
-        json(res, req, 200, await buildQuote(body));
-      } catch (err) {
-        const error = err.error || (err.message === "insufficient_balance" ? "insufficient_balance" : "request_failed");
-        json(res, req, err.status || 500, { ok: false, error });
-      }
-      return;
+    const args = [
+      order,
+      body.orderSignature,
+      Number(body.v ?? body.permitV),
+      body.r ?? body.permitR,
+      body.s ?? body.permitS,
+      swapData,
+    ];
+    try {
+      await publicClient.simulateContract({
+        account,
+        address: /** @type {`0x${string}`} */ (SWAP),
+        abi: rescueAbi,
+        functionName: "rescueWithPermit",
+        args,
+      });
+    } catch (err) {
+      const name = err && (err.shortMessage || err.name || err.message);
+      const revert = err && (err.data?.errorName || err.errorName || "");
+      console.error("relayer_error simulation_failed", name, revert);
+      throw Object.assign(new Error("simulation_failed"), {
+        status: 502,
+        error: "simulation_failed",
+        revert: String(revert || name || "unknown"),
+      });
     }
-    if (req.method === "POST" && path === "/v1/rescues") {
-      const body = await readBody(req);
-      try {
-        json(res, req, 200, await submitRescue(body));
-      } catch (err) {
-        json(res, req, err.status || 500, {
-          ok: false,
-          error: err.error || "request_failed",
-          revert: err.revert,
+    const txHash = await withBroadcastRetry(
+      async (attempt) => {
+        attempts = attempt;
+        return walletClient.writeContract({
+          address: /** @type {`0x${string}`} */ (SWAP),
+          abi: rescueAbi,
+          functionName: "rescueWithPermit",
+          args,
         });
-      }
-      return;
-    }
-    json(res, req, 404, { ok: false, error: "not_found" });
+      },
+      {
+        maxAttempts: BROADCAST_MAX_ATTEMPTS,
+        baseDelayMs: BROADCAST_RETRY_BASE_MS,
+        log: retryLog,
+      },
+    );
+    nonceStore.markConsumed(order.user, order.nonce);
+    await rescueLog.append({
+      event: "rescue_ok",
+      ...summary,
+      txHash,
+      attempts,
+      ms: Date.now() - started,
+    });
+    return { ok: true, txHash, stubRpc: false, attempts };
   } catch (err) {
-    console.error("relayer_error", err instanceof Error ? err.message : "internal");
-    json(res, req, 500, { ok: false, error: "request_failed" });
+    const error = err.error || err.message || "request_failed";
+    if (error === "used_nonce" || /usednonce/i.test(String(err.revert || err.message || ""))) {
+      try {
+        if (body.order?.user != null && body.order?.nonce != null) {
+          nonceStore.markConsumed(body.order.user, body.order.nonce);
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+    await rescueLog.append({
+      event: "rescue_error",
+      ...summary,
+      error: String(error),
+      revert: err.revert ? String(err.revert) : undefined,
+      attempts,
+      ms: Date.now() - started,
+    });
+    throw err;
   }
+}
+
+const server = createRelayerApp({
+  killSwitch,
+  adminSecret: ADMIN_SECRET,
+  allowedOrigins: ALLOWED_ORIGINS,
+  liveStatus,
+  buildQuote,
+  submitRescue,
 });
 
 server.listen(PORT, HOST, () => {
   console.log(
-    `relayer listening on ${HOST}:${PORT} stubRpc=false swap=${SWAP} relayer=${account.address} chain=${CHAIN_ID}`,
+    `relayer listening on ${HOST}:${PORT} stubRpc=false swap=${SWAP} relayer=${account.address} chain=${CHAIN_ID} paused=${killSwitch.isPaused()} dataDir=${DATA_DIR}`,
   );
 });

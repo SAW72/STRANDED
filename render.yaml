@@ -68,3 +68,14 @@ services:
       # https://stranded.onrender.com,https://YOUR.DOMAIN,http://localhost:5173
       - key: CORS_ORIGINS
         sync: false
+      # Relayer-side pause. Health stays 200 with paused=true.
+      - key: KILL_SWITCH
+        value: "0"
+      - key: ADMIN_SECRET
+        sync: false
+      - key: DATA_DIR
+        value: "./data"
+      - key: BROADCAST_MAX_ATTEMPTS
+        value: "3"
+      - key: BROADCAST_RETRY_BASE_MS
+        value: "200"
