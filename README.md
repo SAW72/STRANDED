@@ -1,5 +1,11 @@
 Stranded
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
+## License
+
+MIT — see [`LICENSE`](LICENSE). Copyright (c) 2026 Steward of the King LLC.
+
 **Product:** `GasRescueSwap` — stranded token → swap a slice for native gas → same-chain move-out of the remainder.
 
 **Harness:** `GasRescue.sol` is an in-token fee skim kept for regression. It is **not** the product.
