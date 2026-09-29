@@ -1,5 +1,7 @@
 # Security Audit: GasRescueSwap (Scout #1)
 
+> **Status, 2026-09-27 (`main` `7ac55f8`).** Finding 1 below is stale. `_sweepDust` now sends donated `tokenIn` to the owner before the pull, on both rescue entrypoints. Use [SECURITY.md](../SECURITY.md) as the current snapshot. Findings 2–4 were not re-closed by that sweep.
+
 **Auditor:** Internal auditor bot (docs/AUDITOR.md) — not a human firm.  
 **Scope:** `src/GasRescueSwap.sol` + interfaces, deploy/rescue scripts, tests, mocks, `docs/DESIGN.md`, `README.md`. Harness `src/GasRescue.sol` reviewed only for deploy confusion.  
 **HEAD:** `main` @ `c2e4a1788c3535e1fc68aca8578f40444d2f35d4` (PR #7 merged: vendored libs + wrap-ETH tests; wrap-ETH dust sweep already in `GasRescueSwap.sol`).  

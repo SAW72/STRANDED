@@ -12,7 +12,7 @@ MIT — see [`LICENSE`](LICENSE). Copyright (c) 2026 Steward of the King LLC.
 
 Testnet only: **Base Sepolia (84532)** and **Arb Sepolia (421614)**. No mainnet code path. No bridge adapter in v1. Auditor-bot design APPROVE unblocks this implementation; a third-party firm audit is still required before mainnet.
 
-See [docs/AUDITOR.md](docs/AUDITOR.md). Issues: [#3](https://github.com/SAW72/gas-rescue/issues/3), [#4](https://github.com/SAW72/gas-rescue/issues/4).
+Current operator snapshot: [SECURITY.md](SECURITY.md). The 2026-09-02 write-up is [docs/AUDIT-FINDINGS.md](docs/AUDIT-FINDINGS.md) (Finding 1 there is stale). See [docs/AUDITOR.md](docs/AUDITOR.md). Issues: [#3](https://github.com/SAW72/gas-rescue/issues/3), [#4](https://github.com/SAW72/gas-rescue/issues/4).
 
 HackQuest / Arbitrum Open House — **Arb Sepolia first** (`421614`; Base secondary). [docs/BUILDATHON_PROGRESS.md](docs/BUILDATHON_PROGRESS.md) Day-5 + [issue #24](https://github.com/SAW72/STRANDED/issues/24). Day-1 Lens, Day-2 demo path, Day-3 fail-closed readiness, Day-4 Arb KNOW snapshot, Day-5 fixture/demo judge path (hot wallet underfunded — do not wait for top-up; do not remake the video). Judged product stays `GasRescueSwap`. `StrandedRegistry` is merged and is **not** the deliverable. Live QA: [docs/QA_ARB_SEPOLIA_RESCUE.md](docs/QA_ARB_SEPOLIA_RESCUE.md).
 
