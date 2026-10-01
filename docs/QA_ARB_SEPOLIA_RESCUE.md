@@ -269,6 +269,31 @@ Required extra env: `PRIVATE_KEY` = **relayer** hot key (`0x8240…9AF6`), `USER
 
 ---
 
+## H1 — public mint (draft, not signed)
+
+Live GRTT and gMOCK `mint` are public. Neither token has `owner()` or a mint gate. A 0-ETH wallet can mint and rescue. The locked router holds 0.0195 ETH and pays at most 0.001 ETH per rescue (`payAmount()` for the 0.2-token demo slice is 0.0001 ETH). Relayer limits (1 per wallet, 3 per IP, 4 hours) only slow the drain.
+
+Auditor M-1: do not key a per-user payout cap on `swapExact`'s third argument. `GasRescueSwap` does not bind that word to signed `order.user` or `order.nativeTo`. The signer can rotate it. Rejected.
+
+Two auditor options. (1) Restrict mint on both GRTT and gMOCK. No live setter, so this is a new token plus two delists. Owner-only mint is the draft below. A capped public faucet still lets every fresh address take one payout, so it is not used. (2) A global max ETH per hour on the router. The live router has `setMaxPayout`, `setRate`, and `withdrawEth`, and no hourly cap. That needs a new router. Do not edit `script/DeployLockedDemoSwapRouter.s.sol` (separate PR). An hourly cap slows the drain and does not close it. Not chosen.
+
+`script/MigrateH1GatedDemoToken.s.sol` is the owner script. It deploys `GatedDemoToken` (owner-only mint, 2 tokens to `0x5BFd…BA37`), allowlists it with `setEip2612Token`, and delists GRTT and gMOCK with `setTokenAllowed(token, false)` (that call also clears the EIP-2612 flag on live bytecode). Signer is `0x3046…bA9D`.
+
+Simulate, no key, no `--broadcast`:
+
+```bash
+forge script script/MigrateH1GatedDemoToken.s.sol:MigrateH1GatedDemoToken \
+  --rpc-url "$ARB_SEPOLIA_RPC_URL" --chain-id 421614 -vv
+```
+
+Spencer broadcasts from his machine only, with `PRIVATE_KEY` equal to the owner. Do not broadcast from CI or Cursor.
+
+Until he signs, section 4a still expects `tokenAllowed=true` and `ready=true` for the open GRTT holder. After he signs, that default check goes `tokenAllowed=false` and `ready=false`. The fixture demo (empty Relayer URL) still runs. A live submit needs the new token address in the relayer `TOKEN_ADDRESS` and the wallet `VITE_TOKEN_ADDRESS_ARB_SEPOLIA`. This runbook does not change `render.yaml`. The deploy address depends on the owner nonce; read it from the simulation. Do not retarget `GasRescueLens.LIVE_ARB_GRTT` before that contract exists.
+
+`withdrawEth` and `setMaxPayout` exist on the live router. They are a stopgap (pull the 0.0195 ETH, or set the cap to 0). They are not this migration. A public one-per-address faucet would leave the drain open.
+
+---
+
 ## 7. Pass / fail (Spencer watch list)
 
 | Check | Pass |
@@ -303,7 +328,7 @@ Live still **lacks** `rescueReceipt` / `CANONICAL_PERMIT2()`. Day-5 `HackQuestSt
 
 ## 9. Do not
 
-- `--broadcast` on `HackQuestStatus` or `InspectGasRescueSwap`
+- `--broadcast` on `HackQuestStatus`, `InspectGasRescueSwap`, or `MigrateH1GatedDemoToken` (Spencer's machine only for the last one)
 - Enable Permit2
 - Use mainnet RPC / chain id 1
 - Submit to HackQuest from an agent

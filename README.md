@@ -140,6 +140,7 @@ src/StrandedRegistry.sol           # Phase-2 scaffold (non-production)
 src/interfaces/IStrandedRegistry.sol
 src/GasRescue.sol                  # fee-skim harness
 src/interfaces/IGasRescue.sol
+src/GatedDemoToken.sol             # H1 owner-only mint; not deployed until Spencer signs
 src/mocks/…
 test/GasRescueSwap.t.sol
 test/GasRescueLens.t.sol
@@ -152,6 +153,7 @@ script/DeployGasRescueLens.s.sol   # testnet Lens; Spencer --broadcast only
 script/DeployStrandedRegistry.s.sol  # testnet registry; Spencer --broadcast only
 script/InspectGasRescueSwap.s.sol  # read-only; no keys
 script/HackQuestStatus.s.sol       # Lens consumer; HackQuest JSON; no keys
+script/MigrateH1GatedDemoToken.s.sol # H1 simulate-only; Spencer signs; no --broadcast here
 script/RescueSwap.s.sol
 script/Deploy.s.sol                # harness
 script/Rescue.s.sol                # harness
@@ -179,6 +181,8 @@ Arb demo path (live Relayer + `ArbSepoliaDemoPath`): `pathHash = keccak256(swapE
 **Demo router.** On 2026-10-01 the owner migrated the Arb Sepolia demo router. Retired open router `0x6804…25A8` (delisted Oct 1, 2026) was an unlocked `MockSwapRouter`: anyone could `setPayAmount` and then `swapExact` without tokens and take its ETH (0.0195 ETH inventory, 0.0001 ETH payout, read before the migration). That inventory moved to `LockedDemoSwapRouter` `0xFE22f32eF7a8f64B6c9E1CCAe31817B54184f7fc`, which holds 0.0195 ETH. `GasRescueSwap` `allowedRouters` is true for the new router and false for the retired one. `src/LockedDemoSwapRouter.sol` only swaps for the rescue contract, pulls the tokens, pays proportionally, and caps the payout. Owner settings only. Do not `--broadcast` `script/DeployLockedDemoSwapRouter.s.sol` again: the migration already ran, and a second broadcast deploys another router. The Relayer prefers `quote(amountSwap)` and falls back to `payAmount()` when a router has no `quote`. Repo `render.yaml` names the same locked router. The live Render `ROUTER_ADDRESS` on `stranded-relayer-arb` has been `0xFE22f32eF7a8f64B6c9E1CCAe31817B54184f7fc` since Oct 1, 2026, 1:27 PM ET (Relayer Backend deploy), and quotes return that router. Fee math is unchanged (1% fee, ~20% swap slice, 100 bps slip).
 
 Live Arb bytecode **lacks** tip `CANONICAL_PERMIT2()` and `rescueReceipt` — judged v1 `rescueWithPermit` is still OK. Redeploy is Spencer-only: [docs/REDEPLOY-GASRESCUESWAP.md](docs/REDEPLOY-GASRESCUESWAP.md). Permit2 stays **disabled** on both deploys. Owner `0x30466A210961c0C2C13AF0A9d35dfC6E8858bA9D`. Demo video: https://youtu.be/GzAfCQwoq88
+
+**H1 (open, not signed).** Live GRTT `0x5649…d713` and gMOCK `0x3000…B318` both expose public `mint` and have no `owner()` or mint gate. A 0-ETH wallet can mint and rescue until `LockedDemoSwapRouter` `0xFE22…f7fc` (0.0195 ETH, `maxPayout` 0.001 ETH) is empty. Relayer limits (1 per wallet and 3 per IP per 4 hours) only slow that. A per-user cap keyed on `swapExact`'s third argument is rejected (M-1): `GasRescueSwap` does not bind that word to the signed user. A global hourly router cap is not on the live router and only slows the drain; do not edit `script/DeployLockedDemoSwapRouter.s.sol` for it. `src/GatedDemoToken.sol` is an owner-only mint for both open tokens' replacement. `script/MigrateH1GatedDemoToken.s.sol` is simulate-only: Spencer (`0x3046…bA9D`) deploys it, mints 2 tokens to `0x5BFd…BA37`, allowlists it, and delists GRTT and gMOCK. Do not pass `--broadcast`. Do not change `render.yaml` here. After he signs, point the relayer `TOKEN_ADDRESS` and the wallet `VITE_TOKEN_ADDRESS_ARB_SEPOLIA` at the new token or the live submit breaks, and default `HackQuestStatus` `ready` goes false until the Lens GRTT constant moves. The fixture demo (empty Relayer URL) does not use this token.
 
 ## Wallet UX
 

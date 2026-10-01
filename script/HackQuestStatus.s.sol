@@ -34,6 +34,11 @@ import {GasRescueLens} from "../src/GasRescueLens.sol";
 /// If the hot wallet later falls under 0.10 ETH, the same script reports
 /// `fixture-demo-no-top-up` and `liveSubmitBlocked=true`.
 /// Do not remake the demo video. Do not rewrite Relayer fee math (#26 owns that).
+///
+/// H1 is not executed from this script. Live GRTT and gMOCK stay the readiness
+/// token until Spencer signs `script/MigrateH1GatedDemoToken.s.sol`. After that
+/// broadcast, `tokenAllowed` and `ready` go false for this default GRTT holder
+/// check. Do not retarget `GasRescueLens.LIVE_ARB_GRTT` before that token exists.
 contract HackQuestStatus is Script {
     uint256 internal constant BASE_SEPOLIA_CHAIN_ID = 84_532;
     uint256 internal constant ARB_SEPOLIA_CHAIN_ID = 421_614;
