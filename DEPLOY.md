@@ -8,12 +8,9 @@ The GitHub repo is `SAW72/STRANDED`.
 
 The wallet host is a Render static site named `stranded`, built from `render.yaml`. Render auto-deploys that site on commits to `main`.
 
-| | URL |
-|---|---|
-| Live wallet | https://strandedtoken.trade |
-| Render default URL | https://gas-rescue.onrender.com |
+Use the wallet at https://strandedtoken.trade. `www.strandedtoken.trade` redirects to that apex.
 
-`www.strandedtoken.trade` redirects to the apex `https://strandedtoken.trade`.
+https://gas-rescue.onrender.com is only the Render origin host for the static site. The live relayer's CORS allowlist is `https://strandedtoken.trade` alone, so a page opened on `gas-rescue.onrender.com` gets no `Access-Control-Allow-Origin` and rescue requests from it are blocked.
 
 The Arb Sepolia Relayer is the web service `stranded-relayer-arb` at https://stranded-relayer-arb.onrender.com.
 
@@ -26,20 +23,20 @@ The Arb Sepolia Relayer is the web service `stranded-relayer-arb` at https://str
 | `stranded` | Static site | https://gas-rescue.onrender.com |
 | `stranded-relayer-arb` | Web | https://stranded-relayer-arb.onrender.com |
 
-The live custom domain on `stranded` is https://strandedtoken.trade.
+The wallet must be used at https://strandedtoken.trade. https://gas-rescue.onrender.com is the Render origin host only.
 
 ## 3. Secrets (dashboard only)
 
 On **stranded-relayer-arb**:
 
 - `RELAYER_PRIVATE_KEY` — 32-byte hex private key of the allowlisted relayer (`0x8240…9AF6`). Include `0x` or not; the server normalizes it. Never paste the address. Never commit it.
-- `CORS_ORIGINS` — comma-separated, no trailing slash. Include the live wallet and the Render default URL:
+- `CORS_ORIGINS` — comma-separated, no trailing slash. The live relayer allows only the wallet origin:
 
 ```
-https://strandedtoken.trade,https://gas-rescue.onrender.com,http://localhost:5173,http://127.0.0.1:5173
+https://strandedtoken.trade
 ```
 
-If you add another public origin, append it here. Then **restart** the Relayer (CORS is read at boot).
+Do not add `https://gas-rescue.onrender.com`. That host is not on the allowlist, and rescue requests from it are blocked. CORS is read at boot, so restart the Relayer after any change.
 
 Optional control-plane vars on **stranded-relayer-arb** (see `relayer/.env.example`):
 
@@ -59,7 +56,7 @@ Optional Base Sepolia live quotes: set `VITE_RELAYER_URL` to your existing Base 
 
 ## 4. Custom domain
 
-The static site `stranded` serves the live wallet at https://strandedtoken.trade. `www.strandedtoken.trade` redirects to that apex. Render's default URL https://gas-rescue.onrender.com stays available.
+The static site `stranded` serves the live wallet at https://strandedtoken.trade. `www.strandedtoken.trade` redirects to that apex. https://gas-rescue.onrender.com remains the Render origin host, and rescue requests from it are blocked by CORS.
 
 To attach another domain: Render → **stranded** → **Custom Domains**, add the DNS record Render shows, and wait until HTTPS is **Issued**. Add `https://` that host to Relayer `CORS_ORIGINS` and restart the Relayer.
 
@@ -71,7 +68,7 @@ MetaMask shows the HTTPS origin on permit/order prompts. `http://` on a public d
 curl -sS https://stranded-relayer-arb.onrender.com/health
 ```
 
-Expect `ok: true`, `chainId: 421614`, `swap: 0x65e7…`. Then open https://strandedtoken.trade or https://gas-rescue.onrender.com, pick **Arb Sepolia**, connect, quote, sign.
+Expect `ok: true`, `chainId: 421614`, `swap: 0x65e7…`. Then open https://strandedtoken.trade, pick **Arb Sepolia**, connect, quote, sign. Do not use https://gas-rescue.onrender.com for a rescue; the relayer will not send `Access-Control-Allow-Origin` for that host.
 
 ## Do not
 
