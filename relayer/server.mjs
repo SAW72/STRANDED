@@ -102,6 +102,13 @@ const mockRouterAbi = [
     inputs: [],
     outputs: [{ type: "uint256" }],
   },
+  {
+    type: "function",
+    name: "quote",
+    stateMutability: "view",
+    inputs: [{ name: "amountIn", type: "uint256" }],
+    outputs: [{ type: "uint256" }],
+  },
 ];
 
 const erc20Abi = [
@@ -205,6 +212,28 @@ async function liveStatus() {
   };
 }
 
+/** Proportional payout from LockedDemoSwapRouter. Open mock has no `quote`. */
+async function readNativeOut(amountSwap) {
+  try {
+    const quoted = await publicClient.readContract({
+      address: /** @type {`0x${string}`} */ (ROUTER),
+      abi: mockRouterAbi,
+      functionName: "quote",
+      args: [amountSwap],
+    });
+    if (quoted > 0n) return { payAmount: quoted, quoteSource: "locked-demo-router" };
+    return { payAmount: 0n, quoteSource: "locked-demo-router" };
+  } catch {
+    // Live open MockSwapRouter exposes only a fixed payAmount().
+  }
+  const payAmount = await publicClient.readContract({
+    address: /** @type {`0x${string}`} */ (ROUTER),
+    abi: mockRouterAbi,
+    functionName: "payAmount",
+  });
+  return { payAmount, quoteSource: "mock-swap-router" };
+}
+
 async function buildQuote(body) {
   const user = body.user;
   const tokenIn = body.tokenIn || TOKEN;
@@ -245,11 +274,7 @@ async function buildQuote(body) {
   const nativeTo = body.nativeTo || user;
   const swapData = encodeSwapData(tokenIn, amountSwap, nativeTo);
   const pathHash = keccak256(swapData);
-  const payAmount = await publicClient.readContract({
-    address: /** @type {`0x${string}`} */ (ROUTER),
-    abi: mockRouterAbi,
-    functionName: "payAmount",
-  });
+  const { payAmount, quoteSource } = await readNativeOut(amountSwap);
   if (payAmount <= 0n) {
     throw Object.assign(new Error("quote_unavailable"), { status: 502 });
   }
@@ -279,7 +304,7 @@ async function buildQuote(body) {
     amountOut: payAmount.toString(),
     minAmountOut: minAmountOut.toString(),
     slippageBps,
-    quoteSource: "mock-swap-router",
+    quoteSource,
     amountRemainder: amountRemainder.toString(),
     router: ROUTER,
     pathHash,
