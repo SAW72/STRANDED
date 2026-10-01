@@ -2,41 +2,44 @@
 
 Wallet is a static Vite app. The Arb Sepolia Relayer is a Node service that must stay up to quote and broadcast. Neither stores a private key in git.
 
-## 1. Push this repo
+## 1. Repo and host
 
-Render deploys from GitHub (`SAW72/gas-rescue`). Push the branch that has `render.yaml`, `wallet/`, and `relayer/`.
+The GitHub repo is `SAW72/STRANDED`.
 
-## 2. Create the Blueprint
+The wallet host is a Render static site named `stranded`, built from `render.yaml`. Render auto-deploys that site on commits to `main`.
 
-1. [Render Dashboard](https://dashboard.render.com) → **New** → **Blueprint**
-2. Connect `SAW72/gas-rescue`
-3. Apply `render.yaml`
+| | URL |
+|---|---|
+| Live wallet | https://strandedtoken.trade |
+| Render default URL | https://gas-rescue.onrender.com |
 
-That creates:
+`www.strandedtoken.trade` redirects to the apex `https://strandedtoken.trade`.
 
-| Service | Type | Default URL |
+The Arb Sepolia Relayer is the web service `stranded-relayer-arb` at https://stranded-relayer-arb.onrender.com.
+
+## 2. Blueprint
+
+`render.yaml` defines the static site and the Relayer. In the [Render Dashboard](https://dashboard.render.com), a Blueprint connected to `SAW72/STRANDED` applies that file.
+
+| Service | Type | URL |
 |---|---|---|
-| `stranded` | Static site | `https://stranded.onrender.com` |
-| `stranded-relayer-arb` | Web | `https://stranded-relayer-arb.onrender.com` |
+| `stranded` | Static site | https://gas-rescue.onrender.com |
+| `stranded-relayer-arb` | Web | https://stranded-relayer-arb.onrender.com |
+
+The live custom domain on `stranded` is https://strandedtoken.trade.
 
 ## 3. Secrets (dashboard only)
 
 On **stranded-relayer-arb**:
 
 - `RELAYER_PRIVATE_KEY` — 32-byte hex private key of the allowlisted relayer (`0x8240…9AF6`). Include `0x` or not; the server normalizes it. Never paste the address. Never commit it.
-- `CORS_ORIGINS` — comma-separated, no trailing slash:
+- `CORS_ORIGINS` — comma-separated, no trailing slash. Include the live wallet and the Render default URL:
 
 ```
-https://stranded.onrender.com,http://localhost:5173,http://127.0.0.1:5173
+https://strandedtoken.trade,https://gas-rescue.onrender.com,http://localhost:5173,http://127.0.0.1:5173
 ```
 
-When your custom domain is live, add it:
-
-```
-https://stranded.onrender.com,https://YOUR.DOMAIN,http://localhost:5173
-```
-
-Then **restart** the Relayer (CORS is read at boot).
+If you add another public origin, append it here. Then **restart** the Relayer (CORS is read at boot).
 
 Optional control-plane vars on **stranded-relayer-arb** (see `relayer/.env.example`):
 
@@ -56,14 +59,11 @@ Optional Base Sepolia live quotes: set `VITE_RELAYER_URL` to your existing Base 
 
 ## 4. Custom domain
 
-1. Buy the domain (Namecheap, Cloudflare, Google Domains, etc.).
-2. Render → **stranded** static site → **Custom Domains** → add `YOUR.DOMAIN` and `www.YOUR.DOMAIN` if you want both.
-3. At the registrar, add the CNAME (or A/ALIAS) Render shows. Prefer Cloudflare DNS **proxied** (orange cloud) only if you follow Render’s Cloudflare notes; otherwise DNS-only.
-4. Wait for HTTPS to show **Issued**.
-5. Add `https://YOUR.DOMAIN` to Relayer `CORS_ORIGINS` and restart the Relayer.
-6. Optional: add `api.YOUR.DOMAIN` as a custom domain on **stranded-relayer-arb**, set `VITE_RELAYER_URL_ARB_SEPOLIA=https://api.YOUR.DOMAIN`, rebuild the static site.
+The static site `stranded` serves the live wallet at https://strandedtoken.trade. `www.strandedtoken.trade` redirects to that apex. Render's default URL https://gas-rescue.onrender.com stays available.
 
-MetaMask will show the HTTPS origin on permit/order prompts. `http://` on a public domain will fail.
+To attach another domain: Render → **stranded** → **Custom Domains**, add the DNS record Render shows, and wait until HTTPS is **Issued**. Add `https://` that host to Relayer `CORS_ORIGINS` and restart the Relayer.
+
+MetaMask shows the HTTPS origin on permit/order prompts. `http://` on a public domain will fail.
 
 ## 5. Check it
 
@@ -71,7 +71,7 @@ MetaMask will show the HTTPS origin on permit/order prompts. `http://` on a publ
 curl -sS https://stranded-relayer-arb.onrender.com/health
 ```
 
-Expect `ok: true`, `chainId: 421614`, `swap: 0x65e7…`. Then open the static URL, pick **Arb Sepolia**, connect, quote, sign.
+Expect `ok: true`, `chainId: 421614`, `swap: 0x65e7…`. Then open https://strandedtoken.trade or https://gas-rescue.onrender.com, pick **Arb Sepolia**, connect, quote, sign.
 
 ## Do not
 
