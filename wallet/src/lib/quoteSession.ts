@@ -1,4 +1,10 @@
-import { isRelayerTimeout, RESCUE_SUBMIT_TIMEOUT } from "./relayerError";
+import {
+  isRelayerTimeout,
+  RESCUE_SEND_FAILED,
+  RESCUE_SUBMIT_TIMEOUT,
+  SIGNATURE_CANCELLED,
+  SIGNATURE_FAILED,
+} from "./relayerError";
 
 /**
  * Quote + signature session. After a confirmed rescue the spent Order (nonce,
@@ -88,7 +94,7 @@ export function quoteSessionAfterSignThrow(input: {
       stage: "before-post",
       signed: null,
       dropCachedQuote: false,
-      signError: thrownText(input.error, "Signature rejected."),
+      signError: isUserRejected(input.error) ? SIGNATURE_CANCELLED : SIGNATURE_FAILED,
     };
   }
   if (isRelayerTimeout(input.error)) {
@@ -103,12 +109,28 @@ export function quoteSessionAfterSignThrow(input: {
   return {
     stage: "posting",
     ...quoteSessionAfterRescueError({
-      message: thrownText(input.error, "The rescue request failed."),
+      message: RESCUE_SEND_FAILED,
+      relayerMessage: true,
     }),
   };
 }
 
-function thrownText(error: unknown, fallback: string): string {
-  if (error instanceof Error && error.message.trim()) return error.message;
-  return fallback;
+function isUserRejected(error: unknown, seen = new Set<unknown>()): boolean {
+  if (typeof error === "string") return /user rejected/i.test(error);
+  if (!error || typeof error !== "object") return false;
+  if (seen.has(error)) return false;
+  seen.add(error);
+  const record = error as { name?: unknown; code?: unknown; message?: unknown; cause?: unknown };
+  if (record.name === "UserRejectedRequestError") return true;
+  if (record.code === 4001 || record.code === "4001") return true;
+  if (typeof record.message === "string" && /user rejected/i.test(record.message)) return true;
+  return isUserRejected(record.cause, seen);
+}
+
+/** Drop a previous rescue error banner when the user starts another attempt. */
+export function quoteSessionOnNewAttempt<T extends QuoteSubmitState>(
+  submitState: T,
+): T | { kind: "idle" } {
+  if (submitState.kind === "error") return { kind: "idle" };
+  return submitState;
 }

@@ -213,7 +213,10 @@ describe("fetchRescueQuote POST /v1/quotes", () => {
     };
     const result = await fetchRescueQuote("http://relayer.test", params, fetchImpl);
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.reason).toMatch(/HTTP 404/);
+    if (!result.ok) {
+      expect(result.reason).toBe("Couldn’t load rescue details. Try again.");
+      expect(result.reason).not.toMatch(/HTTP \d+|Relayer POST/);
+    }
   });
 
   it("surfaces relayer_paused from the Relayer", async () => {

@@ -108,6 +108,7 @@ import {
   quoteSessionAfterRescueError,
   quoteSessionAfterRescueSuccess,
   quoteSessionAfterSignThrow,
+  quoteSessionOnNewAttempt,
 } from "./lib/quoteSession";
 import { fetchRescueQuote, hasRequiredQuoteFields, type QuoteSource, type RescueQuote } from "./lib/quotes";
 import { receiptFromSubmit, type RescueReceiptView } from "./lib/receipt";
@@ -432,6 +433,7 @@ export function App() {
   async function onSign() {
     if (signing || awaitingFreshHoldings || submitState.kind === "posting") return;
     if (!canPromptSignatures(phase) || !quoteReady || !quote || !address || !token || !rescue) return;
+    setSubmitState((current) => quoteSessionOnNewAttempt(current));
     if (!onSelectedChain) {
       setSignError(`Switch to ${chainLabel(selectedChainId)} (${selectedChainId}) before signing.`);
       return;
@@ -853,7 +855,11 @@ export function App() {
             className="btn btn-primary"
             type="button"
             disabled={phase !== "review"}
-            onClick={() => setDetailsConfirmed(true)}
+            onClick={() => {
+              setDetailsConfirmed(true);
+              setSubmitState((current) => quoteSessionOnNewAttempt(current));
+              setSignError(null);
+            }}
           >
             Confirm details
           </button>

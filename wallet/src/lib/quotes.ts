@@ -1,7 +1,9 @@
 import { isAddress, isHex, type Address, type Hex } from "viem";
 import { isSupportedChainId, type SupportedChainId } from "./chains";
+import { QUOTE_ERROR } from "../copy";
 import {
   RESCUE_SERVICE_TIMEOUT,
+  RESCUE_UNREACHABLE,
   busyServiceMessage,
   isRelayerTimeout,
   relayerFetchSignal,
@@ -397,7 +399,8 @@ export async function fetchRescueQuote(
     if (isRelayerTimeout(err)) {
       return { ok: false, reason: RESCUE_SERVICE_TIMEOUT, userMessage: RESCUE_SERVICE_TIMEOUT };
     }
-    return { ok: false, reason: `Could not reach Relayer POST /v1/quotes at ${relayerBase}.` };
+    console.error("[quote] POST /v1/quotes network error", { url: source, err });
+    return { ok: false, reason: RESCUE_UNREACHABLE, userMessage: RESCUE_UNREACHABLE };
   }
 
   if (!response.ok) {
@@ -407,8 +410,13 @@ export async function fetchRescueQuote(
     } catch {
       failed = null;
     }
+    const messageContext: RelayerMessageContext = {
+      ...context,
+      retryAfterHeader: response.headers.get("Retry-After"),
+    };
     const userMessage =
-      relayerUserMessage(response.status, failed, context) ?? busyServiceMessage(response.status, failed);
+      relayerUserMessage(response.status, failed, messageContext) ??
+      busyServiceMessage(response.status, failed);
     if (userMessage) {
       return { ok: false, reason: userMessage, userMessage };
     }
@@ -428,17 +436,16 @@ export async function fetchRescueQuote(
         reason: "Rescue quotes are paused right now. Try again later.",
       };
     }
-    return {
-      ok: false,
-      reason: `Relayer POST /v1/quotes returned HTTP ${response.status}. Signing is blocked.`,
-    };
+    console.error("[quote] POST /v1/quotes failed", { status: response.status, body: failed });
+    return { ok: false, reason: QUOTE_ERROR };
   }
 
   let body: unknown;
   try {
     body = await response.json();
-  } catch {
-    return { ok: false, reason: "Relayer POST /v1/quotes did not return JSON." };
+  } catch (err) {
+    console.error("[quote] POST /v1/quotes did not return JSON", err);
+    return { ok: false, reason: QUOTE_ERROR };
   }
 
   const quote = parseQuoteResponse(body);

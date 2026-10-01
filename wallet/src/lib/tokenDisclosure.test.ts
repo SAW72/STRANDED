@@ -7,6 +7,18 @@ import receiptSource from "../RescueReceipt.tsx?raw";
 import celebrationSource from "../StrandedCelebration.tsx?raw";
 import pickerSource from "../WalletPicker.tsx?raw";
 import * as copy from "../copy";
+import { QUOTE_ERROR } from "../copy";
+import { quoteSessionAfterSignThrow } from "./quoteSession";
+import { fetchRescueQuote } from "./quotes";
+import { publicSubmitError } from "./rescues";
+import {
+  RESCUE_COULD_NOT_SEND,
+  RESCUE_NOT_AVAILABLE,
+  RESCUE_SEND_FAILED,
+  RESCUE_UNREACHABLE,
+  SIGNATURE_CANCELLED,
+  SIGNATURE_FAILED,
+} from "./relayerError";
 import disclosureSource from "./tokenDisclosure.ts?raw";
 import {
   demoBannerText,
@@ -118,6 +130,64 @@ describe("banned words in user-visible copy", () => {
     const hits = scanned.flatMap((text) =>
       bannedWordsIn(text).map((word) => `${word}: ${text}`),
     );
+    expect(hits).toEqual([]);
+  });
+
+  it("error mappers never return Relayer POST, HTTP status, snake_case codes, viem@, or Details:", async () => {
+    const developer = /Relayer POST|HTTP \d+|\b[a-z]+_[a-z0-9_]+\b|viem@|Details:/;
+    const viem = new Error("User rejected the request.\n\nDetails: User rejected the request.\nVersion: viem@2.37.8");
+    viem.name = "UserRejectedRequestError";
+    const rejected = quoteSessionAfterSignThrow({ rescuePostAttempted: false, error: viem });
+    const other = quoteSessionAfterSignThrow({
+      rescuePostAttempted: false,
+      error: new Error("Version: viem@2.37.8\nDetails: missing account"),
+    });
+    const thrown = quoteSessionAfterSignThrow({
+      rescuePostAttempted: true,
+      error: new Error("socket hang up"),
+    });
+    const unreachable = await fetchRescueQuote(
+      "http://relayer.test",
+      {
+        user: "0x1111111111111111111111111111111111111111",
+        tokenIn: "0x2222222222222222222222222222222222222222",
+        amountIn: 1n,
+        chainId: 84532,
+      },
+      async () => {
+        throw new Error("offline");
+      },
+    );
+    const httpQuote = await fetchRescueQuote(
+      "http://relayer.test",
+      {
+        user: "0x1111111111111111111111111111111111111111",
+        tokenIn: "0x2222222222222222222222222222222222222222",
+        amountIn: 1n,
+        chainId: 84532,
+      },
+      async () => new Response("nope", { status: 404 }),
+    );
+
+    const sentences = [
+      RESCUE_UNREACHABLE,
+      RESCUE_SEND_FAILED,
+      RESCUE_NOT_AVAILABLE,
+      RESCUE_COULD_NOT_SEND,
+      SIGNATURE_CANCELLED,
+      SIGNATURE_FAILED,
+      QUOTE_ERROR,
+      publicSubmitError(404, { ok: false, error: "not_found" }),
+      publicSubmitError(502, { ok: false, error: "simulation_failed", revert: "Boom_code" }),
+      publicSubmitError(500, { ok: false, error: "some_code" }),
+      publicSubmitError(418, "not-json"),
+      rejected.stage === "before-post" ? rejected.signError : "",
+      other.stage === "before-post" ? other.signError : "",
+      thrown.stage === "posting" && thrown.submitState.kind === "error" ? thrown.submitState.message : "",
+      unreachable.ok ? "" : unreachable.reason,
+      httpQuote.ok ? "" : httpQuote.reason,
+    ];
+    const hits = sentences.filter((text) => developer.test(text));
     expect(hits).toEqual([]);
   });
 });
