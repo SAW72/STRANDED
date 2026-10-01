@@ -1,18 +1,15 @@
-import {
-  createPublicClient,
-  createWalletClient,
-  http as viemHttp,
-  keccak256,
-  encodeFunctionData,
-} from "viem";
+import { createPublicClient, createWalletClient, http as viemHttp, keccak256 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { arbitrumSepolia } from "viem/chains";
 import { createRelayerApp } from "./app.mjs";
+import { parseTrustedProxyHops } from "./clientIp.mjs";
+import { INVALID_AMOUNT_MESSAGE, MISSING_USER_MESSAGE, asBroadcastFailure, fail } from "./httpError.mjs";
 import { createKillSwitch, parseEnvFlag } from "./killSwitch.mjs";
 import { createNonceStore } from "./nonceStore.mjs";
+import { createBuildQuote, encodeSwapData } from "./quote.mjs";
 import { createRescueLog, orderLogSummary } from "./rescueLog.mjs";
+import { createRescueLimiter, parseRescueLimitConfig } from "./rescueLimit.mjs";
 import { DEFAULT_BASE_DELAY_MS, DEFAULT_MAX_ATTEMPTS, withBroadcastRetry } from "./retry.mjs";
-import { slipMinAmountOut, splitRescueAmounts } from "./quoteMath.mjs";
 
 if (process.env.RELAYER_KEY_FILE || process.env.RELAYER_PRIVATE_KEY_FILE) {
   console.error("Key files are forbidden. Export RELAYER_PRIVATE_KEY in the process environment only.");
@@ -55,6 +52,9 @@ const DATA_DIR = process.env.DATA_DIR || "./data";
 const ADMIN_SECRET = String(process.env.ADMIN_SECRET || "").trim();
 const BROADCAST_MAX_ATTEMPTS = Number(process.env.BROADCAST_MAX_ATTEMPTS || DEFAULT_MAX_ATTEMPTS);
 const BROADCAST_RETRY_BASE_MS = Number(process.env.BROADCAST_RETRY_BASE_MS || DEFAULT_BASE_DELAY_MS);
+const TRUSTED_PROXY_HOPS = parseTrustedProxyHops(process.env.TRUSTED_PROXY_HOPS);
+// Unset means the defaults in parseRescueLimitConfig (1 wallet / 3 per IP / 4h).
+const RESCUE_LIMITS = parseRescueLimitConfig(process.env);
 const ALLOWED_ORIGINS = [
   process.env.CORS_ORIGINS || "http://localhost:5173,http://127.0.0.1:5173",
   process.env.APP_ORIGIN || "",
@@ -82,46 +82,6 @@ const walletClient = createWalletClient({
   chain: arbitrumSepolia,
   transport,
 });
-
-const mockRouterAbi = [
-  {
-    type: "function",
-    name: "swapExact",
-    stateMutability: "nonpayable",
-    inputs: [
-      { name: "tokenIn", type: "address" },
-      { name: "amountIn", type: "uint256" },
-      { name: "to", type: "address" },
-    ],
-    outputs: [],
-  },
-  {
-    type: "function",
-    name: "payAmount",
-    stateMutability: "view",
-    inputs: [],
-    outputs: [{ type: "uint256" }],
-  },
-  {
-    type: "function",
-    name: "quote",
-    stateMutability: "view",
-    inputs: [{ name: "amountIn", type: "uint256" }],
-    outputs: [{ type: "uint256" }],
-  },
-];
-
-const erc20Abi = [
-  { type: "function", name: "symbol", stateMutability: "view", inputs: [], outputs: [{ type: "string" }] },
-  { type: "function", name: "decimals", stateMutability: "view", inputs: [], outputs: [{ type: "uint8" }] },
-  {
-    type: "function",
-    name: "balanceOf",
-    stateMutability: "view",
-    inputs: [{ name: "account", type: "address" }],
-    outputs: [{ type: "uint256" }],
-  },
-];
 
 const usedNoncesAbi = [
   {
@@ -184,15 +144,6 @@ const nonceStore = createNonceStore({
     }),
 });
 
-/** Same `swapExact` encoding as `src/ArbSepoliaDemoPath.sol`. pathHash = keccak256(swapData). */
-function encodeSwapData(tokenIn, amountSwap, nativeTo) {
-  return encodeFunctionData({
-    abi: mockRouterAbi,
-    functionName: "swapExact",
-    args: [tokenIn, amountSwap, nativeTo],
-  });
-}
-
 async function liveStatus() {
   const [blockNumber, chainId, bytecode] = await Promise.all([
     publicClient.getBlockNumber(),
@@ -212,132 +163,43 @@ async function liveStatus() {
   };
 }
 
-/** Proportional payout from LockedDemoSwapRouter. Open mock has no `quote`. */
-async function readNativeOut(amountSwap) {
-  try {
-    const quoted = await publicClient.readContract({
-      address: /** @type {`0x${string}`} */ (ROUTER),
-      abi: mockRouterAbi,
-      functionName: "quote",
-      args: [amountSwap],
-    });
-    if (quoted > 0n) return { payAmount: quoted, quoteSource: "locked-demo-router" };
-    return { payAmount: 0n, quoteSource: "locked-demo-router" };
-  } catch {
-    // Routers without `quote` (including the retired open MockSwapRouter) expose only a fixed payAmount().
-  }
-  const payAmount = await publicClient.readContract({
-    address: /** @type {`0x${string}`} */ (ROUTER),
-    abi: mockRouterAbi,
-    functionName: "payAmount",
-  });
-  return { payAmount, quoteSource: "mock-swap-router" };
-}
-
-async function buildQuote(body) {
-  const user = body.user;
-  const tokenIn = body.tokenIn || TOKEN;
-  const amountIn = BigInt(body.amountIn);
-  const chainId = Number(body.chainId ?? CHAIN_ID);
-  if (!user || !tokenIn || amountIn <= 0n) {
-    throw Object.assign(new Error("user, tokenIn, and amountIn are required"), { status: 400 });
-  }
-  if (chainId !== 421614) {
-    throw Object.assign(new Error("this Relayer is Arb Sepolia only"), { status: 400 });
-  }
-  const bal = await publicClient.readContract({
-    address: /** @type {`0x${string}`} */ (tokenIn),
-    abi: erc20Abi,
-    functionName: "balanceOf",
-    args: [user],
-  });
-  if (bal < amountIn) {
-    throw Object.assign(new Error("insufficient_balance"), { status: 400, error: "insufficient_balance" });
-  }
-  const [tokenSymbol, tokenDecimals] = await Promise.all([
-    publicClient.readContract({
-      address: /** @type {`0x${string}`} */ (tokenIn),
-      abi: erc20Abi,
-      functionName: "symbol",
-    }),
-    publicClient.readContract({
-      address: /** @type {`0x${string}`} */ (tokenIn),
-      abi: erc20Abi,
-      functionName: "decimals",
-    }),
-  ]);
-  const { amountSwap, feeAmount, amountRemainder } = splitRescueAmounts(
-    amountIn,
-    body.amountSwap !== undefined ? BigInt(body.amountSwap) : undefined,
-  );
-  const to = body.to || user;
-  const nativeTo = body.nativeTo || user;
-  const swapData = encodeSwapData(tokenIn, amountSwap, nativeTo);
-  const pathHash = keccak256(swapData);
-  const { payAmount, quoteSource } = await readNativeOut(amountSwap);
-  if (payAmount <= 0n) {
-    throw Object.assign(new Error("quote_unavailable"), { status: 502 });
-  }
-  const routerEth = await publicClient.getBalance({
-    address: /** @type {`0x${string}`} */ (ROUTER),
-  });
-  if (routerEth < payAmount) {
-    throw Object.assign(new Error("quote_unavailable"), { status: 502 });
-  }
-  const minAmountOut = slipMinAmountOut(payAmount);
-  const slippageBps = 100;
-  const deadline = BigInt(Math.floor(Date.now() / 1000) + 30 * 60);
-  const nonce = await nonceStore.reserve(user, { ttlMs: 30 * 60 * 1000 });
-  const quote = {
-    quoteId: keccak256(swapData).slice(0, 18),
-    chainId,
-    tokenIn,
-    tokenSymbol: String(tokenSymbol),
-    tokenDecimals: Number(tokenDecimals),
-    user,
-    amountIn: amountIn.toString(),
-    amountSwap: amountSwap.toString(),
-    feeAmount: feeAmount.toString(),
-    feeTo: FEE_TO,
-    to,
-    nativeTo,
-    amountOut: payAmount.toString(),
-    minAmountOut: minAmountOut.toString(),
-    slippageBps,
-    quoteSource,
-    amountRemainder: amountRemainder.toString(),
-    router: ROUTER,
-    pathHash,
-    swapData,
-    deadline: deadline.toString(),
-    nonce: nonce.toString(),
-    nonceReserved: true,
-    live: true,
-    stubRpc: false,
-    swap: SWAP,
-    relayer: account.address,
-  };
-  await rescueLog.append({ event: "quote", ...quote });
-  return quote;
-}
+const buildQuote = createBuildQuote({
+  publicClient,
+  nonceStore,
+  rescueLog,
+  tokenAddress: TOKEN,
+  feeTo: FEE_TO,
+  router: ROUTER,
+  swap: SWAP,
+  relayerAddress: account.address,
+  chainId: CHAIN_ID,
+});
 
 function asOrder(raw) {
-  return {
-    user: raw.user,
-    tokenIn: raw.tokenIn,
-    amountIn: BigInt(raw.amountIn),
-    feeAmount: BigInt(raw.feeAmount),
-    feeTo: raw.feeTo,
-    amountSwap: BigInt(raw.amountSwap),
-    minAmountOut: BigInt(raw.minAmountOut),
-    to: raw.to,
-    nativeTo: raw.nativeTo,
-    router: raw.router,
-    pathHash: raw.pathHash,
-    chainId: BigInt(raw.chainId),
-    deadline: BigInt(raw.deadline),
-    nonce: BigInt(raw.nonce),
-  };
+  try {
+    if (!raw || typeof raw !== "object") {
+      throw fail(400, "missing_user", MISSING_USER_MESSAGE);
+    }
+    return {
+      user: raw.user,
+      tokenIn: raw.tokenIn,
+      amountIn: BigInt(raw.amountIn),
+      feeAmount: BigInt(raw.feeAmount),
+      feeTo: raw.feeTo,
+      amountSwap: BigInt(raw.amountSwap),
+      minAmountOut: BigInt(raw.minAmountOut),
+      to: raw.to,
+      nativeTo: raw.nativeTo,
+      router: raw.router,
+      pathHash: raw.pathHash,
+      chainId: BigInt(raw.chainId),
+      deadline: BigInt(raw.deadline),
+      nonce: BigInt(raw.nonce),
+    };
+  } catch (err) {
+    if (err && err.error && Number.isInteger(err.status)) throw err;
+    throw fail(400, "invalid_amount", INVALID_AMOUNT_MESSAGE);
+  }
 }
 
 function retryLog(info) {
@@ -381,9 +243,10 @@ async function submitRescue(body) {
         args,
       });
     } catch (err) {
-      const name = err && (err.shortMessage || err.name || err.message);
+      const name = err && (err.shortMessage || err.name || "");
       const revert = err && (err.data?.errorName || err.errorName || "");
-      console.error("relayer_error simulation_failed", name, revert);
+      const detail = String(name).replace(/https?:\/\/\S+/gi, "[url]").slice(0, 180);
+      console.error("relayer_error simulation_failed", detail, String(revert).slice(0, 80));
       throw Object.assign(new Error("simulation_failed"), {
         status: 502,
         error: "simulation_failed",
@@ -416,8 +279,8 @@ async function submitRescue(body) {
     });
     return { ok: true, txHash, stubRpc: false, attempts };
   } catch (err) {
-    const error = err.error || err.message || "request_failed";
-    if (error === "used_nonce" || /usednonce/i.test(String(err.revert || err.message || ""))) {
+    const raw = `${err && err.error ? err.error : ""} ${err && err.revert ? err.revert : ""} ${err && err.shortMessage ? err.shortMessage : ""} ${err && err.message ? err.message : ""}`;
+    if (/used[_ ]?nonce/i.test(raw)) {
       try {
         if (body.order?.user != null && body.order?.nonce != null) {
           nonceStore.markConsumed(body.order.user, body.order.nonce);
@@ -426,17 +289,25 @@ async function submitRescue(body) {
         /* ignore */
       }
     }
+    const pub = asBroadcastFailure(err);
+    const revert = err && typeof err.revert === "string" ? err.revert.slice(0, 180) : undefined;
     await rescueLog.append({
       event: "rescue_error",
       ...summary,
-      error: String(error),
-      revert: err.revert ? String(err.revert) : undefined,
+      error: String(pub.error || "broadcast_failed"),
+      revert,
       attempts,
       ms: Date.now() - started,
     });
-    throw err;
+    throw pub;
   }
 }
+
+const rescueLimiter = createRescueLimiter({
+  dataDir: DATA_DIR,
+  env: process.env,
+  config: RESCUE_LIMITS,
+});
 
 const server = createRelayerApp({
   killSwitch,
@@ -445,10 +316,15 @@ const server = createRelayerApp({
   liveStatus,
   buildQuote,
   submitRescue,
+  rescueLimiter,
+  chainId: CHAIN_ID,
+  trustedProxyHops: TRUSTED_PROXY_HOPS,
 });
 
+await rescueLimiter.ready;
+const limitLabel = (value) => (value == null ? "off" : String(value));
 server.listen(PORT, HOST, () => {
   console.log(
-    `relayer listening on ${HOST}:${PORT} stubRpc=false swap=${SWAP} relayer=${account.address} chain=${CHAIN_ID} paused=${killSwitch.isPaused()} dataDir=${DATA_DIR}`,
+    `relayer listening on ${HOST}:${PORT} stubRpc=false swap=${SWAP} relayer=${account.address} chain=${CHAIN_ID} paused=${killSwitch.isPaused()} dataDir=${DATA_DIR} walletLimit=${limitLabel(RESCUE_LIMITS.perWallet)} ipLimit=${limitLabel(RESCUE_LIMITS.perIp)} windowMs=${RESCUE_LIMITS.windowMs} trustedProxyHops=${TRUSTED_PROXY_HOPS}`,
   );
 });
