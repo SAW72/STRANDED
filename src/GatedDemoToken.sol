@@ -7,7 +7,9 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 
 /// @title GatedDemoToken
-/// @notice EIP-2612 demo token for the Arb Sepolia judge path. `mint` is
+/// @notice EIP-2612 demo token for the Arb Sepolia judge path. ERC20 name and
+///         the EIP-2612 / EIP-712 permit domain are "Stranded Demo Token".
+///         Symbol is "SDEMO". Both are immutable after deploy. `mint` is
 ///         owner-only. The live GRTT and gMOCK contracts expose public `mint`
 ///         and have no owner, so they cannot be gated in place.
 ///
@@ -23,7 +25,7 @@ contract GatedDemoToken is ERC20, ERC20Permit, Ownable2Step {
         address initialOwner,
         address initialRecipient,
         uint256 initialAmount
-    ) ERC20("GasRescue Test Token", "GRTT") ERC20Permit("GasRescue Test Token") Ownable(initialOwner) {
+    ) ERC20("Stranded Demo Token", "SDEMO") ERC20Permit("Stranded Demo Token") Ownable(initialOwner) {
         if (initialAmount > 0) {
             if (initialRecipient == address(0)) revert ZeroAddress();
             _mint(initialRecipient, initialAmount);

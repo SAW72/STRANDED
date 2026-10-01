@@ -3,8 +3,9 @@ import { isAddress, type Address } from "viem";
 /**
  * Live open GRTT on Arb Sepolia. The demo-token default for the wallet.
  * Do not replace this with a nonce-predicted address. After Spencer signs
- * the H1 migration, set `VITE_TOKEN_ADDRESS_ARB_SEPOLIA` to the deployed
- * `GatedDemoToken` (one line).
+ * the H1 migration, set `VITE_TOKEN_ADDRESS_ARB_SEPOLIA` on the Render static
+ * site `stranded` (strandedtoken.trade) to the deployed `GatedDemoToken`
+ * ("Stranded Demo Token", SDEMO) and rebuild.
  */
 export const LIVE_ARB_GRTT = "0x5649fF51123D534044aA7E6cBc8762698Ffed713" as const;
 

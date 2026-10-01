@@ -168,6 +168,22 @@ contract H1GatedDemoTokenTest is Test {
         assertEq(address(router).balance, inventory - MAX_PAYOUT * 2);
     }
 
+    function test_nameSymbolAndPermitDomain() public {
+        GatedDemoToken gated = new GatedDemoToken(owner, address(0), 0);
+        assertEq(gated.name(), "Stranded Demo Token");
+        assertEq(gated.symbol(), "SDEMO");
+        bytes32 expected = keccak256(
+            abi.encode(
+                keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"),
+                keccak256(bytes("Stranded Demo Token")),
+                keccak256(bytes("1")),
+                block.chainid,
+                address(gated)
+            )
+        );
+        assertEq(gated.DOMAIN_SEPARATOR(), expected);
+    }
+
     function test_renounceAndZeroMintRevert() public {
         GatedDemoToken gated = new GatedDemoToken(owner, address(0), 0);
         vm.expectRevert(GatedDemoToken.OwnershipCannotBeRenounced.selector);
