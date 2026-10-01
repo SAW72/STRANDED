@@ -1,6 +1,6 @@
 import { isAddress, isHex, type Hex } from "viem";
 import type { RescueOrder } from "./order";
-import { relayerUserMessage, type RelayerMessageContext } from "./relayerError";
+import { busyServiceMessage, relayerUserMessage, type RelayerMessageContext } from "./relayerError";
 
 export type RescueSubmitInput = {
   chainId: number;
@@ -78,7 +78,7 @@ export function publicSubmitError(
   body: unknown,
   context?: RelayerMessageContext,
 ): string {
-  const userMessage = relayerUserMessage(status, body, context);
+  const userMessage = relayerUserMessage(status, body, context) ?? busyServiceMessage(status, body);
   if (userMessage) return userMessage;
   const { error, revert } = asErrorBody(body);
   if (status === 404 || error === "not_found") {
@@ -157,7 +157,8 @@ export async function submitRescue(
   }
 
   if (!response.ok) {
-    const userMessage = relayerUserMessage(response.status, body, context);
+    const userMessage =
+      relayerUserMessage(response.status, body, context) ?? busyServiceMessage(response.status, body);
     const reason = userMessage ?? publicSubmitError(response.status, body, context);
     console.error("[rescue] POST /v1/rescues failed", {
       status: response.status,

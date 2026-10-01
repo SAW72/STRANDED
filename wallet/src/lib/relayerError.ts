@@ -1,9 +1,12 @@
 /**
  * User-facing text for Relayer HTTP errors.
  * 400, 429, and 502 use the server's `message` when it is present.
- * Other statuses, non-JSON bodies, and a missing `message` return null
- * so callers keep their existing sentences.
+ * A non-JSON or non-object HTTP 502 uses {@link RESCUE_SERVICE_BUSY}.
+ * Other statuses and a missing `message` return null so callers keep their existing sentences.
  */
+
+export const RESCUE_SERVICE_BUSY =
+  "The rescue service is busy or unavailable right now. Please try again in a minute.";
 
 const READABLE_STATUS = new Set([400, 429, 502]);
 
@@ -95,6 +98,16 @@ function withLocalTime(message: string, local: string): string {
     return `${stem}. You can try again at ${local}.`;
   }
   return message.replace(new RegExp(ISO_TIME_SOURCE, "g"), local);
+}
+
+/**
+ * HTTP 502 whose body is not a JSON object (parse failure, empty, or a non-object).
+ * A JSON error object keeps its own `message` or the caller's existing mapping.
+ */
+export function busyServiceMessage(status: number, body: unknown): string | null {
+  if (status !== 502) return null;
+  if (body !== null && typeof body === "object" && !Array.isArray(body)) return null;
+  return RESCUE_SERVICE_BUSY;
 }
 
 /**

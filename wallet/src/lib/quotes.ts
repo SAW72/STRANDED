@@ -1,6 +1,6 @@
 import { isAddress, isHex, type Address, type Hex } from "viem";
 import { isSupportedChainId, type SupportedChainId } from "./chains";
-import { relayerUserMessage, type RelayerMessageContext } from "./relayerError";
+import { busyServiceMessage, relayerUserMessage, type RelayerMessageContext } from "./relayerError";
 
 /** Canonical Relayer / fixture quote. Field names must match the design freeze. */
 export type RescueQuote = {
@@ -396,7 +396,8 @@ export async function fetchRescueQuote(
     } catch {
       failed = null;
     }
-    const userMessage = relayerUserMessage(response.status, failed, context);
+    const userMessage =
+      relayerUserMessage(response.status, failed, context) ?? busyServiceMessage(response.status, failed);
     if (userMessage) {
       return { ok: false, reason: userMessage, userMessage };
     }

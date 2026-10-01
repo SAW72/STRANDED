@@ -2,7 +2,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { sampleFixtureQuote } from "./fixture";
 import { buildOrder } from "./order";
 import { fetchRescueQuote } from "./quotes";
-import { relayerUserMessage, type RelayerMessageContext } from "./relayerError";
+import {
+  RESCUE_SERVICE_BUSY,
+  busyServiceMessage,
+  relayerUserMessage,
+  type RelayerMessageContext,
+} from "./relayerError";
 import { publicSubmitError, submitRescue } from "./rescues";
 
 const LOCALE = "en-US";
@@ -162,6 +167,15 @@ describe("relayerUserMessage", () => {
     expect(relayerUserMessage(503, { ok: false, error: "relayer_paused", message: "raw" })).toBeNull();
     expect(relayerUserMessage(429, [])).toBeNull();
   });
+
+  it("uses the busy sentence only for a non-object HTTP 502", () => {
+    expect(busyServiceMessage(502, null)).toBe(RESCUE_SERVICE_BUSY);
+    expect(busyServiceMessage(502, "bad gateway")).toBe(RESCUE_SERVICE_BUSY);
+    expect(busyServiceMessage(502, [])).toBe(RESCUE_SERVICE_BUSY);
+    expect(busyServiceMessage(502, { ok: false, error: "simulation_failed" })).toBeNull();
+    expect(busyServiceMessage(400, null)).toBeNull();
+    expect(busyServiceMessage(404, "nope")).toBeNull();
+  });
 });
 
 describe("quote and rescue endpoints", () => {
@@ -259,14 +273,33 @@ describe("quote and rescue endpoints", () => {
     expect((await quoteReason(502, upstream)).reason).not.toMatch(/HTTP 502/);
   });
 
-  it("keeps the existing sentence for a non-JSON 502", async () => {
+  it("shows a plain busy sentence for a non-JSON 502 and still fails the quote", async () => {
     const quote = await quoteReason(502, "<html>bad gateway</html>", true);
-    expect(quote.reason).toBe("Relayer POST /v1/quotes returned HTTP 502. Signing is blocked.");
-    expect(quote.userMessage).toBeUndefined();
+    expect(quote.ok).toBe(false);
+    expect(quote.reason).toBe(RESCUE_SERVICE_BUSY);
+    expect(quote.userMessage).toBe(RESCUE_SERVICE_BUSY);
+    expect(quote.reason).not.toMatch(/Relayer|HTTP|502|\/v1\//);
 
     const rescue = await rescueReason(502, "<html>bad gateway</html>", true);
-    expect(rescue.reason).toBe("Relayer POST /v1/rescues returned HTTP 502.");
-    expect(rescue.relayerMessage).toBeUndefined();
+    expect(rescue.reason).toBe(RESCUE_SERVICE_BUSY);
+    expect(rescue.relayerMessage).toBe(true);
+    expect(rescue.reason).not.toMatch(/Relayer|HTTP|502|\/v1\//);
+    expect(publicSubmitError(502, null)).toBe(RESCUE_SERVICE_BUSY);
+  });
+
+  it("shows the same busy sentence when the 502 body is unparseable", async () => {
+    const quote = await quoteReason(502, "{", true);
+    expect(quote.reason).toBe(RESCUE_SERVICE_BUSY);
+    expect(quote.userMessage).toBe(RESCUE_SERVICE_BUSY);
+
+    const rescue = await rescueReason(502, "{", true);
+    expect(rescue.reason).toBe(RESCUE_SERVICE_BUSY);
+    expect(rescue.relayerMessage).toBe(true);
+
+    const quotePrimitive = await quoteReason(502, 1);
+    expect(quotePrimitive.reason).toBe(RESCUE_SERVICE_BUSY);
+    const rescueArray = await rescueReason(502, []);
+    expect(rescueArray.reason).toBe(RESCUE_SERVICE_BUSY);
   });
 
   it("keeps the existing sentence when the JSON message is missing", async () => {
