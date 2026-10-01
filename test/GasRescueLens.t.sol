@@ -205,12 +205,11 @@ contract GasRescueLensTest is Test {
 
     function test_deployScript_prepareAndRefuseMainnet() public {
         DeployGasRescueLens script = new DeployGasRescueLens();
-        vm.setEnv("GAS_RESCUE_SWAP_ADDRESS", vm.toString(address(rescue)));
-        script.prepare();
+        script.prepareFor(address(rescue));
 
         vm.chainId(1);
         vm.expectRevert(bytes("DeployGasRescueLens: testnet only (Arb Sepolia 421614 or Base Sepolia 84532)"));
-        script.prepare();
+        script.prepareFor(address(rescue));
     }
 
     function test_relayerOwnerSplit_readiness() public {
@@ -301,10 +300,10 @@ contract GasRescueLensTest is Test {
 
     function test_hackQuestStatus_script_printsReadyJson() public {
         HackQuestStatus script = new HackQuestStatus();
-        vm.setEnv("GAS_RESCUE_SWAP_ADDRESS", vm.toString(address(rescue)));
-        vm.setEnv("GAS_RESCUE_LENS_ADDRESS", vm.toString(address(lens)));
 
-        string memory json = script.reportJson(user, 1, 100 ether, nativeTo, bytes32(0));
+        string memory json = script.reportJson(
+            user, 1, 100 ether, nativeTo, bytes32(0), ArbSepoliaDemoPath.GRTT, address(rescue), address(lens)
+        );
         assertTrue(_contains(json, '"product":"GasRescueSwap"'));
         assertTrue(_contains(json, '"buildathon":"2026-09-17-day5"'));
         assertTrue(_contains(json, '"permit2Enabled":false'));
@@ -338,13 +337,17 @@ contract GasRescueLensTest is Test {
         assertTrue(_contains(json, vm.toString(ArbSepoliaDemoPath.dryGrttPathHash(nativeTo))));
 
         vm.deal(0x8240124dc78a27c80354Ca813Df12aa2888A9AF6, 0.015 ether);
-        string memory lowHot = script.reportJson(user, 1, 100 ether, nativeTo, bytes32(0));
+        string memory lowHot = script.reportJson(
+            user, 1, 100 ether, nativeTo, bytes32(0), ArbSepoliaDemoPath.GRTT, address(rescue), address(lens)
+        );
         assertTrue(_contains(lowHot, '"hotWalletUnderfunded":true'), "0.015 ETH is below the 0.10 live-submit floor");
         assertTrue(_contains(lowHot, '"liveSubmitBlocked":true'));
         assertTrue(_contains(lowHot, '"recommendedJudgePath":"fixture-demo-no-top-up"'));
 
         vm.deal(0x8240124dc78a27c80354Ca813Df12aa2888A9AF6, 0.10 ether);
-        string memory fundedHot = script.reportJson(user, 1, 100 ether, nativeTo, bytes32(0));
+        string memory fundedHot = script.reportJson(
+            user, 1, 100 ether, nativeTo, bytes32(0), ArbSepoliaDemoPath.GRTT, address(rescue), address(lens)
+        );
         assertTrue(_contains(fundedHot, '"hotWalletUnderfunded":false'));
         assertTrue(_contains(fundedHot, '"liveSubmitBlocked":false'));
         assertTrue(_contains(fundedHot, '"hotWalletWei":"100000000000000000"'));
@@ -358,7 +361,9 @@ contract GasRescueLensTest is Test {
         assertEq(script.recommendedJudgePath(true), "fixture-demo-no-top-up");
         assertEq(script.recommendedJudgePath(false), "live-submit-ok-if-user-funded");
 
-        string memory probeJson = script.reportJson(user, 1, 0, nativeTo, bytes32(0));
+        string memory probeJson = script.reportJson(
+            user, 1, 0, nativeTo, bytes32(0), ArbSepoliaDemoPath.GRTT, address(rescue), address(lens)
+        );
         assertTrue(_contains(probeJson, '"amountInPositive":false'));
         assertTrue(_contains(probeJson, '"probeOnly":true'));
         assertTrue(_contains(probeJson, '"userFunded":false'));
@@ -366,7 +371,7 @@ contract GasRescueLensTest is Test {
 
         vm.chainId(1);
         vm.expectRevert(bytes("HackQuestStatus: testnet only (Arb Sepolia 421614 or Base Sepolia 84532)"));
-        script.reportJson(user, 1, 0, nativeTo, bytes32(0));
+        script.reportJson(user, 1, 0, nativeTo, bytes32(0), ArbSepoliaDemoPath.GRTT, address(rescue), address(lens));
     }
 
     function _contains(

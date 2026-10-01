@@ -1,5 +1,6 @@
 import { encodeFunctionData, keccak256, type Address, type Hex } from "viem";
 import { ARB_SEPOLIA_CHAIN_ID } from "./chains";
+import { LIVE_ARB_GRTT, liveDemoToken } from "./demoToken";
 import { RELAYER_DRY_PATH_HASH } from "./fixture";
 import type { RescueQuote } from "./quotes";
 
@@ -24,7 +25,7 @@ export const ARB_SEPOLIA_DEMO = {
   owner: "0x30466A210961c0C2C13AF0A9d35dfC6E8858bA9D",
   relayer: "0x8240124dc78a27c80354Ca813Df12aa2888A9AF6",
   weth: "0x980B62Da83eFf3D4576C647993b0c1D7faf17c73",
-  grtt: "0x5649fF51123D534044aA7E6cBc8762698Ffed713",
+  grtt: LIVE_ARB_GRTT,
   gmock: "0x30006e29a23c713070136F56db1BDf2A8B82B318",
   router: "0xFE22f32eF7a8f64B6c9E1CCAe31817B54184f7fc",
   dryNativeTo: "0x1111111111111111111111111111111111111111",
@@ -36,7 +37,11 @@ export const ARB_SEPOLIA_DEMO = {
 
 export function isSupportedDemoToken(tokenIn: Address): boolean {
   const t = tokenIn.toLowerCase();
-  return t === ARB_SEPOLIA_DEMO.grtt.toLowerCase() || t === ARB_SEPOLIA_DEMO.gmock.toLowerCase();
+  return (
+    t === liveDemoToken().toLowerCase() ||
+    t === ARB_SEPOLIA_DEMO.grtt.toLowerCase() ||
+    t === ARB_SEPOLIA_DEMO.gmock.toLowerCase()
+  );
 }
 
 /** Relayer + Foundry `ArbSepoliaDemoPath.encodeSwapExact`. */

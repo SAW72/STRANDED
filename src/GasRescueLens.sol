@@ -26,7 +26,10 @@ contract GasRescueLens {
     address public constant LIVE_OWNER = 0x30466A210961c0C2C13AF0A9d35dfC6E8858bA9D;
     address public constant LIVE_RELAYER = 0x8240124dc78a27c80354Ca813Df12aa2888A9AF6;
     address public constant LIVE_ARB_WETH = 0x980B62Da83eFf3D4576C647993b0c1D7faf17c73;
-    address public constant LIVE_ARB_GRTT = 0x5649fF51123D534044aA7E6cBc8762698Ffed713;
+    /// @dev Same address as `ArbSepoliaDemoPath.GRTT`. `HackQuestStatus.run`
+    ///      reads `DEMO_TOKEN` and passes `demoToken(configured)` into
+    ///      `hackQuestReport`. This constant stays live GRTT.
+    address public constant LIVE_ARB_GRTT = ArbSepoliaDemoPath.GRTT;
     address public constant LIVE_ARB_GMOCK = 0x30006e29a23c713070136F56db1BDf2A8B82B318;
     /// @dev `LockedDemoSwapRouter`, live since the 2026-10-01 migration (0.0195 ETH).
     ///      Retired open router `0x6804…25A8` (delisted Oct 1, 2026) is not this constant.
@@ -269,22 +272,36 @@ contract GasRescueLens {
         return ArbSepoliaDemoPath.matches(tokenIn, amountSwap, nativeTo, quotedHash);
     }
 
-    /// @notice Wallet/relayer evidence bundle. `quotedPathHash` is optional
-    ///         (zero skips the dry-placeholder flag). `nativeTo` required for
-    ///         GRTT/gMOCK dry-amount path hashes.
+    /// @notice Wallet/relayer evidence bundle. Uses live GRTT.
+    ///         `quotedPathHash` is optional (zero skips the dry-placeholder flag).
     function hackQuestReport(
         address user,
         uint256 nonce,
         uint256 amountIn,
         address nativeTo,
         bytes32 quotedPathHash
+    ) public view returns (HackQuestReport memory) {
+        return hackQuestReport(user, nonce, amountIn, nativeTo, quotedPathHash, LIVE_ARB_GRTT);
+    }
+
+    /// @notice Same bundle for an explicit demo token. `HackQuestStatus.run`
+    ///         passes `ArbSepoliaDemoPath.demoToken(configured)` after reading
+    ///         `DEMO_TOKEN`, so readiness follows the gated token after GRTT
+    ///         is delisted. `address(0)` is rejected.
+    function hackQuestReport(
+        address user,
+        uint256 nonce,
+        uint256 amountIn,
+        address nativeTo,
+        bytes32 quotedPathHash,
+        address demoToken
     ) public view returns (HackQuestReport memory out) {
-        if (nativeTo == address(0)) revert ZeroAddress();
+        if (nativeTo == address(0) || demoToken == address(0)) revert ZeroAddress();
         out.swapStatus = status();
-        out.readiness = arbDemoReadiness(user, nonce, amountIn);
+        out.readiness = rescueReadiness(LIVE_RELAYER, demoToken, LIVE_ARB_ROUTER, user, nonce, amountIn);
         out.bytecode = bytecodeHints();
         out.receipt = _receiptView(user, nonce);
-        out.paths = _demoPaths(nativeTo, quotedPathHash);
+        out.paths = _demoPaths(nativeTo, quotedPathHash, demoToken);
     }
 
     function _receiptView(
@@ -296,9 +313,10 @@ contract GasRescueLens {
 
     function _demoPaths(
         address nativeTo,
-        bytes32 quotedPathHash
+        bytes32 quotedPathHash,
+        address demoToken
     ) internal pure returns (DemoPaths memory out) {
-        out.grttPathHash = ArbSepoliaDemoPath.dryGrttPathHash(nativeTo);
+        out.grttPathHash = ArbSepoliaDemoPath.pathHash(demoToken, ArbSepoliaDemoPath.DEMO_AMOUNT_SWAP, nativeTo);
         out.gmockPathHash = ArbSepoliaDemoPath.dryGmockPathHash(nativeTo);
         out.quotedIsWalletDryPlaceholder = ArbSepoliaDemoPath.isWalletDryPlaceholder(quotedPathHash);
     }

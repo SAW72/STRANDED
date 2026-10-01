@@ -269,6 +269,24 @@ Required extra env: `PRIVATE_KEY` = **relayer** hot key (`0x8240…9AF6`), `USER
 
 ---
 
+## H1 — public mint (draft, not signed)
+
+Live GRTT and gMOCK `mint` are public. Neither token has `owner()` or a mint gate. A 0-ETH wallet can mint and rescue. The locked router holds 0.0195 ETH and pays at most 0.001 ETH per rescue (`payAmount()` for the 0.2-token demo slice is 0.0001 ETH). Relayer limits (1 per wallet, 3 per IP, 4 hours) only slow the drain.
+
+Auditor M-1: do not key a per-user payout cap on `swapExact`'s third argument. `GasRescueSwap` does not bind that word to signed `order.user` or `order.nativeTo`. The signer can rotate it. Rejected.
+
+Two auditor options. (1) Restrict mint on both GRTT and gMOCK. No live setter, so this is a new token plus two delists. This draft uses a fixed-supply token with no `mint`. A capped public faucet still lets every fresh address take one payout, so it is not used. (2) A global max ETH per hour on the router. The live router has `setMaxPayout`, `setRate`, and `withdrawEth`, and no hourly cap. That needs a new router. Do not edit `script/DeployLockedDemoSwapRouter.s.sol` (separate PR). An hourly cap slows the drain and does not close it. Not chosen.
+
+`script/MigrateH1GatedDemoToken.s.sol` is the owner script, in two phases. The ordered steps, including the commands, are in [docs/SDEMO_MIGRATION_RUNBOOK.md](SDEMO_MIGRATION_RUNBOOK.md). Phase A creates fixed-supply SDEMO (name "Stranded Demo Token", symbol SDEMO, permit domain "Stranded Demo Token", no `mint`, 2e18 to `0x5BFd…BA37` and 18e18 to `0x3046…bA9D`) and calls `setEip2612Token` on the address the CREATE receipt returns. Phase B delists GRTT and gMOCK. `setTokenAllowed(false)` also clears the EIP-2612 flag on live bytecode. Signer is `0x3046…bA9D`. The script calls `vm.startBroadcast()` with no key in the repo and reverts on Foundry's default sender `0x1804…1f38`. GRTT stays drainable between the two phases. H1 is open during that window, as it is today, so Phase B should follow within the hour after the live check.
+
+`cast logs` of `TokenAllowed` and `Eip2612TokenAllowed` from block 300000000 through latest, then `cast call` of `allowedTokens` and `eip2612Tokens`: only gMOCK (block 305436708) and GRTT (block 305485600) are allowed. WETH is not. No third token, so the owner list has no extra delist.
+
+Until he signs Phase A, section 4a still expects `tokenAllowed=true` and `ready=true` for the open GRTT holder (`DEMO_TOKEN` unset). The constructor creates the whole supply: 2e18 on `0x5BFd…BA37` and 18e18 on `0x3046…bA9D`. A judge using their own wallet needs a transfer of 2 SDEMO from the Steward wallet, logged in [docs/SDEMO_DISTRIBUTION_LOG.md](SDEMO_DISTRIBUTION_LOG.md). `0x5BFd261b1eF7e61Bfea1ebfC87bDD8F4244BBA37` is Spencer's demo/QA EOA. It was allowlisted as a relayer in the past. On 2026-10-01 `relayers(address)` on `GasRescueSwap` `0x65e7…993D` returned false for it. The live relayer hot key is `0x8240…9AF6`. ETH out is at most SDEMO `totalSupply()` times 0.0005 ETH, so 2 SDEMO = 0.001 ETH and 20 SDEMO = 0.01 ETH, which is 51% of the router's 0.0195 ETH inventory. Remainders are returned and can be swapped again. SDEMO held by the router is never swept and sent out again. The fixture demo (empty Relayer URL) still runs. Do not change `setRate` or `setMaxPayout` on the router during judging. Do not call `sweepToken` on SDEMO.
+
+`withdrawEth` and `setMaxPayout` exist on the live router. They are a stopgap (pull the 0.0195 ETH, or set the cap to 0). They are not this migration. A public one-per-address faucet would leave the drain open.
+
+---
+
 ## 7. Pass / fail (Spencer watch list)
 
 | Check | Pass |
@@ -303,7 +321,7 @@ Live still **lacks** `rescueReceipt` / `CANONICAL_PERMIT2()`. Day-5 `HackQuestSt
 
 ## 9. Do not
 
-- `--broadcast` on `HackQuestStatus` or `InspectGasRescueSwap`
+- `--broadcast` on `HackQuestStatus`, `InspectGasRescueSwap`, or `MigrateH1GatedDemoToken` (Spencer's machine only for the last one)
 - Enable Permit2
 - Use mainnet RPC / chain id 1
 - Submit to HackQuest from an agent

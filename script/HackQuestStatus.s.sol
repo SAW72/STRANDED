@@ -27,6 +27,12 @@ import {GasRescueLens} from "../src/GasRescueLens.sol";
 ///                             probe (`userFunded` / `ready` stay false).
 ///   HACKQUEST_NATIVE_TO       path-hash recipient (default fixture 0x1111…)
 ///   HACKQUEST_PATH_HASH       optional quoted hash (flags wallet dry 0xbbb…)
+///   DEMO_TOKEN                demo token for readiness and the GRTT path hash.
+///                             Unset, this is live GRTT
+///                             `0x5649fF51123D534044aA7E6cBc8762698Ffed713`.
+///                             After Spencer signs, set it to the deployed
+///                             `GatedDemoToken` (one line). Do not paste a
+///                             nonce-predicted address. A zero value keeps GRTT.
 ///
 /// Day-5 JSON (no keys, no broadcast): Day-4 fields plus judge path.
 /// Hot wallet read 2026-10-01 is above the 0.10 ETH floor, so the default
@@ -34,6 +40,13 @@ import {GasRescueLens} from "../src/GasRescueLens.sol";
 /// If the hot wallet later falls under 0.10 ETH, the same script reports
 /// `fixture-demo-no-top-up` and `liveSubmitBlocked=true`.
 /// Do not remake the demo video. Do not rewrite Relayer fee math (#26 owns that).
+///
+/// H1 is not executed from this script. With `DEMO_TOKEN` unset, readiness
+/// still uses live GRTT, so today's default check stays `ready: true` for
+/// `0x5BFd…BA37`. After Spencer signs `script/MigrateH1GatedDemoToken.s.sol`,
+/// set `DEMO_TOKEN` to the address the script prints. That keeps this check
+/// `ready: true` on the gated token. `GasRescueLens.LIVE_ARB_GRTT` stays the
+/// live GRTT constant. Do not replace it with a predicted address.
 contract HackQuestStatus is Script {
     uint256 internal constant BASE_SEPOLIA_CHAIN_ID = 84_532;
     uint256 internal constant ARB_SEPOLIA_CHAIN_ID = 421_614;
@@ -41,7 +54,9 @@ contract HackQuestStatus is Script {
     address internal constant LIVE_BASE_SWAP = 0x21A1ADf810e64B5bd1d530D31abA6856b8DEf688;
     address internal constant LIVE_RELAYER = 0x8240124dc78a27c80354Ca813Df12aa2888A9AF6;
     address internal constant DRY_NATIVE_TO = 0x1111111111111111111111111111111111111111;
-    /// @dev GRTT holder used for the default funded preflight (read 2026-10-01).
+    /// @dev Spencer's demo/QA EOA. Was allowlisted as a relayer in the past.
+    ///      `relayers` on the live rescue returned false on 2026-10-01.
+    ///      Default funded preflight user (read 2026-10-01).
     address internal constant DEMO_GRTT_HOLDER = 0x5BFd261b1eF7e61Bfea1ebfC87bDD8F4244BBA37;
     uint256 internal constant DEMO_AMOUNT_IN = 1 ether;
     /// @dev Spencer / Chain Ops target before a live `rescueWithPermit` submit.
@@ -64,13 +79,16 @@ contract HackQuestStatus is Script {
         uint256 amountIn = vm.envOr("HACKQUEST_AMOUNT_IN", DEMO_AMOUNT_IN);
         address nativeTo = vm.envOr("HACKQUEST_NATIVE_TO", DRY_NATIVE_TO);
         bytes32 quoted = vm.envOr("HACKQUEST_PATH_HASH", bytes32(0));
+        address token = ArbSepoliaDemoPath.demoToken(vm.envOr("DEMO_TOKEN", address(0)));
+        address lensAddr = vm.envOr("GAS_RESCUE_LENS_ADDRESS", address(0));
 
-        string memory json = reportJson(user, nonce, amountIn, nativeTo, quoted);
+        string memory json = reportJson(user, nonce, amountIn, nativeTo, quoted, token, _swap(), lensAddr);
         console2.log(json);
     }
 
-    /// @notice Build the JSON blob. Deploys a local Lens when none is configured
-    ///         (`new` is outside `startBroadcast` — never broadcast from here).
+    /// @notice Build the JSON blob for live GRTT and the chain's documented swap.
+    ///         Does not read `DEMO_TOKEN`. Deploys a local Lens (`new` is outside
+    ///         `startBroadcast` — never broadcast from here).
     function reportJson(
         address user,
         uint256 nonce,
@@ -78,21 +96,47 @@ contract HackQuestStatus is Script {
         address nativeTo,
         bytes32 quotedPathHash
     ) public returns (string memory) {
-        _requireTestnet();
-        (GasRescueLens lens, bool ephemeral) = _lens();
-        GasRescueLens.HackQuestReport memory r = lens.hackQuestReport(user, nonce, amountIn, nativeTo, quotedPathHash);
-        if (ephemeral) {
-            console2.log("Lens constructed in-script (not broadcast, not on-chain).");
-        }
-        return _encode(r, address(lens), ephemeral, user, nonce, amountIn, nativeTo);
+        address swap = block.chainid == ARB_SEPOLIA_CHAIN_ID ? LIVE_ARB_SWAP : LIVE_BASE_SWAP;
+        return reportJson(user, nonce, amountIn, nativeTo, quotedPathHash, ArbSepoliaDemoPath.GRTT, swap, address(0));
     }
 
-    function _lens() internal returns (GasRescueLens lens, bool ephemeral) {
-        address configured = vm.envOr("GAS_RESCUE_LENS_ADDRESS", address(0));
-        if (configured != address(0)) {
-            return (GasRescueLens(configured), false);
+    /// @notice Same JSON for an explicit demo token, swap, and optional Lens.
+    ///         `demoToken == address(0)` keeps live GRTT. `lensAddr == address(0)`
+    ///         constructs the Lens in-script. `run` reads env, then calls this.
+    function reportJson(
+        address user,
+        uint256 nonce,
+        uint256 amountIn,
+        address nativeTo,
+        bytes32 quotedPathHash,
+        address demoToken,
+        address swap,
+        address lensAddr
+    ) public returns (string memory) {
+        _requireTestnet();
+        address token = ArbSepoliaDemoPath.demoToken(demoToken);
+        (GasRescueLens lens, bool ephemeral) = _lens(swap, lensAddr);
+        GasRescueLens.HackQuestReport memory r;
+        if (ephemeral) {
+            r = lens.hackQuestReport(user, nonce, amountIn, nativeTo, quotedPathHash, token);
+            console2.log("Lens constructed in-script (not broadcast, not on-chain).");
+        } else {
+            // A previously deployed Lens may not have the 6-arg report.
+            r = lens.hackQuestReport(user, nonce, amountIn, nativeTo, quotedPathHash);
+            r.readiness = lens.rescueReadiness(LIVE_RELAYER, token, ArbSepoliaDemoPath.ROUTER, user, nonce, amountIn);
+            r.paths.grttPathHash = ArbSepoliaDemoPath.pathHash(token, ArbSepoliaDemoPath.DEMO_AMOUNT_SWAP, nativeTo);
         }
-        return (new GasRescueLens(_swap()), true);
+        return _encode(r, address(lens), ephemeral, user, nonce, amountIn, nativeTo, token);
+    }
+
+    function _lens(
+        address swap,
+        address lensAddr
+    ) internal returns (GasRescueLens lens, bool ephemeral) {
+        if (lensAddr != address(0)) {
+            return (GasRescueLens(lensAddr), false);
+        }
+        return (new GasRescueLens(swap), true);
     }
 
     function _swap() internal view returns (address swap) {
@@ -118,7 +162,8 @@ contract HackQuestStatus is Script {
         address user,
         uint256 nonce,
         uint256 amountIn,
-        address nativeTo
+        address nativeTo,
+        address demoToken
     ) internal view returns (string memory) {
         uint256 hotWei = LIVE_RELAYER.balance;
         bool hotUnderfunded = hotWei < HOT_WALLET_MIN_WEI;
@@ -154,6 +199,8 @@ contract HackQuestStatus is Script {
             '",',
             '"nativeTo":"',
             _a(nativeTo),
+            '","demoToken":"',
+            _a(demoToken),
             '"'
         );
         string memory policy = string.concat(

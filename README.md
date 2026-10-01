@@ -140,6 +140,7 @@ src/StrandedRegistry.sol           # Phase-2 scaffold (non-production)
 src/interfaces/IStrandedRegistry.sol
 src/GasRescue.sol                  # fee-skim harness
 src/interfaces/IGasRescue.sol
+src/GatedDemoToken.sol             # H1 fixed-supply SDEMO; no mint, no owner
 src/mocks/…
 test/GasRescueSwap.t.sol
 test/GasRescueLens.t.sol
@@ -152,6 +153,7 @@ script/DeployGasRescueLens.s.sol   # testnet Lens; Spencer --broadcast only
 script/DeployStrandedRegistry.s.sol  # testnet registry; Spencer --broadcast only
 script/InspectGasRescueSwap.s.sol  # read-only; no keys
 script/HackQuestStatus.s.sol       # Lens consumer; HackQuest JSON; no keys
+script/MigrateH1GatedDemoToken.s.sol # H1 simulate-only; Spencer signs; no --broadcast here
 script/RescueSwap.s.sol
 script/Deploy.s.sol                # harness
 script/Rescue.s.sol                # harness
@@ -180,7 +182,32 @@ Arb demo path (live Relayer + `ArbSepoliaDemoPath`): `pathHash = keccak256(swapE
 
 Live Arb bytecode **lacks** tip `CANONICAL_PERMIT2()` and `rescueReceipt` — judged v1 `rescueWithPermit` is still OK. Redeploy is Spencer-only: [docs/REDEPLOY-GASRESCUESWAP.md](docs/REDEPLOY-GASRESCUESWAP.md). Permit2 stays **disabled** on both deploys. Owner `0x30466A210961c0C2C13AF0A9d35dfC6E8858bA9D`. Demo video: https://youtu.be/GzAfCQwoq88
 
+**H1 (open, not signed).** Live GRTT `0x5649…d713` and gMOCK `0x3000…B318` both expose public `mint` and have no `owner()` or mint gate. A 0-ETH wallet can mint and rescue until `LockedDemoSwapRouter` `0xFE22…f7fc` (0.0195 ETH, `maxPayout` 0.001 ETH) is empty. Relayer limits (1 per wallet and 3 per IP per 4 hours) only slow that. A per-user cap keyed on `swapExact`'s third argument is rejected (M-1): `GasRescueSwap` does not bind that word to the signed user. A global hourly router cap is not on the live router and only slows the drain; do not edit `script/DeployLockedDemoSwapRouter.s.sol` for it. `src/GatedDemoToken.sol` is a fixed-supply EIP-2612 token. Its ERC20 name and permit domain are "Stranded Demo Token" and its symbol is SDEMO; both are immutable. The constructor creates the only 20 SDEMO: 2 to `0x5BFd…BA37` and 18 to `0x3046…bA9D`. There is no `mint` and no owner. `script/MigrateH1GatedDemoToken.s.sol` is simulate-only and keyless (`--sender 0x3046…bA9D`, no `--broadcast` here) and runs in two phases. Phase A deploys SDEMO and allowlists the address from the CREATE receipt. GRTT and gMOCK stay allowlisted, so the live demo keeps working. Phase B delists those two, which are the only tokens on the live allowlist today. GRTT stays drainable between A and B. H1 is open during that window, as it is today, so B should follow within the hour. The ordered steps are in [docs/SDEMO_MIGRATION_RUNBOOK.md](docs/SDEMO_MIGRATION_RUNBOOK.md). Do not change `render.yaml`. Before he signs, `DEMO_TOKEN` stays unset and `HackQuestStatus` still reads live GRTT (`ready: true` for that holder). After Phase A, set `DEMO_TOKEN` on the relayer to the receipt address (`DEMO_TOKEN` wins over `TOKEN_ADDRESS`). `VITE_TOKEN_ADDRESS_ARB_SEPOLIA` is a Render env change on the static site `stranded` plus a rebuild. Do not paste a predicted address. Without that address, a live submit of the new token does not match. The constructor split is the whole supply. Judges receive 2 SDEMO by transfer from the Steward wallet. `0x5BFd261b1eF7e61Bfea1ebfC87bDD8F4244BBA37` is Spencer's demo/QA EOA. It was allowlisted as a relayer in the past. On 2026-10-01 `relayers(address)` on `GasRescueSwap` `0x65e7…993D` returned false for it. The live relayer hot key is `0x8240…9AF6`. ETH out is at most SDEMO `totalSupply()` times 0.0005 ETH, so 2 SDEMO = 0.001 ETH and 20 SDEMO = 0.01 ETH, which is 51% of the router's 0.0195 ETH inventory. Remainders are returned and can be swapped again, so the ceiling is the full supply times that rate. The fixture demo (empty Relayer URL) does not use this token.
+
+## Stranded Demo Token (SDEMO)
+
+> **Stranded Demo Token (SDEMO): testnet demo only.** SDEMO is a test token on Arbitrum Sepolia, a test network, at `[address added after deployment]`. It has no monetary value, is not for sale, and cannot be bought from us. It is not an investment and carries no right to profits, revenue, governance, or any future token.
+>
+> **Fixed supply.** SDEMO has a fixed supply of 20 tokens, all created once when the contract was deployed. No more can ever be minted. 2 SDEMO went to our demo wallet (`0x5BFd261b1eF7e61Bfea1ebfC87bDD8F4244BBA37`) and 18 to a wallet operated for Steward of the King LLC (`0x30466A210961c0C2C13AF0A9d35dfC6E8858bA9D`), which sends SDEMO only to demo and hackathon-judge wallets. SDEMO is a standard transferable token, so anyone holding it can send it to any address.
+>
+> **What SDEMO can draw from the demo router.** The STRANDED rescue flow uses SDEMO to pay out testnet ETH held by the demo router. Every 2 SDEMO can draw up to 0.001 testnet ETH. The full 20 SDEMO supply could draw up to 0.01 testnet ETH. Testnet ETH has no monetary value.
+>
+> Anyone offering SDEMO for sale, and any "SDEMO" token on another network, is not affiliated with us. STRANDED is experimental, unaudited software provided "as is," without warranties. STRANDED is a project of Steward of the King LLC, an Ohio (USA) limited liability company.
+
+After Phase A, replace `[address added after deployment]` in the disclosure above with the address the CREATE receipt returns. Leave the placeholder until then. Do not paste a nonce-predicted address. The ordered steps are in [docs/SDEMO_MIGRATION_RUNBOOK.md](docs/SDEMO_MIGRATION_RUNBOOK.md).
+
+### Distribution policy
+
+The contract creates 20 SDEMO in the constructor and has no `mint`. Supply stays at `totalSupply()` of 20.
+
+- No faucet and no liquidity pool.
+- The Steward wallet transfers 2 SDEMO per named judge or QA wallet, on request only. Those wallets are the demo and hackathon-judge wallets named above.
+- Log every transfer (date, recipient, amount, tx hash) in [docs/SDEMO_DISTRIBUTION_LOG.md](docs/SDEMO_DISTRIBUTION_LOG.md). The migration script does not move balances.
+- Do not change `setRate` or `setMaxPayout` on the router during judging. Do not call `sweepToken` on SDEMO on the router during judging. SDEMO held by the router is never swept and sent out again. The 0.01 ETH ceiling assumes that.
+
 ## Wallet UX
+
+The STRANDED wallet is the Render static site `stranded` (strandedtoken.trade).
 
 Vite + React + wagmi/viem under [`wallet/`](wallet/). Testnets only: Base Sepolia (`84532`) and Arb Sepolia (`421614`). No mainnet.
 
