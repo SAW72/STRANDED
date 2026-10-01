@@ -102,7 +102,12 @@ import {
 } from "./lib/order";
 import { canPromptSignatures, rescuePhase } from "./lib/processGate";
 import { readLiveHoldings, readLivePermitAuth, type LiveHoldings } from "./lib/holdings";
-import { QUOTES_QUERY_KEY, quoteSessionAfterRescueSuccess } from "./lib/quoteSession";
+import {
+  QUOTES_QUERY_KEY,
+  quoteSessionAfterRescueError,
+  quoteSessionAfterRescueSuccess,
+  quoteSessionAfterSignThrow,
+} from "./lib/quoteSession";
 import { fetchRescueQuote, hasRequiredQuoteFields, type QuoteSource, type RescueQuote } from "./lib/quotes";
 import { receiptFromSubmit, type RescueReceiptView } from "./lib/receipt";
 import { submitRescue } from "./lib/rescues";
@@ -446,6 +451,8 @@ export function App() {
     const order = buildOrder({ quote });
     setSigning(true);
     setSignError(null);
+    let rescuePostAttempted = false;
+    let postedOk = false;
     try {
       // Live name() + nonces() — cached "MockERC20Permit" / spent nonce → ERC2612InvalidSigner 0x4b800e46.
       const permitAuth = await readLivePermitAuth(publicClient, token, address);
@@ -474,8 +481,9 @@ export function App() {
         permitR: permit.r,
         permitS: permit.s,
       });
-      let postedOk = useFixture || !relayer;
+      postedOk = useFixture || !relayer;
       if (relayer && !useFixture) {
+        rescuePostAttempted = true;
         setSubmitState({ kind: "posting" });
         const submitted = await submitRescue(relayer, {
           chainId: selectedChainId,
@@ -502,12 +510,17 @@ export function App() {
           await Promise.all([refreshHoldings(), refetchNonceUsed()]);
           setAwaitingFreshHoldings(false);
         } else {
-          setSubmitState({
-            kind: "error",
+          const reset = quoteSessionAfterRescueError({
             message: submitted.reason,
             relayerMessage: submitted.relayerMessage,
           });
-          setSigned(null);
+          setSubmitState(reset.submitState);
+          setSigned(reset.signed);
+          setDetailsConfirmed(reset.detailsConfirmed);
+          setSignError(reset.signError);
+          if (reset.dropCachedQuote) {
+            queryClient.removeQueries({ queryKey: [QUOTES_QUERY_KEY] });
+          }
           postedOk = false;
           console.error("[rescue] submit failed", submitted.reason);
         }
@@ -516,10 +529,23 @@ export function App() {
         setCelebration(isFirstRescuePending() ? "first" : "rescue");
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Signature rejected.";
       console.error("[rescue] sign/submit threw", error);
-      setSignError(message);
-      setSigned(null);
+      if (postedOk) {
+        return;
+      }
+      const outcome = quoteSessionAfterSignThrow({ rescuePostAttempted, error });
+      if (outcome.stage === "posting") {
+        setSubmitState(outcome.submitState);
+        setSigned(outcome.signed);
+        setDetailsConfirmed(outcome.detailsConfirmed);
+        setSignError(outcome.signError);
+        if (outcome.dropCachedQuote) {
+          queryClient.removeQueries({ queryKey: [QUOTES_QUERY_KEY] });
+        }
+      } else {
+        setSignError(outcome.signError);
+        setSigned(outcome.signed);
+      }
     } finally {
       setSigning(false);
       setAwaitingFreshHoldings(false);
