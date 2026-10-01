@@ -1,6 +1,10 @@
 import http from "node:http";
 import { timingSafeEqual } from "node:crypto";
+import { clientIp } from "./clientIp.mjs";
+import { fail, toPublicError } from "./httpError.mjs";
 import { RELAYER_PAUSED } from "./killSwitch.mjs";
+import { parseQuoteBody, parseRescueUser } from "./quoteRequest.mjs";
+import { errorFromLimit } from "./rescueLimit.mjs";
 
 function secretsEqual(provided, expected) {
   const a = Buffer.from(String(provided || ""), "utf8");
@@ -38,11 +42,12 @@ export function createCors(allowedOrigins) {
   };
 }
 
-export function json(res, req, status, body, corsHeaders) {
+export function json(res, req, status, body, corsHeaders, extraHeaders = {}) {
   res.writeHead(status, {
     "content-type": "application/json; charset=utf-8",
     "cache-control": "no-store",
     ...corsHeaders(req),
+    ...extraHeaders,
   });
   res.end(JSON.stringify(body));
 }
@@ -53,20 +58,46 @@ export function readBody(req) {
     req.on("data", (c) => chunks.push(c));
     req.on("end", () => {
       const raw = Buffer.concat(chunks).toString("utf8");
-      if (!raw) return resolve({});
+      if (!raw.trim()) {
+        reject(fail(400, "invalid_json", "Request body is empty. Send a JSON object."));
+        return;
+      }
       try {
-        resolve(JSON.parse(raw));
+        const parsed = JSON.parse(raw);
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+          reject(fail(400, "invalid_json", "Request body must be a JSON object."));
+          return;
+        }
+        resolve(parsed);
       } catch {
-        reject(Object.assign(new Error("invalid_json"), { status: 400 }));
+        reject(fail(400, "invalid_json", "Request body is not valid JSON."));
       }
     });
-    req.on("error", reject);
+    req.on("error", () => {
+      reject(fail(400, "invalid_json", "Request body could not be read."));
+    });
   });
+}
+
+function sendPublic(res, req, err, corsHeaders) {
+  const pub = toPublicError(err);
+  if (pub.status >= 500 && !(err && err.error)) {
+    console.error("relayer_error", err instanceof Error ? err.name : "error");
+  }
+  json(res, req, pub.status, pub.body, corsHeaders, pub.headers);
+}
+
+function requestIp(req, trustedProxyHops) {
+  return clientIp(req, { trustedProxyHops });
 }
 
 /**
  * HTTP control plane. Quote/rescue implementations are injected so unit tests
  * can refuse without live RPC.
+ *
+ * Rescue limits, when provided, are checked after input validation and before
+ * quote RPC or rescue simulation/broadcast. Only a successful rescue consumes
+ * a slot. 429 responses use the same CORS headers as the rest of the API.
  *
  * @param {object} deps
  * @param {{ isPaused: Function, pause: Function, unpause: Function }} deps.killSwitch
@@ -75,6 +106,9 @@ export function readBody(req) {
  * @param {() => Promise<object>} deps.liveStatus
  * @param {(body: object) => Promise<object>} deps.buildQuote
  * @param {(body: object) => Promise<object>} deps.submitRescue
+ * @param {ReturnType<import("./rescueLimit.mjs").createRescueLimiter>} [deps.rescueLimiter]
+ * @param {number} [deps.chainId]
+ * @param {number} [deps.trustedProxyHops]
  */
 export function createRelayerApp(deps) {
   const killSwitch = deps.killSwitch;
@@ -83,6 +117,9 @@ export function createRelayerApp(deps) {
   const liveStatus = deps.liveStatus;
   const buildQuote = deps.buildQuote;
   const submitRescue = deps.submitRescue;
+  const limiter = deps.rescueLimiter || null;
+  const defaultChainId = Number(deps.chainId ?? 421614);
+  const trustedProxyHops = Number.isInteger(deps.trustedProxyHops) ? deps.trustedProxyHops : 1;
 
   function refuseIfPaused(res, req) {
     if (!killSwitch.isPaused()) return false;
@@ -92,7 +129,11 @@ export function createRelayerApp(deps) {
 
   async function healthBody() {
     const live = await liveStatus();
-    return { ...live, paused: killSwitch.isPaused() };
+    const body = { ...live, paused: killSwitch.isPaused() };
+    if (limiter) {
+      body.rescueLimits = { ...limiter.publicConfig(), trustedProxyHops };
+    }
+    return body;
   }
 
   return http.createServer(async (req, res) => {
@@ -134,42 +175,51 @@ export function createRelayerApp(deps) {
 
       if (req.method === "POST" && (path === "/quotes" || path === "/v1/quotes")) {
         if (refuseIfPaused(res, req)) return;
-        const body = await readBody(req);
         try {
+          const body = await readBody(req);
+          const parsed = parseQuoteBody(body, { defaultChainId });
+          if (limiter) {
+            const decision = await limiter.check(parsed.user, requestIp(req, trustedProxyHops));
+            const limited = errorFromLimit(decision);
+            if (limited) throw limited;
+          }
           json(res, req, 200, await buildQuote(body), corsHeaders);
         } catch (err) {
-          const error =
-            err.error || (err.message === "insufficient_balance" ? "insufficient_balance" : "request_failed");
-          json(res, req, err.status || 500, { ok: false, error }, corsHeaders);
+          sendPublic(res, req, err, corsHeaders);
         }
         return;
       }
 
       if (req.method === "POST" && path === "/v1/rescues") {
         if (refuseIfPaused(res, req)) return;
-        const body = await readBody(req);
+        let gate = null;
         try {
-          json(res, req, 200, await submitRescue(body), corsHeaders);
+          const body = await readBody(req);
+          const user = parseRescueUser(body);
+          if (limiter) {
+            gate = await limiter.begin(user, requestIp(req, trustedProxyHops));
+            if (!gate.ok) throw errorFromLimit(gate.decision);
+          }
+          const result = await submitRescue(body);
+          const succeeded = Boolean(result && result.ok !== false && result.txHash);
+          if (gate) await gate.finish(succeeded);
+          json(res, req, 200, result, corsHeaders);
         } catch (err) {
-          json(
-            res,
-            req,
-            err.status || 500,
-            {
-              ok: false,
-              error: err.error || "request_failed",
-              revert: err.revert,
-            },
-            corsHeaders,
-          );
+          if (gate && gate.ok) {
+            try {
+              await gate.finish(false);
+            } catch {
+              /* the response still reports the original error */
+            }
+          }
+          sendPublic(res, req, err, corsHeaders);
         }
         return;
       }
 
       json(res, req, 404, { ok: false, error: "not_found" }, corsHeaders);
     } catch (err) {
-      console.error("relayer_error", err instanceof Error ? err.message : "internal");
-      json(res, req, 500, { ok: false, error: "request_failed" }, corsHeaders);
+      sendPublic(res, req, err, corsHeaders);
     }
   });
 }

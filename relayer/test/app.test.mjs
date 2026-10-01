@@ -1,46 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { createRelayerApp } from "../app.mjs";
+import { req, withServer } from "./harness.mjs";
 import { createKillSwitch } from "../killSwitch.mjs";
-
-async function withServer(deps, fn) {
-  const killSwitch = deps.killSwitch || createKillSwitch();
-  let quoteCalls = 0;
-  let rescueCalls = 0;
-  const server = createRelayerApp({
-    killSwitch,
-    liveStatus: async () => ({ ok: true, live: true, chainId: 421614, stubRpc: false }),
-    buildQuote: async () => {
-      quoteCalls += 1;
-      return { quoteId: "q-live", nonce: "1" };
-    },
-    submitRescue: async () => {
-      rescueCalls += 1;
-      return { ok: true, txHash: `0x${"ab".repeat(32)}` };
-    },
-    allowedOrigins: ["http://localhost:5173"],
-    ...deps,
-  });
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const { port } = server.address();
-  try {
-    return await fn({
-      port,
-      killSwitch,
-      quoteCalls: () => quoteCalls,
-      rescueCalls: () => rescueCalls,
-      url: `http://127.0.0.1:${port}`,
-    });
-  } finally {
-    await new Promise((resolve) => server.close(resolve));
-  }
-}
-
-async function req(url, path, init = {}) {
-  const res = await fetch(`${url}${path}`, init);
-  const body = await res.json();
-  return { status: res.status, body };
-}
 
 describe("relayer HTTP kill switch", () => {
   it("refuses quotes and rescues when paused; health stays 200 with paused=true", async () => {
@@ -53,20 +14,25 @@ describe("relayer HTTP kill switch", () => {
 
       const quote = await req(url, "/v1/quotes", {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: {
+          "content-type": "application/json",
+          origin: "http://localhost:5173",
+        },
         body: JSON.stringify({ user: "0x1", tokenIn: "0x2", amountIn: "1" }),
       });
       assert.equal(quote.status, 503);
       assert.equal(quote.body.error, "relayer_paused");
+      assert.equal(quote.headers.get("access-control-allow-origin"), "http://localhost:5173");
       assert.equal(quoteCalls(), 0);
 
       const rescue = await req(url, "/v1/rescues", {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", origin: "http://localhost:5173" },
         body: JSON.stringify({ order: { user: "0x1", nonce: "1" } }),
       });
       assert.equal(rescue.status, 503);
       assert.equal(rescue.body.error, "relayer_paused");
+      assert.equal(rescue.headers.get("access-control-allow-origin"), "http://localhost:5173");
       assert.equal(rescueCalls(), 0);
     });
   });
