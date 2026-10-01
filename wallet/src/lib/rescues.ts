@@ -1,5 +1,6 @@
 import { isAddress, isHex, type Hex } from "viem";
 import type { RescueOrder } from "./order";
+import { relayerUserMessage, type RelayerMessageContext } from "./relayerError";
 
 export type RescueSubmitInput = {
   chainId: number;
@@ -13,7 +14,7 @@ export type RescueSubmitInput = {
 
 export type RescueSubmitResult =
   | { ok: true; txHash: Hex | null; stubRpc: boolean }
-  | { ok: false; reason: string };
+  | { ok: false; reason: string; relayerMessage?: boolean };
 
 export function rescuesUrl(relayerBase: string): string {
   const base = relayerBase.replace(/\/$/, "");
@@ -67,8 +68,18 @@ function asErrorBody(body: unknown): { error: string; revert: string } {
   };
 }
 
-/** Map Relayer POST /v1/rescues failure JSON into a visible reason. Never swallows the error code. */
-export function publicSubmitError(status: number, body: unknown): string {
+/**
+ * Map Relayer POST /v1/rescues failure JSON into a visible reason.
+ * HTTP 400, 429, and 502 with a `message` use that text (429 times are local).
+ * Otherwise the error code stays in the reason.
+ */
+export function publicSubmitError(
+  status: number,
+  body: unknown,
+  context?: RelayerMessageContext,
+): string {
+  const userMessage = relayerUserMessage(status, body, context);
+  if (userMessage) return userMessage;
   const { error, revert } = asErrorBody(body);
   if (status === 404 || error === "not_found") {
     return "Relayer POST /v1/rescues is not available.";
@@ -108,6 +119,7 @@ export async function submitRescue(
   relayerBase: string,
   input: RescueSubmitInput,
   fetchImpl: typeof fetch = fetch,
+  context?: RelayerMessageContext,
 ): Promise<RescueSubmitResult> {
   if (!relayerBase.trim()) {
     return { ok: false, reason: "VITE_RELAYER_URL is not set." };
@@ -145,13 +157,16 @@ export async function submitRescue(
   }
 
   if (!response.ok) {
-    const reason = publicSubmitError(response.status, body);
+    const userMessage = relayerUserMessage(response.status, body, context);
+    const reason = userMessage ?? publicSubmitError(response.status, body, context);
     console.error("[rescue] POST /v1/rescues failed", {
       status: response.status,
       body,
       reason,
     });
-    return { ok: false, reason };
+    return userMessage
+      ? { ok: false, reason, relayerMessage: true }
+      : { ok: false, reason };
   }
 
   const obj = body && typeof body === "object" && !Array.isArray(body) ? (body as Record<string, unknown>) : null;
