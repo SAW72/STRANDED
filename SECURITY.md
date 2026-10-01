@@ -28,7 +28,13 @@ Before that migration, the allowlisted demo router was the open `MockSwapRouter`
 
 The inventory now sits on `LockedDemoSwapRouter` `0xFE22f32eF7a8f64B6c9E1CCAe31817B54184f7fc` (0.0195 ETH). `allowedRouters` is true for that router and false for the retired open router, which holds 0 ETH. Only the rescue contract may call `swapExact`. The call pulls the tokens (short deliveries revert). ETH paid back to the rescue is `amountIn * rate / denominator`, capped by `maxPayout`. Settings and `withdrawEth` are owner-only. `test_nonOwnerCannotDrain` covers a stranger calling the setters, `withdrawEth`, and `swapExact`.
 
-The open deployment cannot be upgraded in place; it was delisted. On chain 421614, `script/DeployLockedDemoSwapRouter.s.sol` always requires `DLDSR_FORCE_NEW_ROUTER=true` and an explicit `DLDSR_PRIOR_LOCKED_ROUTER` (no default). That prior must already be allowlisted, and it must not be the retired open router. After the run the prior is delisted and the new router is allowlisted. The script is keyless (`--account` / `--sender`); it does not read `PRIVATE_KEY`. Agents must not pass `--broadcast`. Source `MockSwapRouter` setters are `onlyOwner`, and a zero-token swap reverts, so a future mock deploy is not open the same way. The live contract at the retired address is still the pre-fix open router. The live Render `ROUTER_ADDRESS` on `stranded-relayer-arb` has been `0xFE22f32eF7a8f64B6c9E1CCAe31817B54184f7fc` since Oct 1, 2026, 1:27 PM ET (Relayer Backend deploy), and quotes return that router.
+The open deployment cannot be upgraded in place; it was delisted. On chain 421614, `script/DeployLockedDemoSwapRouter.s.sol` always requires `DLDSR_FORCE_NEW_ROUTER=true` and an explicit `DLDSR_PRIOR_LOCKED_ROUTER` (no default). That prior must already be allowlisted, and it must not be the retired open router. `DLDSR_ALLOWLIST_ON_RESCUE=false` is overridden on this chain. `DLDSR_FUND_WEI=0` reverts while the prior router still holds ETH. After a successful run the prior is delisted and the new router is allowlisted. The script is keyless (`--account` / `--sender`); it does not read `PRIVATE_KEY`. Agents must not pass `--broadcast`. Source `MockSwapRouter` setters are `onlyOwner`, and a zero-token swap reverts, so a future mock deploy is not open the same way. The live contract at the retired address is still the pre-fix open router. The live Render `ROUTER_ADDRESS` on `stranded-relayer-arb` has been `0xFE22f32eF7a8f64B6c9E1CCAe31817B54184f7fc` since Oct 1, 2026, 1:27 PM ET (Relayer Backend deploy), and quotes return that router.
+
+Replacing that router (owner only):
+
+1. `withdrawEth` the prior locked router's ETH to the owner.
+2. Fund the new router (`DLDSR_FUND_WEI` greater than 0, or deploy only after the prior balance is 0).
+3. Set Render `ROUTER_ADDRESS` on `stranded-relayer-arb` and in `render.yaml` to the new router.
 
 ## Do not fund
 

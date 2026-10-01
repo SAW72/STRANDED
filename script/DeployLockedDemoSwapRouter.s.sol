@@ -46,8 +46,12 @@ interface ILockedRouterRescue {
 ///         and an explicit `priorLocked` (`DLDSR_PRIOR_LOCKED_ROUTER`, no default).
 ///         That prior must already be `allowedRouters == true`. It must not be the
 ///         retired open router `0x680410c7f64e06EB7e80dc7B5c149f7855e225A8`
-///         (still open, DO-NOT-FUND). After broadcast the prior is delisted and
-///         the new router is allowlisted.
+///         (still open, DO-NOT-FUND). `DLDSR_ALLOWLIST_ON_RESCUE=false` is
+///         overridden on this chain: the prior is still delisted and the new
+///         router is still allowlisted. If `DLDSR_FUND_WEI` is 0 and the prior
+///         still holds ETH, `deploy` reverts. Withdraw with `withdrawEth`, then
+///         fund the new router, then point Render `ROUTER_ADDRESS` on
+///         `stranded-relayer-arb` and `render.yaml` at the new router.
 ///
 ///         Default rate pays 0.0001 ETH for the canonical 0.2-token slice and
 ///         caps a swap at 0.001 ETH.
@@ -57,8 +61,9 @@ interface ILockedRouterRescue {
 ///   DLDSR_RATE_NUMERATOR            default 5e14 (0.0005 ETH per 1e18 token)
 ///   DLDSR_RATE_DENOMINATOR          default 1e18
 ///   DLDSR_MAX_PAYOUT                default 0.001 ether
-///   DLDSR_FUND_WEI                  extra ETH from the owner
-///   DLDSR_ALLOWLIST_ON_RESCUE       default true. On 421614 the script allowlists anyway.
+///   DLDSR_FUND_WEI                  extra ETH from the owner. On 421614, 0 reverts
+///                                   when the prior router still holds ETH.
+///   DLDSR_ALLOWLIST_ON_RESCUE       default true. On 421614 false is overridden.
 ///   DLDSR_FORCE_NEW_ROUTER          default false. Must be true on 421614.
 ///   DLDSR_PRIOR_LOCKED_ROUTER       required on 421614. No default.
 contract DeployLockedDemoSwapRouter is Script {
@@ -114,7 +119,7 @@ contract DeployLockedDemoSwapRouter is Script {
         );
         address sender = msg.sender;
         require(sender != DEFAULT_SCRIPT_SENDER, "DeployLockedDemoSwapRouter: refusing Foundry default sender");
-        require(cfg.rescue != address(0), "DeployLockedDemoSwapRouter: rescue address required");
+        require(cfg.rescue != address(0), "DeployLockedDemoSwapRouter: DLDSR_GAS_RESCUE_SWAP_ADDRESS required");
 
         bool arb = chainId == ARB_SEPOLIA_CHAIN_ID;
         // 421614 always swaps the allowlist. The flag only applies on Base Sepolia.
@@ -129,17 +134,25 @@ contract DeployLockedDemoSwapRouter is Script {
         }
 
         if (arb) {
-            require(cfg.forceNew, "DeployLockedDemoSwapRouter: FORCE_NEW_ROUTER=true required on 421614");
-            require(cfg.priorLocked != address(0), "DeployLockedDemoSwapRouter: PRIOR_LOCKED_ROUTER required on 421614");
+            require(cfg.forceNew, "DeployLockedDemoSwapRouter: DLDSR_FORCE_NEW_ROUTER=true required on 421614");
+            require(
+                cfg.priorLocked != address(0),
+                "DeployLockedDemoSwapRouter: DLDSR_PRIOR_LOCKED_ROUTER required on 421614"
+            );
         }
         if (allowlist && cfg.priorLocked == LIVE_ARB_OPEN_ROUTER) {
-            revert("DeployLockedDemoSwapRouter: refusing to delist the retired open router");
+            revert("DeployLockedDemoSwapRouter: DLDSR_PRIOR_LOCKED_ROUTER is the retired open router");
         }
         if (arb) {
             require(
                 rescue.allowedRouters(cfg.priorLocked),
-                "DeployLockedDemoSwapRouter: prior locked router is not allowlisted"
+                "DeployLockedDemoSwapRouter: DLDSR_PRIOR_LOCKED_ROUTER not allowlisted"
             );
+            if (cfg.fundWei == 0 && cfg.priorLocked.balance > 0) {
+                revert(
+                    "DeployLockedDemoSwapRouter: DLDSR_FUND_WEI is 0 and DLDSR_PRIOR_LOCKED_ROUTER still holds ETH; withdrawEth from the prior router and set DLDSR_FUND_WEI first"
+                );
+            }
         }
 
         // `msg.sender` is the keystore account under
@@ -159,7 +172,8 @@ contract DeployLockedDemoSwapRouter is Script {
         if (arb) {
             require(rescue.allowedRouters(address(router)), "DeployLockedDemoSwapRouter: new router not allowlisted");
             require(
-                !rescue.allowedRouters(cfg.priorLocked), "DeployLockedDemoSwapRouter: prior router still allowlisted"
+                !rescue.allowedRouters(cfg.priorLocked),
+                "DeployLockedDemoSwapRouter: DLDSR_PRIOR_LOCKED_ROUTER still allowlisted"
             );
         }
 
