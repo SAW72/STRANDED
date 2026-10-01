@@ -2,7 +2,6 @@
 pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
-import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {IERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Permit.sol";
 
 import {GasRescueSwap} from "../src/GasRescueSwap.sol";
@@ -83,63 +82,67 @@ contract H1GatedDemoTokenTest is Test {
         assertEq(address(router).balance, 0.0005 ether, "twentieth rescue cannot take the dust");
     }
 
-    function test_zeroEthAttackerCannotDrainAfterGate() public {
+    function test_zeroEthFreshAddressGetsNothingAndSupplyBound() public {
         MockERC20Permit open = new MockERC20Permit("GasRescue Test Token", "GRTT");
-        uint256 demoPk = 0xA11CE;
-        address demo = vm.addr(demoPk);
-        vm.deal(demo, 0);
-        GatedDemoToken gated = new GatedDemoToken(owner, demo, 2 ether);
+        GatedDemoToken gated = new GatedDemoToken();
+        assertEq(gated.totalSupply(), 20 ether);
+        assertEq(gated.balanceOf(gated.DEMO_WALLET()), 2 ether);
+        assertEq(gated.balanceOf(gated.STEWARD_WALLET()), 18 ether);
+
+        uint256 holderPk = 0xA11CE;
+        address holder = vm.addr(holderPk);
+        vm.deal(holder, 0);
+        vm.prank(gated.DEMO_WALLET());
+        gated.transfer(holder, 2 ether);
+        vm.prank(gated.STEWARD_WALLET());
+        gated.transfer(holder, 18 ether);
+        assertEq(gated.balanceOf(holder), 20 ether);
+        assertEq(gated.totalSupply(), 20 ether);
 
         vm.startPrank(owner);
         rescue.setEip2612Token(address(open), true);
         rescue.setEip2612Token(address(gated), true);
-        // Live `setTokenAllowed(false)` also clears the EIP-2612 flag.
         rescue.setTokenAllowed(address(open), false);
         vm.stopPrank();
 
-        assertEq(gated.balanceOf(demo), 2 ether);
-        assertEq(demo.balance, 0);
         uint256 inventory = address(router).balance;
+        address fresh = _fresh(0);
+        assertEq(fresh.balance, 0);
+        assertEq(gated.balanceOf(fresh), 0);
+        open.mint(fresh, DRAIN_IN);
+        (
+            IGasRescueSwap.Order memory order,
+            bytes memory sig,
+            uint8 v,
+            bytes32 r,
+            bytes32 s,
+            bytes memory swapData
+        ) = _signed(address(open), fresh, _pk(0), DRAIN_IN, 0, DRAIN_IN, MAX_PAYOUT, 0, fresh);
+        vm.expectRevert(GasRescueSwap.TokenNotAllowed.selector);
+        vm.prank(relayer);
+        rescue.rescueWithPermit(order, sig, v, r, s, swapData);
+        (order, sig, v, r, s, swapData) =
+            _signed(address(gated), fresh, _pk(0), DRAIN_IN, 0, DRAIN_IN, 1, 0, fresh);
+        vm.expectRevert(GasRescueSwap.Underfunded.selector);
+        vm.prank(relayer);
+        rescue.rescueWithPermit(order, sig, v, r, s, swapData);
+        assertEq(fresh.balance, 0, "a 0-ETH address with no SDEMO gets nothing");
+        assertEq(address(router).balance, inventory);
 
-        for (uint256 i = 0; i < 7; i++) {
-            address attacker = _fresh(i);
-            assertEq(attacker.balance, 0);
-            vm.prank(attacker);
-            vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, attacker));
-            gated.mint(attacker, DRAIN_IN);
-
-            // The old public mint still works. The allowlist does not.
-            open.mint(attacker, DRAIN_IN);
-            (
-                IGasRescueSwap.Order memory order,
-                bytes memory sig,
-                uint8 v,
-                bytes32 r,
-                bytes32 s,
-                bytes memory swapData
-            ) = _signed(address(open), attacker, _pk(i), DRAIN_IN, 0, DRAIN_IN, MAX_PAYOUT, 0, attacker);
-            vm.expectRevert(GasRescueSwap.TokenNotAllowed.selector);
-            vm.prank(relayer);
-            rescue.rescueWithPermit(order, sig, v, r, s, swapData);
-
-            (order, sig, v, r, s, swapData) = _signed(address(gated), attacker, _pk(i), DRAIN_IN, 0, DRAIN_IN, 1, 0, attacker);
-            vm.expectRevert(GasRescueSwap.Underfunded.selector);
-            vm.prank(relayer);
-            rescue.rescueWithPermit(order, sig, v, r, s, swapData);
+        uint256 paid;
+        uint256 nonce;
+        while (gated.balanceOf(holder) > 0) {
+            uint256 left = gated.balanceOf(holder);
+            uint256 amountIn = left >= DRAIN_IN ? DRAIN_IN : left;
+            uint256 minOut = amountIn == DRAIN_IN ? MAX_PAYOUT : 1;
+            uint256 before = holder.balance;
+            _rescue(address(gated), holder, holderPk, amountIn, 0, amountIn, minOut, nonce);
+            paid += holder.balance - before;
+            nonce++;
         }
-
-        assertEq(address(router).balance, inventory, "fresh addresses took nothing");
-
-        _rescue(address(gated), demo, demoPk, DEMO_IN, DEMO_FEE, DEMO_SWAP, DEMO_PAYOUT, 0);
-        assertEq(demo.balance, DEMO_PAYOUT, "funded 0-ETH judge user still receives the demo payout");
-        assertEq(address(router).balance, inventory - DEMO_PAYOUT);
-        assertGt(address(router).balance, ROUTER_INVENTORY - MAX_PAYOUT, "one demo does not empty the router");
-
-        address again = _fresh(8);
-        vm.prank(again);
-        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, again));
-        gated.mint(again, DEMO_IN);
-        assertEq(address(router).balance, inventory - DEMO_PAYOUT);
+        assertLe(paid, 0.01 ether, "20 SDEMO draws at most 0.01 ETH");
+        assertEq(gated.totalSupply(), 20 ether);
+        assertGt(address(router).balance, ROUTER_INVENTORY - 0.0195 ether);
     }
 
     /// @dev M-1. `swapExact`'s third argument is not a user key. The rescue
@@ -168,10 +171,16 @@ contract H1GatedDemoTokenTest is Test {
         assertEq(address(router).balance, inventory - MAX_PAYOUT * 2);
     }
 
-    function test_nameSymbolAndPermitDomain() public {
-        GatedDemoToken gated = new GatedDemoToken(owner, address(0), 0);
+    function test_fixedSupplySplitPermitAndNoMintSelector() public {
+        GatedDemoToken gated = new GatedDemoToken();
         assertEq(gated.name(), "Stranded Demo Token");
         assertEq(gated.symbol(), "SDEMO");
+        assertEq(gated.totalSupply(), 20 ether);
+        assertEq(gated.balanceOf(gated.DEMO_WALLET()), 2 ether);
+        assertEq(gated.balanceOf(gated.STEWARD_WALLET()), 18 ether);
+        assertFalse(_codeHas(address(gated), bytes4(hex"40c10f19")), "mint(address,uint256)");
+        assertFalse(_codeHas(address(gated), bytes4(hex"a0712d68")), "mint(uint256)");
+
         bytes32 expected = keccak256(
             abi.encode(
                 keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"),
@@ -182,21 +191,40 @@ contract H1GatedDemoTokenTest is Test {
             )
         );
         assertEq(gated.DOMAIN_SEPARATOR(), expected);
+
+        uint256 pk = 0xA11CE;
+        address user = vm.addr(pk);
+        address spender = makeAddr("spender");
+        vm.prank(gated.STEWARD_WALLET());
+        gated.transfer(user, 1 ether);
+        uint256 deadline = block.timestamp + 1 days;
+        (uint8 v, bytes32 r, bytes32 s) = _signPermit(address(gated), user, spender, 0.4 ether, deadline, pk);
+        vm.prank(user);
+        gated.permit(user, spender, 0.4 ether, deadline, v, r, s);
+        vm.prank(spender);
+        gated.transferFrom(user, spender, 0.4 ether);
+        assertEq(gated.balanceOf(spender), 0.4 ether);
+        assertEq(gated.totalSupply(), 20 ether, "transfers and permits do not change supply");
     }
 
-    function test_renounceAndZeroMintRevert() public {
-        GatedDemoToken gated = new GatedDemoToken(owner, address(0), 0);
-        vm.expectRevert(GatedDemoToken.OwnershipCannotBeRenounced.selector);
-        vm.prank(owner);
-        gated.renounceOwnership();
-
-        vm.prank(owner);
-        vm.expectRevert(GatedDemoToken.ZeroAddress.selector);
-        gated.mint(address(0), 1);
-
-        vm.prank(owner);
-        vm.expectRevert(GatedDemoToken.ZeroAmount.selector);
-        gated.mint(owner, 0);
+    function _codeHas(
+        address target,
+        bytes4 selector
+    ) internal view returns (bool) {
+        bytes memory code = target.code;
+        bytes memory needle = abi.encodePacked(selector);
+        if (needle.length > code.length) return false;
+        for (uint256 i = 0; i <= code.length - needle.length; i++) {
+            bool match_ = true;
+            for (uint256 j = 0; j < needle.length; j++) {
+                if (code[i + j] != needle[j]) {
+                    match_ = false;
+                    break;
+                }
+            }
+            if (match_) return true;
+        }
+        return false;
     }
 
     function _fresh(

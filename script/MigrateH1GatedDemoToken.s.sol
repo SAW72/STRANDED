@@ -2,7 +2,6 @@
 pragma solidity ^0.8.24;
 
 import {Script, console2} from "forge-std/Script.sol";
-import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 
 import {GatedDemoToken} from "../src/GatedDemoToken.sol";
 
@@ -84,15 +83,16 @@ contract MigrateH1GatedDemoToken is Script {
     address internal constant LIVE_SWAP = 0x65e712222745A8FCCbF038A90Fa75caB0867993D;
     address internal constant LIVE_GRTT = 0x5649fF51123D534044aA7E6cBc8762698Ffed713;
     address internal constant LIVE_GMOCK = 0x30006e29a23c713070136F56db1BDf2A8B82B318;
-    /// @dev Spencer's demo/QA EOA. Receives the constructor mint. Was a
+    /// @dev Spencer's demo/QA EOA. Receives the constructor allocation. Was a
     ///      relayer in the past; `relayers` was false on 2026-10-01.
     address internal constant DEMO_HOLDER = 0x5BFd261b1eF7e61Bfea1ebfC87bDD8F4244BBA37;
     /// @dev Foundry's unset script sender. Never a real owner key.
     address internal constant FOUNDRY_DEFAULT_SENDER = 0x1804c8AB1F12E6bbf3894d4083f33e07309d1f38;
-    /// @dev Two 1-token judge rescues (`amountIn` 1e18). Not a public supply.
-    uint256 internal constant JUDGE_MINT = 2 ether;
-    /// @dev Not the owner. Used only to show `mint` reverts.
-    address internal constant NON_OWNER = 0x000000000000000000000000000000000000bEEF;
+    uint256 internal constant DEMO_ALLOCATION = 2 ether;
+    uint256 internal constant STEWARD_ALLOCATION = 18 ether;
+    uint256 internal constant TOTAL_SUPPLY = 20 ether;
+    bytes4 internal constant MINT_ADDRESS_UINT = 0x40c10f19;
+    bytes4 internal constant MINT_UINT = 0xa0712d68;
 
     /// @dev `existingToken == address(0)` deploys. Any other address resumes.
     ///      `sender` is the owner key. `run` copies `msg.sender`. Tests pass it
@@ -122,20 +122,27 @@ contract MigrateH1GatedDemoToken is Script {
         if (sender != OWNER) revert SenderNotOwner(sender);
 
         console2.log("signer           ", sender);
-        console2.log("judge mint       ", JUDGE_MINT);
+        console2.log("demo allocation  ", DEMO_ALLOCATION);
+        console2.log("steward allocation", STEWARD_ALLOCATION);
         console2.log("demo holder      ", DEMO_HOLDER);
 
         GatedDemoToken token;
         uint256 supplyBefore;
+        uint256 demoBefore;
+        uint256 stewardBefore;
         if (cfg.existingToken == address(0)) {
             vm.startBroadcast(sender);
-            token = new GatedDemoToken(OWNER, DEMO_HOLDER, JUDGE_MINT);
+            token = new GatedDemoToken();
             vm.stopBroadcast();
-            require(token.totalSupply() == JUDGE_MINT, "MigrateH1: fresh supply");
+            require(token.totalSupply() == TOTAL_SUPPLY, "MigrateH1: fresh supply");
+            require(token.balanceOf(DEMO_HOLDER) == DEMO_ALLOCATION, "MigrateH1: demo allocation");
+            require(token.balanceOf(OWNER) == STEWARD_ALLOCATION, "MigrateH1: steward allocation");
         } else {
             token = GatedDemoToken(cfg.existingToken);
             _requireExisting(token);
             supplyBefore = token.totalSupply();
+            demoBefore = token.balanceOf(DEMO_HOLDER);
+            stewardBefore = token.balanceOf(OWNER);
         }
         deployed = address(token);
 
@@ -179,15 +186,16 @@ contract MigrateH1GatedDemoToken is Script {
             vm.stopBroadcast();
         }
 
-        require(token.owner() == OWNER, "MigrateH1: token owner");
-        require(token.pendingOwner() == address(0), "MigrateH1: pending owner");
-        require(token.balanceOf(DEMO_HOLDER) == JUDGE_MINT, "MigrateH1: holder mint");
+        require(!_hasMintSelector(deployed), "MigrateH1: mint selector");
+        require(token.totalSupply() == TOTAL_SUPPLY, "MigrateH1: supply");
         if (cfg.existingToken == address(0)) {
-            require(token.totalSupply() == JUDGE_MINT, "MigrateH1: fresh supply");
+            require(token.balanceOf(DEMO_HOLDER) == DEMO_ALLOCATION, "MigrateH1: demo allocation");
+            require(token.balanceOf(OWNER) == STEWARD_ALLOCATION, "MigrateH1: steward allocation");
         } else {
             require(token.totalSupply() == supplyBefore, "MigrateH1: supply changed");
+            require(token.balanceOf(DEMO_HOLDER) == demoBefore, "MigrateH1: demo balance changed");
+            require(token.balanceOf(OWNER) == stewardBefore, "MigrateH1: steward balance changed");
         }
-        _requireNonOwnerMintReverts(token);
         require(swap.allowedTokens(deployed) && swap.eip2612Tokens(deployed), "MigrateH1: new token");
         require(!swap.allowedTokens(LIVE_GRTT) && !swap.eip2612Tokens(LIVE_GRTT), "MigrateH1: GRTT still allowed");
         require(!swap.allowedTokens(LIVE_GMOCK) && !swap.eip2612Tokens(LIVE_GMOCK), "MigrateH1: gMOCK still allowed");
@@ -197,34 +205,56 @@ contract MigrateH1GatedDemoToken is Script {
         console2.log("gMOCK allowed    ", swap.allowedTokens(LIVE_GMOCK));
     }
 
+    /// @dev Resume accepts a token with code, the SDEMO name and symbol, and
+    ///      `totalSupply == 20e18`. The constructor split is 2e18 on the demo
+    ///      wallet and 18e18 on the Steward wallet. If both balances are still
+    ///      at least those amounts, supply forces them to be exact. If either
+    ///      balance is lower, transfers already happened; the script still
+    ///      accepts the token because it cannot recreate supply (no mint
+    ///      selector) and this run does not move balances.
     function _requireExisting(
         GatedDemoToken token
     ) internal view {
         require(address(token).code.length > 0, "MigrateH1: EXISTING_TOKEN has no code");
-        require(token.owner() == OWNER, "MigrateH1: EXISTING_TOKEN owner");
         require(
             keccak256(bytes(token.name())) == keccak256(bytes("Stranded Demo Token")),
             "MigrateH1: EXISTING_TOKEN name"
         );
         require(keccak256(bytes(token.symbol())) == keccak256(bytes("SDEMO")), "MigrateH1: EXISTING_TOKEN symbol");
-        require(token.totalSupply() == JUDGE_MINT, "MigrateH1: EXISTING_TOKEN supply");
+        require(token.totalSupply() == TOTAL_SUPPLY, "MigrateH1: EXISTING_TOKEN supply");
+        require(!_hasMintSelector(address(token)), "MigrateH1: EXISTING_TOKEN mint selector");
+        bool splitIntact = token.balanceOf(DEMO_HOLDER) >= DEMO_ALLOCATION
+            && token.balanceOf(OWNER) >= STEWARD_ALLOCATION;
+        if (!splitIntact) {
+            console2.log("EXISTING_TOKEN balances have moved since the constructor");
+            console2.log("demo balance    ", token.balanceOf(DEMO_HOLDER));
+            console2.log("steward balance ", token.balanceOf(OWNER));
+        }
     }
 
-    function _requireNonOwnerMintReverts(
-        GatedDemoToken token
-    ) internal {
-        vm.prank(NON_OWNER);
-        try token.mint(NON_OWNER, 1) {
-            revert("MigrateH1: non-owner mint succeeded");
-        } catch (bytes memory reason) {
-            require(reason.length >= 4, "MigrateH1: non-owner mint empty revert");
-            bytes4 sel;
-            assembly {
-                sel := mload(add(reason, 32))
+    function _hasMintSelector(
+        address token
+    ) internal view returns (bool) {
+        return _codeHas(token, MINT_ADDRESS_UINT) || _codeHas(token, MINT_UINT);
+    }
+
+    function _codeHas(
+        address target,
+        bytes4 selector
+    ) internal view returns (bool) {
+        bytes memory code = target.code;
+        bytes memory needle = abi.encodePacked(selector);
+        if (needle.length > code.length) return false;
+        for (uint256 i = 0; i <= code.length - needle.length; i++) {
+            bool ok = true;
+            for (uint256 j = 0; j < needle.length; j++) {
+                if (code[i + j] != needle[j]) {
+                    ok = false;
+                    break;
+                }
             }
-            require(
-                sel == Ownable.OwnableUnauthorizedAccount.selector, "MigrateH1: non-owner mint"
-            );
+            if (ok) return true;
         }
+        return false;
     }
 }

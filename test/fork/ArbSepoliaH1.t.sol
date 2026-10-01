@@ -4,7 +4,6 @@ pragma solidity ^0.8.24;
 import {Test} from "forge-std/Test.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Permit.sol";
-import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 
 import {ArbSepoliaDemoPath} from "../../src/ArbSepoliaDemoPath.sol";
 import {GatedDemoToken} from "../../src/GatedDemoToken.sol";
@@ -133,9 +132,9 @@ contract ArbSepoliaH1Test is Test {
     }
 
     function test_live_setEip2612TokenAllowlistsGatedToken() public onlyFork {
-        GatedDemoToken token = new GatedDemoToken(LIVE_OWNER, DEMO_HOLDER, 2 ether);
-        assertEq(token.owner(), LIVE_OWNER);
+        GatedDemoToken token = new GatedDemoToken();
         assertEq(token.balanceOf(DEMO_HOLDER), 2 ether);
+        assertEq(token.balanceOf(LIVE_OWNER), 18 ether);
 
         vm.prank(LIVE_OWNER);
         swap.setEip2612Token(address(token), true);
@@ -153,8 +152,8 @@ contract ArbSepoliaH1Test is Test {
         uint256 inventory = LIVE_ROUTER.balance;
         assertEq(inventory, 0.0195 ether);
 
+        GatedDemoToken token = new GatedDemoToken();
         vm.startPrank(LIVE_OWNER);
-        GatedDemoToken token = new GatedDemoToken(LIVE_OWNER, DEMO_HOLDER, 2 ether);
         swap.setEip2612Token(address(token), true);
         swap.setTokenAllowed(LIVE_GRTT, false);
         swap.setTokenAllowed(LIVE_GMOCK, false);
@@ -186,9 +185,6 @@ contract ArbSepoliaH1Test is Test {
         uint256 pk = uint256(keccak256("h1-fork-fresh")) | 1;
         address attacker = vm.addr(pk);
         vm.deal(attacker, 0);
-        vm.prank(attacker);
-        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, attacker));
-        token.mint(attacker, 1 ether);
         assertEq(token.balanceOf(attacker), 0);
 
         _mint(LIVE_GRTT, attacker, 1 ether);
@@ -225,16 +221,16 @@ contract ArbSepoliaH1Test is Test {
         );
         assertEq(vm.getNonce(LIVE_OWNER), nonce + 4, "fresh run is CREATE plus three setters");
         GatedDemoToken token = GatedDemoToken(deployed);
-        assertEq(token.totalSupply(), 2 ether);
-        assertEq(token.pendingOwner(), address(0));
+        assertEq(token.totalSupply(), 20 ether);
         assertEq(token.balanceOf(DEMO_HOLDER), 2 ether);
+        assertEq(token.balanceOf(LIVE_OWNER), 18 ether);
         assertTrue(swap.eip2612Tokens(deployed) && swap.allowedTokens(deployed));
         assertFalse(swap.allowedTokens(LIVE_GRTT) || swap.eip2612Tokens(LIVE_GRTT));
         assertFalse(swap.allowedTokens(LIVE_GMOCK) || swap.eip2612Tokens(LIVE_GMOCK));
     }
 
     function test_live_scriptResumeAfterCreate() public onlyFork {
-        GatedDemoToken token = new GatedDemoToken(LIVE_OWNER, DEMO_HOLDER, 2 ether);
+        GatedDemoToken token = new GatedDemoToken();
         assertFalse(swap.eip2612Tokens(address(token)));
         MigrateH1GatedDemoToken migration = new MigrateH1GatedDemoToken();
         uint256 nonce = vm.getNonce(LIVE_OWNER);
@@ -243,14 +239,14 @@ contract ArbSepoliaH1Test is Test {
         );
         assertEq(deployed, address(token), "resume does not deploy a second token");
         assertEq(vm.getNonce(LIVE_OWNER), nonce + 3, "resume after CREATE sends the three setters");
-        assertEq(token.totalSupply(), 2 ether);
+        assertEq(token.totalSupply(), 20 ether);
         assertTrue(swap.eip2612Tokens(address(token)));
         assertFalse(swap.allowedTokens(LIVE_GRTT));
         assertFalse(swap.allowedTokens(LIVE_GMOCK));
     }
 
     function test_live_scriptResumeAfterCreateAndAllowlist() public onlyFork {
-        GatedDemoToken token = new GatedDemoToken(LIVE_OWNER, DEMO_HOLDER, 2 ether);
+        GatedDemoToken token = new GatedDemoToken();
         vm.prank(LIVE_OWNER);
         swap.setEip2612Token(address(token), true);
         MigrateH1GatedDemoToken migration = new MigrateH1GatedDemoToken();
@@ -280,11 +276,10 @@ contract ArbSepoliaH1Test is Test {
         assertFalse(swap.allowedTokens(LIVE_GRTT) || swap.allowedTokens(LIVE_GMOCK));
     }
 
-    function test_live_scriptExistingTokenWrongOwnerReverts() public onlyFork {
-        address other = makeAddr("wrong-owner");
-        GatedDemoToken token = new GatedDemoToken(other, DEMO_HOLDER, 2 ether);
+    function test_live_scriptExistingTokenWrongSupplyReverts() public onlyFork {
+        NotFixedSdemo token = new NotFixedSdemo();
         MigrateH1GatedDemoToken migration = new MigrateH1GatedDemoToken();
-        vm.expectRevert(bytes("MigrateH1: EXISTING_TOKEN owner"));
+        vm.expectRevert(bytes("MigrateH1: EXISTING_TOKEN supply"));
         migration.migrate(
             MigrateH1GatedDemoToken.Config({existingToken: address(token), sender: LIVE_OWNER})
         );
@@ -402,4 +397,25 @@ interface ILiveRescue {
     function hashOrder(
         IGasRescueSwap.Order calldata order
     ) external view returns (bytes32);
+}
+
+/// @dev Right name and symbol, wrong supply. Used to show EXISTING_TOKEN rejects it.
+contract NotFixedSdemo {
+    function name() external pure returns (string memory) {
+        return "Stranded Demo Token";
+    }
+
+    function symbol() external pure returns (string memory) {
+        return "SDEMO";
+    }
+
+    function totalSupply() external pure returns (uint256) {
+        return 1;
+    }
+
+    function balanceOf(
+        address
+    ) external pure returns (uint256) {
+        return 0;
+    }
 }
