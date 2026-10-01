@@ -3,7 +3,15 @@ import { privateKeyToAccount } from "viem/accounts";
 import { arbitrumSepolia } from "viem/chains";
 import { createRelayerApp } from "./app.mjs";
 import { parseTrustedProxyHops } from "./clientIp.mjs";
-import { INVALID_AMOUNT_MESSAGE, MISSING_USER_MESSAGE, asBroadcastFailure, fail } from "./httpError.mjs";
+import {
+  INVALID_AMOUNT_MESSAGE,
+  MISSING_USER_MESSAGE,
+  PATH_MISMATCH_MESSAGE,
+  ROUTER_NOT_ALLOWED_MESSAGE,
+  asBroadcastFailure,
+  fail,
+  simulationFailure,
+} from "./httpError.mjs";
 import { createKillSwitch, parseEnvFlag } from "./killSwitch.mjs";
 import { createNonceStore } from "./nonceStore.mjs";
 import { createBuildQuote, encodeSwapData } from "./quote.mjs";
@@ -221,10 +229,10 @@ async function submitRescue(body) {
     const swapData =
       body.swapData || encodeSwapData(order.tokenIn, order.amountSwap, order.nativeTo);
     if (keccak256(swapData) !== order.pathHash) {
-      throw Object.assign(new Error("PathMismatch"), { status: 400, error: "path_mismatch" });
+      throw fail(400, "path_mismatch", PATH_MISMATCH_MESSAGE);
     }
     if (order.router.toLowerCase() !== ROUTER.toLowerCase()) {
-      throw Object.assign(new Error("RouterNotAllowed"), { status: 400, error: "router_not_allowed" });
+      throw fail(400, "router_not_allowed", ROUTER_NOT_ALLOWED_MESSAGE);
     }
     const args = [
       order,
@@ -247,11 +255,7 @@ async function submitRescue(body) {
       const revert = err && (err.data?.errorName || err.errorName || "");
       const detail = String(name).replace(/https?:\/\/\S+/gi, "[url]").slice(0, 180);
       console.error("relayer_error simulation_failed", detail, String(revert).slice(0, 80));
-      throw Object.assign(new Error("simulation_failed"), {
-        status: 502,
-        error: "simulation_failed",
-        revert: String(revert || name || "unknown"),
-      });
+      throw simulationFailure(err);
     }
     const txHash = await withBroadcastRetry(
       async (attempt) => {

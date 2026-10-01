@@ -43,6 +43,12 @@ export const QUOTE_UNAVAILABLE_MESSAGE =
 export const UPSTREAM_MESSAGE = "The network is unavailable right now. Please try again in a moment.";
 export const BROADCAST_FAILED_MESSAGE = "The rescue didn't go through. Please try again in a moment.";
 export const RELAYER_PAUSED_MESSAGE = "Rescues are paused right now. Please try again later.";
+export const PATH_MISMATCH_MESSAGE =
+  "This rescue quote doesn't match the request. Please get a new quote and try again.";
+export const ROUTER_NOT_ALLOWED_MESSAGE =
+  "This rescue route isn't available. Please get a new quote and try again.";
+export const SIMULATION_FAILED_MESSAGE =
+  "This rescue wouldn't go through right now. Please get a new quote and try again.";
 
 /**
  * @param {number} status
@@ -113,6 +119,20 @@ export function toPublicError(err) {
   if (retryAt && retryAt.length <= 40 && !/[\r\n]/.test(retryAt)) body.retryAt = retryAt;
 
   return { status, body, headers };
+}
+
+/**
+ * Simulation failure for the client. `message` is always the fixed sentence.
+ * `revert` stays the previous detail (contract error name, otherwise the
+ * viem short message or error name) so callers can keep their existing field.
+ * @param {object} [err]
+ */
+export function simulationFailure(err) {
+  const name = err && (err.shortMessage || err.name || "");
+  const revert = err && (err.data?.errorName || err.errorName || "");
+  return fail(502, "simulation_failed", SIMULATION_FAILED_MESSAGE, {
+    revert: String(revert || name || "unknown"),
+  });
 }
 
 /** Broadcast / unexpected failures stay coded and secret-free. */

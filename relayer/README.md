@@ -87,6 +87,9 @@ Bad input is HTTP 400 with `{ "ok": false, "error": "<code>", "message": "..." }
 | Not enough gas set aside for the rescue | `quote_unavailable` | There isn't enough gas available for this rescue right now. Please try again later. |
 | Upstream network failure | `upstream_unavailable` | The network is unavailable right now. Please try again in a moment. |
 | Broadcast did not go through | `broadcast_failed` | The rescue didn't go through. Please try again in a moment. |
+| Quote no longer matches the signed request | `path_mismatch` | This rescue quote doesn't match the request. Please get a new quote and try again. |
+| Signed route is not the one this service uses | `router_not_allowed` | This rescue route isn't available. Please get a new quote and try again. |
+| The rescue check failed before broadcast | `simulation_failed` | This rescue wouldn't go through right now. Please get a new quote and try again. |
 
 `quote_unavailable` and `upstream_unavailable` stay HTTP 502. The kill switch stays HTTP 503. An unexpected crash is HTTP 500 `request_failed` with no other fields.
 
