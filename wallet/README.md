@@ -39,7 +39,7 @@ cp .env.example .env
 | `VITE_GAS_RESCUE_ADDRESS` | to sign on Base | Base Sepolia GasRescueSwap `0x21A1ADf810e64B5bd1d530D31abA6856b8DEf688`. |
 | `VITE_TOKEN_ADDRESS` | to read/sign on Base | Base Sepolia MockERC20Permit `0xE36c35cbF0373D77D00732f7B92dB4fB8fd37166`. |
 | `VITE_GAS_RESCUE_ADDRESS_ARB_SEPOLIA` | to sign on Arb | Arb Sepolia GasRescueSwap `0x65e712222745A8FCCbF038A90Fa75caB0867993D`. |
-| `VITE_TOKEN_ADDRESS_ARB_SEPOLIA` | to read/sign on Arb | Live GRTT `0x5649fF51123D534044aA7E6cBc8762698Ffed713`. After Spencer signs the H1 migration, set this on the Render static site `stranded` to the deployed token and rebuild. Do not paste a nonce-predicted address. The constructor creates 2 SDEMO on `0x5BFd…BA37` and 18 on the Steward wallet; any other judge wallet needs a transfer of 2 SDEMO. |
+| `VITE_TOKEN_ADDRESS_ARB_SEPOLIA` | to read/sign on Arb | SDEMO `0xE3cb1AC5EDc70D3a85250a8c00cBe3A45AFc616C` (Stranded Demo Token, testnet, no value). Set on the Render static site `stranded`; rebuild after a change. A judge wallet needs 2 SDEMO sent from the Steward wallet. |
 | `VITE_GAS_RESCUE_LENS_ADDRESS` | no | Optional Day-2 Lens. Leave empty until Spencer broadcasts `DeployGasRescueLens`. |
 | `VITE_BASE_SEPOLIA_RPC_URL` | no | Defaults to `https://sepolia.base.org` |
 | `VITE_ARB_SEPOLIA_RPC_URL` | no | Defaults to `https://sepolia-rollup.arbitrum.io/rpc` |
@@ -95,7 +95,7 @@ Dry-mock amounts (also in `src/fixtures/sample-swap-quote.json` / `sample-swap-q
 | `amountSwap` | `0.2e18` |
 | `feeAmount` | `0.01e18` |
 | `amountRemainder` | `0.79e18` |
-| `tokenSymbol` | `mPERMIT` (Base) / `GRTT` (Arb) |
+| `tokenSymbol` | `mPERMIT` (Base) / `SDEMO` (Arb) |
 | `pathHash` | `0xbbb…` (32 bytes) |
 | `chainId` | `84532` or `421614` (fixtures pin the live deploy addrs below) |
 
@@ -112,7 +112,7 @@ Arb Sepolia fixture / `.env.example` deploy addrs (421614):
 
 | Role | Address |
 | --- | --- |
-| `tokenIn` / MockERC20Permit **GRTT** | `0x5649fF51123D534044aA7E6cBc8762698Ffed713` |
+| `tokenIn` / **SDEMO** (GatedDemoToken) | `0xE3cb1AC5EDc70D3a85250a8c00cBe3A45AFc616C` |
 | `feeTo` (Owner) | `0x30466A210961c0C2C13AF0A9d35dfC6E8858bA9D` |
 | GasRescueSwap | `0x65e712222745A8FCCbF038A90Fa75caB0867993D` |
 | `router` | `0xFE22f32eF7a8f64B6c9E1CCAe31817B54184f7fc` (`LockedDemoSwapRouter`, migrated 2026-10-01). Retired open router `0x680410c7f64e06EB7e80dc7B5c149f7855e225A8` (delisted Oct 1, 2026) |

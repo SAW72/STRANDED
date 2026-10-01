@@ -38,12 +38,12 @@ No keys. No broadcast. No mainnet.
 | Owner | `0x30466A210961c0C2C13AF0A9d35dfC6E8858bA9D` |
 | Relayer hot wallet | `0x8240124dc78a27c80354Ca813Df12aa2888A9AF6` |
 | WETH | `0x980B62Da83eFf3D4576C647993b0c1D7faf17c73` |
-| Demo token **GRTT** | `0x5649fF51123D534044aA7E6cBc8762698Ffed713` |
-| Also allowlisted gMOCK | `0x30006e29a23c713070136F56db1BDf2A8B82B318` |
+| Demo token **SDEMO** (Stranded Demo Token, testnet, no value) | `0xE3cb1AC5EDc70D3a85250a8c00cBe3A45AFc616C` |
+| Delisted Oct 1, 2026 (GRTT, gMOCK) | `0x5649…d713`, `0x3000…B318` |
 | Retired open router (Day-1 mock; delisted Oct 1, 2026) | `0x680410c7f64e06EB7e80dc7B5c149f7855e225A8` |
 | GasRescueLens | _not deployed — Spencer `DeployGasRescueLens` + `--broadcast` only_ |
 
-Live read (2026-09-14): `paused=false`, `permit2=address(0)`, `permit2Enabled=false`, relayer allowlisted, owner ≠ relayer, GRTT + gMOCK EIP-2612 allowlisted, the then-live mock router allowlisted. That router is the retired open router in the table above (delisted Oct 1, 2026, 0 ETH). Live router as of 2026-10-01: `LockedDemoSwapRouter` `0xFE22f32eF7a8f64B6c9E1CCAe31817B54184f7fc` (0.0195 ETH, allowlisted). F-1 `setPermit2` reverts `Permit2Immutable`. Missing vs tip: `CANONICAL_PERMIT2()` getter (F-5) and `rescueReceipt` (registry proof).
+History (2026-09-14, before SDEMO): `paused=false`, `permit2=address(0)`, `permit2Enabled=false`, relayer allowlisted, owner ≠ relayer, GRTT + gMOCK EIP-2612 allowlisted, the then-live mock router allowlisted. That router is the retired open router in the table above (delisted Oct 1, 2026, 0 ETH). GRTT and gMOCK were delisted on Oct 1, 2026. Live router as of 2026-10-01: `LockedDemoSwapRouter` `0xFE22f32eF7a8f64B6c9E1CCAe31817B54184f7fc` (0.0195 ETH, allowlisted). F-1 `setPermit2` reverts `Permit2Immutable`. Missing vs tip: `CANONICAL_PERMIT2()` getter (F-5) and `rescueReceipt` (registry proof).
 
 ### Base Sepolia (documented, not the Day-1 primary)
 
@@ -69,8 +69,8 @@ Live read (2026-09-14): `paused=false`, `permit2=address(0)`, `permit2Enabled=fa
 
 ### What shipped
 
-- **`ArbSepoliaDemoPath`** — known-good Arb Sepolia mock-router path for **GRTT / gMOCK → WETH/native**. Same formula as the live Relayer: `pathHash = keccak256(abi.encodeWithSelector(swapExact, tokenIn, amountSwap, nativeTo))`. Wallet dry `0xbbb…` is labeled a placeholder and rejected as a live path.
-- **`GasRescueLens.hackQuestReport`** — one-call consumer of Day-1 Lens read paths: status, GRTT demo readiness (Permit2-off fail-closed), `rescueReceiptOrMissing` (view path; live bytecode still lacks the getter), F-1/F-5 hints, and computed GRTT/gMOCK demo `pathHash`es.
+- **`ArbSepoliaDemoPath`** — known-good Arb Sepolia demo path for **the demo token (SDEMO since Oct 1, 2026) → WETH/native**. Same formula as the live Relayer: `pathHash = keccak256(abi.encodeWithSelector(swapExact, tokenIn, amountSwap, nativeTo))`. Wallet dry `0xbbb…` is labeled a placeholder and rejected as a live path.
+- **`GasRescueLens.hackQuestReport`** — one-call consumer of Day-1 Lens read paths: status, demo-token readiness (Permit2-off fail-closed), `rescueReceiptOrMissing` (view path; live bytecode still lacks the getter), F-1/F-5 hints, and computed demo `pathHash`es (SDEMO; GRTT/gMOCK were delisted on Oct 1, 2026 and are kept for history).
 - **`script/HackQuestStatus.s.sol`** — read-only Foundry script. Prints HackQuest-ready JSON. Constructs Lens in-script when `GAS_RESCUE_LENS_ADDRESS` is unset. **No keys. No `--broadcast`.**
 - Wallet helpers only (`wallet/src/lib/demoPath.ts`, `wallet/src/lib/lens.ts`): same path formula + Lens ABI. No UI rewrite. Fixtures stay dry `0xbbb…`.
 - Tests: `test/ArbSepoliaDemoPath.t.sol`, Lens/script unit tests, optional live fork assertion that live still lacks `rescueReceipt`.
@@ -100,10 +100,11 @@ Fixture `nativeTo=0x1111…1111` hashes (read-only `HackQuestStatus` on Arb RPC,
 
 | Token | pathHash |
 | --- | --- |
-| GRTT | `0xf2fa57d446a79240cf3043e9e9f82fd28d8719d264bc89de7d81b8eb167b3c47` |
-| gMOCK | `0x8b4de67c75e10145cd31889f5f4bb75938d269e2147e0a00ad9b82bc2c9a8665` |
+| SDEMO | `0x41bdecd8a9b0f6b3c1034a23ef8efe7d5c5af0018f90f10eae6501567c7188a3` |
+| GRTT (delisted Oct 1, 2026) | `0xf2fa57d446a79240cf3043e9e9f82fd28d8719d264bc89de7d81b8eb167b3c47` |
+| gMOCK (delisted Oct 1, 2026) | `0x8b4de67c75e10145cd31889f5f4bb75938d269e2147e0a00ad9b82bc2c9a8665` |
 
-Supported demo tokens: **GRTT** `0x5649…d713`, **gMOCK** `0x3000…B318`. Destination of the swap slice is native/WETH `0x980B…7c73` (router `payAmount`), remainder ERC-20 still goes to signed `to` (move-out).
+Supported demo token: **SDEMO** `0xE3cb…616C` (testnet, no value). GRTT and gMOCK were delisted Oct 1, 2026. Destination of the swap slice is native/WETH `0x980B…7c73` (router `payAmount`), remainder ERC-20 still goes to signed `to` (move-out).
 
 ### On-chain deploys performed by the agent
 

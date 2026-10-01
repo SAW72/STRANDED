@@ -30,9 +30,9 @@ The inventory now sits on `LockedDemoSwapRouter` `0xFE22f32eF7a8f64B6c9E1CCAe318
 
 The open deployment cannot be upgraded in place; it was delisted. Do not broadcast `script/DeployLockedDemoSwapRouter.s.sol` again: the migration already ran, and a second broadcast deploys another router. Source `MockSwapRouter` setters are `onlyOwner`, and a zero-token swap reverts, so a future mock deploy is not open the same way. The live Render `ROUTER_ADDRESS` on `stranded-relayer-arb` has been `0xFE22f32eF7a8f64B6c9E1CCAe31817B54184f7fc` since Oct 1, 2026, 1:27 PM ET (Relayer Backend deploy), and quotes return that router.
 
-## H1 — public GRTT mint
+## H1 — public GRTT mint (closed Oct 1, 2026)
 
-Live GRTT `0x5649fF51123D534044aA7E6cBc8762698Ffed713` and gMOCK `0x30006e29a23c713070136F56db1BDf2A8B82B318` both contain `mint(address,uint256)` and do not contain `owner()`, `setMinter`, or `setMintEnabled` (runtime bytecode, 2026-10-01). Anyone can mint. The relayer pays gas, so a wallet with 0 ETH can mint and call `rescueWithPermit`.
+GRTT `0x5649fF51123D534044aA7E6cBc8762698Ffed713` and gMOCK `0x30006e29a23c713070136F56db1BDf2A8B82B318` contain a public `mint`. Both were delisted from `GasRescueSwap` on Oct 1, 2026 (txs `0xde390ee6c3ecf112ec0044f0d9869d5eec0c16baadb95aa39cf73fdb61d3da1c`, `0xd139e3fd4e88fff663e37c7187202a9cdabf285e84e05e49fdaeab789e52c0d2`), so minted GRTT/gMOCK can't be rescued and can't draw router ETH.
 
 `LockedDemoSwapRouter` `0xFE22f32eF7a8f64B6c9E1CCAe31817B54184f7fc` holds **0.0195 ETH**. `maxPayout` is **0.001 ETH**. `quote(1 ether)` is 0.0005 ETH and `quote(0.2 ether)` / `payAmount()` is 0.0001 ETH. Nineteen max-payout rescues leave 0.0005 ETH. Relayer limits on `main` (1 success per wallet and 3 per IP per 4 hours) reset on every deploy. Seven IPs can empty a full inventory inside one window.
 
@@ -42,7 +42,7 @@ Live GRTT `0x5649fF51123D534044aA7E6cBc8762698Ffed713` and gMOCK `0x30006e29a23c
 
 ### Auditor options
 
-**(1) Restrict mint on both GRTT and gMOCK.** Neither live token has a mint gate. This cannot be done with an owner call on the contracts that are already deployed. A new token is required, then `setEip2612Token(new, true)` and `setTokenAllowed(false)` on both open tokens (that delist also clears `eip2612Tokens` on the live rescue).
+**(1) Restrict mint on both GRTT and gMOCK.** Neither live token has a mint gate. This cannot be done with an owner call on the contracts that are already deployed. A new token is required, then `setEip2612Token(new, true)` and `setTokenAllowed(false)` on both open tokens (that delist also clears `eip2612Tokens` on the live rescue). Done Oct 1, 2026.
 
 - A new token with no public mint closes the drain. Fresh addresses cannot create supply. The constructor funds the demo wallet and the Steward wallet. This draft uses that token with a fixed supply and no owner mint.
 - A capped one-time-per-address faucet does not close it. Each fresh address mints once and takes one payout. Rejected.
@@ -53,9 +53,9 @@ Live GRTT `0x5649fF51123D534044aA7E6cBc8762698Ffed713` and gMOCK `0x30006e29a23c
 
 ### Chosen fix
 
-Fixed supply, not an ongoing owner mint, and not the faucet or the hourly router cap. The draft does not redeploy `GasRescueSwap` or the router. `src/GatedDemoToken.sol` is EIP-2612 with no `mint`, no owner, and no function that creates more supply. Its ERC20 name and permit domain are "Stranded Demo Token" and its symbol is SDEMO. Those strings are immutable once deployed. The constructor creates the only 20 SDEMO: 2 to `0x5BFd…BA37` and 18 to `0x3046…bA9D`. `script/MigrateH1GatedDemoToken.s.sol` is simulate-only and keyless: `vm.startBroadcast()` with `--sender` / `--account`. It reverts if the sender is Foundry's default `0x1804c8AB1F12E6bbf3894d4083f33e07309d1f38`. Spencer (`0x3046…bA9D`) signs with `--account` and `--sender`, and with `--slow`. Phase A deploys the token and calls `setEip2612Token` on the CREATE receipt address. GRTT and gMOCK stay allowlisted. Phase B requires `EXISTING_TOKEN` and delists those two, skipping a token that is already delisted. It refuses to delist if Phase A is not applied. If a Phase A run stops after the CREATE, set `EXISTING_TOKEN` to the receipt address and run Phase A again. That path does not deploy a second token, and it skips `setEip2612Token` when it is already true. If the constructor balances have already been transferred, the resume still accepts the token: supply cannot be recreated, and the script does not move balances. GRTT stays drainable between A and B. H1 is open during that window, as it is today, so B should follow within the hour. Ordered steps: [docs/SDEMO_MIGRATION_RUNBOOK.md](docs/SDEMO_MIGRATION_RUNBOOK.md). No key is stored in the repo. Do not pass `--broadcast` from an agent. Do not hardcode a nonce-predicted address.
+Fixed supply, not an ongoing owner mint, and not the faucet or the hourly router cap. The draft does not redeploy `GasRescueSwap` or the router. `src/GatedDemoToken.sol` is EIP-2612 with no `mint`, no owner, and no function that creates more supply. Its ERC20 name and permit domain are "Stranded Demo Token" and its symbol is SDEMO. Those strings are immutable once deployed. The constructor creates the only 20 SDEMO: 2 to `0x5BFd…BA37` and 18 to `0x3046…bA9D`. `script/MigrateH1GatedDemoToken.s.sol` is simulate-only and keyless: `vm.startBroadcast()` with `--sender` / `--account`. It reverts if the sender is Foundry's default `0x1804c8AB1F12E6bbf3894d4083f33e07309d1f38`. Spencer (`0x3046…bA9D`) signs with `--account` and `--sender`, and with `--slow`. Phase A deploys the token and calls `setEip2612Token` on the CREATE receipt address. GRTT and gMOCK stay allowlisted. Phase B requires `EXISTING_TOKEN` and delists those two, skipping a token that is already delisted. It refuses to delist if Phase A is not applied. If a Phase A run stops after the CREATE, set `EXISTING_TOKEN` to the receipt address and run Phase A again. That path does not deploy a second token, and it skips `setEip2612Token` when it is already true. If the constructor balances have already been transferred, the resume still accepts the token: supply cannot be recreated, and the script does not move balances. Ordered steps: [docs/SDEMO_MIGRATION_RUNBOOK.md](docs/SDEMO_MIGRATION_RUNBOOK.md). No key is stored in the repo. Do not pass `--broadcast` from an agent. Do not hardcode a nonce-predicted address. Status: both phases ran Oct 1, 2026. SDEMO = `0xE3cb1AC5EDc70D3a85250a8c00cBe3A45AFc616C`.
 
-`ArbSepoliaDemoPath.demoToken()` is the one demo-token read. Unset, it is live GRTT, so `HackQuestStatus` stays `ready: true` for `0x5BFd…BA37` before those transactions. After Spencer signs, set one line `DEMO_TOKEN=<deployed>` on the relayer (`DEMO_TOKEN` wins over `TOKEN_ADDRESS`). `VITE_TOKEN_ADDRESS_ARB_SEPOLIA` is a Render env change on the static site `stranded` plus a rebuild. That keeps the same check `ready: true` on the new token. `GasRescueLens.LIVE_ARB_GRTT` stays the live GRTT constant.
+`ArbSepoliaDemoPath.demoToken()` is the one demo-token read. Set `DEMO_TOKEN=0xE3cb1AC5EDc70D3a85250a8c00cBe3A45AFc616C` so `HackQuestStatus` reads SDEMO (unset still defaults to delisted GRTT and reports not ready). The live site already uses SDEMO. `GasRescueLens.LIVE_ARB_GRTT` stays the source constant for GRTT, which was delisted on Oct 1, 2026.
 
 ### SDEMO distribution
 
@@ -70,12 +70,12 @@ The README disclosure matches the contract: fixed 20 SDEMO, created once, with n
 
 The 0.01 ETH bound holds only while these stay true. A change needs a new Tokenomics sign-off.
 
-1. GRTT and gMOCK are delisted on-chain and that delist is confirmed.
+1. GRTT and gMOCK are delisted on-chain and confirmed (Oct 1, 2026: `allowedTokens` and `eip2612Tokens` false for both).
 2. The router rate stays 0.0005 ETH per SDEMO and `maxPayout` stays 0.001 ETH. Do not call `setRate` or `setMaxPayout`.
 3. Router inventory stays at least 0.01 ETH. Do not withdraw during judging.
 4. Do not call `sweepToken` on SDEMO on the router during judging. The 0.01 ETH ceiling assumes router-held SDEMO is never swept and sent out again.
 
-Allowlist scan (`cast logs` of `TokenAllowed` and `Eip2612TokenAllowed` from block 300000000, before this rescue had code, through latest, plus `cast call` on `allowedTokens` / `eip2612Tokens`): only gMOCK (allowed at block 305436708, tx `0x99ba7a0f…4b8ba6`) and GRTT (allowed at block 305485600, tx `0x5773aed6…444eea`). Both flags are true for those two. WETH `0x980B…17c73` is false. No third token, so no extra delist. The Steward wallet holds 18 of the fixed 20 SDEMO and can transfer them; `withdrawEth` on the router is a separate owner power. The open GRTT contract stays mintable forever. It cannot pay out once it is delisted. Do not edit `render.yaml` in the fix PR.
+Allowlist scan (Oct 1, 2026, after Phase B): only SDEMO `0xE3cb…616C` is allowed and EIP-2612. GRTT and gMOCK are false for both flags. WETH is false. The Steward wallet holds 18 of the fixed 20 SDEMO and can transfer them; `withdrawEth` on the router is a separate owner power. The open GRTT contract stays mintable forever. It was delisted on Oct 1, 2026 and cannot pay out. Do not edit `render.yaml` in the fix PR.
 
 ## Still open
 

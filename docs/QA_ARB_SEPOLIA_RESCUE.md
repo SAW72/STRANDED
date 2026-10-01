@@ -128,8 +128,8 @@ forge script script/InspectGasRescueSwap.s.sol:InspectGasRescueSwap \
 | `relayer allowed` | `true` (hot `0x8240…9AF6`) |
 | `hot underfunded` / `live submit blocked` | **`false`** on the 2026-10-01 read (0.214961419621579600 ETH). **`true`** if hot ETH later falls under 0.10 |
 | `recommended path` | `live-submit-ok-if-user-funded` on that read. `fixture-demo-no-top-up` if the hot wallet falls under 0.10 ETH |
-| `GRTT allowed` / `eip2612` | `true` (`0x5649fF51123D534044aA7E6cBc8762698Ffed713`) |
-| `gMOCK allowed` | `true` |
+| `SDEMO allowed` / `eip2612` | `true` (`0xE3cb…616C`) |
+| `GRTT` / `gMOCK allowed` | `false` (delisted Oct 1, 2026) |
 | `router` / `router allowed` / `router wei` | `0xFE22f32eF7a8f64B6c9E1CCAe31817B54184f7fc`, `true`, `19500000000000000` (0.0195 ETH) |
 | `retired router` / `retired allowed` / `retired wei` | retired open router `0x680410c7f64e06EB7e80dc7B5c149f7855e225A8` (delisted Oct 1, 2026), `false`, `0` |
 | `setPermit2 is F-1 immutable` | `true` |
@@ -149,7 +149,7 @@ forge script script/HackQuestStatus.s.sol:HackQuestStatus \
   --rpc-url "$ARB_SEPOLIA_RPC_URL" --chain-id 421614
 ```
 
-Default `HACKQUEST_USER` is GRTT holder `0x5BFd261b1eF7e61Bfea1ebfC87bDD8F4244BBA37` and default `HACKQUEST_AMOUNT_IN` is `1e18`. The in-script Lens checks locked router `0xFE22f32eF7a8f64B6c9E1CCAe31817B54184f7fc`. Set `HACKQUEST_AMOUNT_IN=0` for the Day-3 probe (`ready=false`, `probeOnly=true`).
+Set `DEMO_TOKEN=0xE3cb1AC5EDc70D3a85250a8c00cBe3A45AFc616C`. Default `HACKQUEST_USER` `0x5BFd261b1eF7e61Bfea1ebfC87bDD8F4244BBA37` holds 2 SDEMO and default `HACKQUEST_AMOUNT_IN` is `1e18`. The in-script Lens checks locked router `0xFE22f32eF7a8f64B6c9E1CCAe31817B54184f7fc`. Set `HACKQUEST_AMOUNT_IN=0` for the Day-3 probe (`ready=false`, `probeOnly=true`).
 
 **Expect JSON fields (default, 2026-10-01):**
 
@@ -178,7 +178,8 @@ Default `HACKQUEST_USER` is GRTT holder `0x5BFd261b1eF7e61Bfea1ebfC87bDD8F4244BB
 | `feePostureNote` | `match=flat-1pct-tokenIn; amountSwap=20pct-gas-topup-not-fee; slip=100bps-fail-closed; usd-hybrid=deferred-not-a-relayer-bug; owner=Relayer-Backend-do-not-rewrite` |
 | `hasRescueReceipt` / `rescueReceiptSupported` / `hasCanonicalPermit2Getter` | `false` on live |
 | `liveVsTip` | `live-lacks-rescueReceipt-and-canonicalPermit2-do-not-claim-redeploy` |
-| Fixture `nativeTo=0x1111…1111` `grttDemoPathHash` | `0xf2fa57d446a79240cf3043e9e9f82fd28d8719d264bc89de7d81b8eb167b3c47` |
+| Fixture `nativeTo=0x1111…1111` SDEMO pathHash | `0x41bdecd8a9b0f6b3c1034a23ef8efe7d5c5af0018f90f10eae6501567c7188a3` |
+| Fixture `nativeTo=0x1111…1111` `grttDemoPathHash` (GRTT was delisted on Oct 1, 2026) | `0xf2fa57d446a79240cf3043e9e9f82fd28d8719d264bc89de7d81b8eb167b3c47` |
 
 ### 4b. Real-rescue preflight (`amountIn > 0`)
 
@@ -194,7 +195,7 @@ forge script script/HackQuestStatus.s.sol:HackQuestStatus \
   --rpc-url "$ARB_SEPOLIA_RPC_URL" --chain-id 421614
 ```
 
-**Expect:** `probeOnly=false`, `amountInPositive=true`. `ready=true` only if that user holds ≥ `amountIn` GRTT **and** the other flags stay true. `ready=false` + `userFunded=false` means do not sign / submit yet.
+**Expect:** `probeOnly=false`, `amountInPositive=true`. `ready=true` only if that user holds ≥ `amountIn` SDEMO **and** the other flags stay true. `ready=false` + `userFunded=false` means do not sign / submit yet.
 
 ---
 
@@ -208,7 +209,7 @@ curl -sS -X POST https://stranded-relayer-arb.onrender.com/v1/quotes \
   -d '{
     "chainId": 421614,
     "user": "0xYourStrandedUser",
-    "tokenIn": "0x5649fF51123D534044aA7E6cBc8762698Ffed713",
+    "tokenIn": "0xE3cb1AC5EDc70D3a85250a8c00cBe3A45AFc616C",
     "amountIn": "1000000000000000000",
     "amountSwap": "200000000000000000",
     "to": "0xRemainderRecipient",
@@ -269,19 +270,19 @@ Required extra env: `PRIVATE_KEY` = **relayer** hot key (`0x8240…9AF6`), `USER
 
 ---
 
-## H1 — public mint (draft, not signed)
+## H1 — public mint (closed Oct 1, 2026)
 
-Live GRTT and gMOCK `mint` are public. Neither token has `owner()` or a mint gate. A 0-ETH wallet can mint and rescue. The locked router holds 0.0195 ETH and pays at most 0.001 ETH per rescue (`payAmount()` for the 0.2-token demo slice is 0.0001 ETH). Relayer limits (1 per wallet, 3 per IP, 4 hours) only slow the drain.
+GRTT and gMOCK had a public `mint`. Both were delisted Oct 1, 2026 and can't be rescued. SDEMO has a fixed supply of 20 and no mint. The locked router pays at most 0.001 ETH per rescue, and the whole SDEMO supply can draw at most 0.01 testnet ETH.
 
 Auditor M-1: do not key a per-user payout cap on `swapExact`'s third argument. `GasRescueSwap` does not bind that word to signed `order.user` or `order.nativeTo`. The signer can rotate it. Rejected.
 
-Two auditor options. (1) Restrict mint on both GRTT and gMOCK. No live setter, so this is a new token plus two delists. This draft uses a fixed-supply token with no `mint`. A capped public faucet still lets every fresh address take one payout, so it is not used. (2) A global max ETH per hour on the router. The live router has `setMaxPayout`, `setRate`, and `withdrawEth`, and no hourly cap. That needs a new router. Do not edit `script/DeployLockedDemoSwapRouter.s.sol` (separate PR). An hourly cap slows the drain and does not close it. Not chosen.
+Two auditor options. (1) Restrict mint on both GRTT and gMOCK. No live setter, so this is a new token plus two delists. This draft uses a fixed-supply token with no `mint`. A capped public faucet still lets every fresh address take one payout, so it is not used. (2) A global max ETH per hour on the router. The live router has `setMaxPayout`, `setRate`, and `withdrawEth`, and no hourly cap. That needs a new router. Do not edit `script/DeployLockedDemoSwapRouter.s.sol` (separate PR). An hourly cap slows the drain and does not close it. Not chosen. Both were delisted on Oct 1, 2026.
 
-`script/MigrateH1GatedDemoToken.s.sol` is the owner script, in two phases. The ordered steps, including the commands, are in [docs/SDEMO_MIGRATION_RUNBOOK.md](SDEMO_MIGRATION_RUNBOOK.md). Phase A creates fixed-supply SDEMO (name "Stranded Demo Token", symbol SDEMO, permit domain "Stranded Demo Token", no `mint`, 2e18 to `0x5BFd…BA37` and 18e18 to `0x3046…bA9D`) and calls `setEip2612Token` on the address the CREATE receipt returns. Phase B delists GRTT and gMOCK. `setTokenAllowed(false)` also clears the EIP-2612 flag on live bytecode. Signer is `0x3046…bA9D`. The script calls `vm.startBroadcast()` with no key in the repo and reverts on Foundry's default sender `0x1804…1f38`. GRTT stays drainable between the two phases. H1 is open during that window, as it is today, so Phase B should follow within the hour after the live check.
+`script/MigrateH1GatedDemoToken.s.sol` is the owner script, in two phases. The ordered steps, including the commands, are in [docs/SDEMO_MIGRATION_RUNBOOK.md](SDEMO_MIGRATION_RUNBOOK.md). Phase A creates fixed-supply SDEMO (name "Stranded Demo Token", symbol SDEMO, permit domain "Stranded Demo Token", no `mint`, 2e18 to `0x5BFd…BA37` and 18e18 to `0x3046…bA9D`) and calls `setEip2612Token` on the address the CREATE receipt returns. Phase B delists GRTT and gMOCK. `setTokenAllowed(false)` also clears the EIP-2612 flag on live bytecode. Signer is `0x3046…bA9D`. The script calls `vm.startBroadcast()` with no key in the repo and reverts on Foundry's default sender `0x1804…1f38`. Both phases ran on Oct 1, 2026 (deploy `0xfc357a9a…`, allowlist `0x0d7bdd17…`, delists `0xde390ee6…` and `0xd139e3fd…`). H1 is closed.
 
-`cast logs` of `TokenAllowed` and `Eip2612TokenAllowed` from block 300000000 through latest, then `cast call` of `allowedTokens` and `eip2612Tokens`: only gMOCK (block 305436708) and GRTT (block 305485600) are allowed. WETH is not. No third token, so the owner list has no extra delist.
+`cast logs` of `TokenAllowed` and `Eip2612TokenAllowed` from block 300000000 through latest, then `cast call` of `allowedTokens` and `eip2612Tokens`: After Phase B (Oct 1, 2026), only SDEMO `0xE3cb…616C` is allowed. GRTT and gMOCK are false. WETH is not.
 
-Until he signs Phase A, section 4a still expects `tokenAllowed=true` and `ready=true` for the open GRTT holder (`DEMO_TOKEN` unset). The constructor creates the whole supply: 2e18 on `0x5BFd…BA37` and 18e18 on `0x3046…bA9D`. A judge using their own wallet needs a transfer of 2 SDEMO from the Steward wallet, logged in [docs/SDEMO_DISTRIBUTION_LOG.md](SDEMO_DISTRIBUTION_LOG.md). `0x5BFd261b1eF7e61Bfea1ebfC87bDD8F4244BBA37` is Spencer's demo/QA EOA. It was allowlisted as a relayer in the past. On 2026-10-01 `relayers(address)` on `GasRescueSwap` `0x65e7…993D` returned false for it. The live relayer hot key is `0x8240…9AF6`. ETH out is at most SDEMO `totalSupply()` times 0.0005 ETH, so 2 SDEMO = 0.001 ETH and 20 SDEMO = 0.01 ETH, which is 51% of the router's 0.0195 ETH inventory. Remainders are returned and can be swapped again. SDEMO held by the router is never swept and sent out again. The fixture demo (empty Relayer URL) still runs. Do not change `setRate` or `setMaxPayout` on the router during judging. Do not call `sweepToken` on SDEMO.
+Phases A and B are done. With `DEMO_TOKEN=0xE3cb…616C`, section 4a expects `tokenAllowed=true` and `ready=true` for `0x5BFd…BA37` (2 SDEMO). The constructor creates the whole supply: 2e18 on `0x5BFd…BA37` and 18e18 on `0x3046…bA9D`. A judge using their own wallet needs a transfer of 2 SDEMO from the Steward wallet, logged in [docs/SDEMO_DISTRIBUTION_LOG.md](SDEMO_DISTRIBUTION_LOG.md). `0x5BFd261b1eF7e61Bfea1ebfC87bDD8F4244BBA37` is Spencer's demo/QA EOA. It was allowlisted as a relayer in the past. On 2026-10-01 `relayers(address)` on `GasRescueSwap` `0x65e7…993D` returned false for it. The live relayer hot key is `0x8240…9AF6`. ETH out is at most SDEMO `totalSupply()` times 0.0005 ETH, so 2 SDEMO = 0.001 ETH and 20 SDEMO = 0.01 ETH, which is 51% of the router's 0.0195 ETH inventory. Remainders are returned and can be swapped again. SDEMO held by the router is never swept and sent out again. The fixture demo (empty Relayer URL) still runs. Do not change `setRate` or `setMaxPayout` on the router during judging. Do not call `sweepToken` on SDEMO.
 
 `withdrawEth` and `setMaxPayout` exist on the live router. They are a stopgap (pull the 0.0195 ETH, or set the cap to 0). They are not this migration. A public one-per-address faucet would leave the drain open.
 
@@ -293,9 +294,9 @@ Until he signs Phase A, section 4a still expects `tokenAllowed=true` and `ready=
 | --- | --- |
 | Relayer `/health` | `ok`, `421614`, `stubRpc=false`, swap + hot wallet match |
 | Hot wallet ETH | 0.214961419621579600 ETH on 2026-10-01, above the ~0.10 floor. `liveSubmitBlocked=false`. The 2026-09-17 reading was ~0.015 ETH |
-| `InspectGasRescueSwap` | Permit2 off, not paused, GRTT + locked router + relayer allowlisted; retired open router not allowlisted |
+| `InspectGasRescueSwap` | Permit2 off, not paused, SDEMO + locked router + relayer allowlisted; GRTT, gMOCK and the retired open router not allowlisted |
 | Default `HackQuestStatus` | `routerAllowed=true`, **`ready=true`**, `recommendedJudgePath=live-submit-ok-if-user-funded`. `HACKQUEST_AMOUNT_IN=0` is still the probe (`ready=false`) |
-| Funded `HackQuestStatus` | `ready=true` only with `amountIn>0` and a real GRTT balance |
+| Funded `HackQuestStatus` | `ready=true` only with `amountIn>0` and a real SDEMO balance |
 | Live quote | nonzero `amountIn`; path is `swapExact`, not `0xbbb…`; fee MATCH 1% / 20% gas top-up / 100 bps (do not rewrite) |
 | Sign / broadcast | Spencer machine only; testnet `421614`; Permit2 never enabled |
 
@@ -311,8 +312,8 @@ Live still **lacks** `rescueReceipt` / `CANONICAL_PERMIT2()`. Day-5 `HackQuestSt
 | Owner | `0x30466A210961c0C2C13AF0A9d35dfC6E8858bA9D` |
 | Relayer hot | `0x8240124dc78a27c80354Ca813Df12aa2888A9AF6` |
 | WETH | `0x980B62Da83eFf3D4576C647993b0c1D7faf17c73` |
-| GRTT | `0x5649fF51123D534044aA7E6cBc8762698Ffed713` |
-| gMOCK | `0x30006e29a23c713070136F56db1BDf2A8B82B318` |
+| SDEMO (demo token) | `0xE3cb1AC5EDc70D3a85250a8c00cBe3A45AFc616C` |
+| GRTT, gMOCK (delisted Oct 1, 2026) | `0x5649…d713`, `0x3000…B318` |
 | Locked demo router | `0xFE22f32eF7a8f64B6c9E1CCAe31817B54184f7fc` |
 | Retired open router (delisted Oct 1, 2026) | `0x680410c7f64e06EB7e80dc7B5c149f7855e225A8` |
 | Relayer URL | https://stranded-relayer-arb.onrender.com |

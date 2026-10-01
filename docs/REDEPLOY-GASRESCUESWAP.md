@@ -45,11 +45,11 @@ Arb Sepolia values (set explicitly; not script defaults):
 RELAYER_ADDRESS=0x8240124dc78a27c80354Ca813Df12aa2888A9AF6
 WETH_ADDRESS=0x980B62Da83eFf3D4576C647993b0c1D7faf17c73
 ROUTER_ADDRESS=0xFE22f32eF7a8f64B6c9E1CCAe31817B54184f7fc
-TOKEN_ADDRESS=0x5649fF51123D534044aA7E6cBc8762698Ffed713
+TOKEN_ADDRESS=0xE3cb1AC5EDc70D3a85250a8c00cBe3A45AFc616C
 PERMIT2_ADDRESS=   # leave empty → address(0). Do not enable Permit2.
 ```
 
-`ROUTER_ADDRESS` is the live `LockedDemoSwapRouter` (migrated 2026-10-01). Do not allowlist retired open router `0x680410c7f64e06EB7e80dc7B5c149f7855e225A8` (delisted Oct 1, 2026). The script allowlists `ROUTER_ADDRESS` and marks `TOKEN_ADDRESS` EIP-2612. If you also need gMOCK `0x30006e29a23c713070136F56db1BDf2A8B82B318`, owner-call `setEip2612Token` after deploy (Spencer).
+`ROUTER_ADDRESS` is the live `LockedDemoSwapRouter` (migrated 2026-10-01). Do not allowlist retired open router `0x680410c7f64e06EB7e80dc7B5c149f7855e225A8` (delisted Oct 1, 2026). The script allowlists `ROUTER_ADDRESS` and marks `TOKEN_ADDRESS` EIP-2612.
 
 ## After a successful broadcast (Spencer)
 

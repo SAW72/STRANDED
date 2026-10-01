@@ -6,7 +6,12 @@ Runtime secrets stay in the environment. Do not put `RELAYER_PRIVATE_KEY` in a f
 
 ## Rescue limits
 
-GRTT can be minted by anyone, and each successful rescue pays gas from the router inventory (up to 0.001 ETH). These limits are a **mitigation** so one wallet or one IP cannot empty that inventory during the hackathon. They are not a substitute for restricting GRTT `mint` or capping router payouts. That change is `GatedDemoToken` ("Stranded Demo Token", symbol SDEMO) plus the owner script in the contracts package. After Phase A of that script, set `DEMO_TOKEN` to the SDEMO address from the CREATE receipt and restart. Leave `TOKEN_ADDRESS`. `DEMO_TOKEN` wins. Unset, `TOKEN_ADDRESS` stays live GRTT. Do not paste a nonce-predicted address. Ordered steps: `docs/SDEMO_MIGRATION_RUNBOOK.md`.
+Each successful rescue pays gas from the router inventory (up to 0.001 testnet ETH). These limits (1 per wallet, 3 per IP, 4 hours) slow repeat use. The demo token is SDEMO "Stranded Demo Token" (`0xE3cb1AC5EDc70D3a85250a8c00cBe3A45AFc616C`). It has a fixed supply of 20 and no mint, so the whole supply can draw at most 0.01 testnet ETH. Set both to that address. `DEMO_TOKEN` wins over `TOKEN_ADDRESS`. GRTT and gMOCK were delisted Oct 1, 2026.
+
+```
+TOKEN_ADDRESS=0xE3cb1AC5EDc70D3a85250a8c00cBe3A45AFc616C
+DEMO_TOKEN=0xE3cb1AC5EDc70D3a85250a8c00cBe3A45AFc616C
+```
 
 Defaults apply when the variables are **unset**, including on the live Render service:
 
