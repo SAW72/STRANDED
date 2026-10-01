@@ -50,7 +50,7 @@ Render fronts the service with Cloudflare. A client-supplied leftmost `X-Forward
 }
 ```
 
-`error` is `rate_limited_wallet` or `rate_limited_ip`. `retryAfter` is seconds. The response also sets `Retry-After` to that number. The IP message says the network limit was reached and includes the same timestamp.
+`error` is `rate_limited_wallet` or `rate_limited_ip`. `retryAfter` is seconds. The response also sets `Retry-After` to that number. The IP message is `Too many rescues from this network. You can try again at <ISO time>.` When the wallet cap is higher than 1, the wallet message is `Too many rescues from this wallet. You can try again at <ISO time>.` A rescue already in progress keeps the same timestamp fields and says you can try again at that time.
 
 `GET /health` includes the configured caps (not who has used them):
 
@@ -71,19 +71,24 @@ A disabled cap is `null` and its `*Enabled` flag is `false`.
 
 Bad input is HTTP 400 with `{ "ok": false, "error": "<code>", "message": "..." }`. No stack traces, RPC URLs, or secrets.
 
-| Case | Code |
-| --- | --- |
-| Empty body, invalid JSON, or a non-object | `invalid_json` |
-| Missing `user` (quote) or `order.user` (rescue) | `missing_user` |
-| Malformed `user` or `tokenIn` | `invalid_address` |
-| Missing, non-numeric, negative, or zero `amountIn` | `invalid_amount` |
-| `amountSwap + feeAmount` is not below `amountIn` | `invalid_amount_split` |
-| `chainId` other than 421614 | `wrong_chain` (`message` is `this Relayer is Arb Sepolia only`) |
-| `tokenIn` is an EOA (no bytecode) | `token_not_contract` |
-| Router quote pays 0 | `amount_too_small` |
-| Token balance too low | `insufficient_balance` |
+| Case | Code | Message |
+| --- | --- | --- |
+| Empty body, invalid JSON, or a non-object | `invalid_json` | That request doesn't look right. Please try again. |
+| Missing wallet on a quote or rescue | `missing_user` | A wallet address is required. |
+| Malformed wallet address | `invalid_address` | That wallet address doesn't look right. |
+| Malformed token address | `invalid_address` | That token address doesn't look right. |
+| Missing, non-numeric, negative, or zero amount | `invalid_amount` | That amount isn't valid. Please check it and try again. |
+| The amount split does not fit | `invalid_amount_split` | That amount isn't valid. Please check it and try again. |
+| Chain other than Arbitrum Sepolia | `wrong_chain` | This rescue only works on Arbitrum Sepolia. |
+| Token has no contract code | `token_not_contract` | That token isn't supported for rescue. |
+| Amount is too small to pay gas | `amount_too_small` | That amount is too small to rescue. Please try a larger amount. |
+| Amount is larger than the wallet balance | `insufficient_balance` | That amount is larger than this wallet's balance. |
+| Kill switch | `relayer_paused` | Rescues are paused right now. Please try again later. |
+| Not enough gas set aside for the rescue | `quote_unavailable` | There isn't enough gas available for this rescue right now. Please try again later. |
+| Upstream network failure | `upstream_unavailable` | The network is unavailable right now. Please try again in a moment. |
+| Broadcast did not go through | `broadcast_failed` | The rescue didn't go through. Please try again in a moment. |
 
-Upstream RPC failures are HTTP 502 `upstream_unavailable`. A router that cannot fund a positive quote stays HTTP 502 `quote_unavailable`. An unexpected crash is HTTP 500 `request_failed` with no other fields.
+`quote_unavailable` and `upstream_unavailable` stay HTTP 502. The kill switch stays HTTP 503. An unexpected crash is HTTP 500 `request_failed` with no other fields.
 
 ## Broadcast retry
 

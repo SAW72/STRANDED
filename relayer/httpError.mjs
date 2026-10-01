@@ -29,11 +29,20 @@ const DEFAULT_STATUS = {
   request_failed: 500,
 };
 
-export const UPSTREAM_MESSAGE = "The network request failed. Try again in a moment.";
-export const BROADCAST_FAILED_MESSAGE = "The rescue could not be broadcast. Try again in a moment.";
-export const ARB_SEPOLIA_ONLY = "this Relayer is Arb Sepolia only";
-export const AMOUNT_TOO_SMALL_MESSAGE =
-  "This amount is too small to pay out native gas. Try a larger amount.";
+export const INVALID_JSON_MESSAGE = "That request doesn't look right. Please try again.";
+export const MISSING_USER_MESSAGE = "A wallet address is required.";
+export const INVALID_WALLET_ADDRESS_MESSAGE = "That wallet address doesn't look right.";
+export const INVALID_TOKEN_ADDRESS_MESSAGE = "That token address doesn't look right.";
+export const INVALID_AMOUNT_MESSAGE = "That amount isn't valid. Please check it and try again.";
+export const ARB_SEPOLIA_ONLY = "This rescue only works on Arbitrum Sepolia.";
+export const TOKEN_NOT_CONTRACT_MESSAGE = "That token isn't supported for rescue.";
+export const AMOUNT_TOO_SMALL_MESSAGE = "That amount is too small to rescue. Please try a larger amount.";
+export const INSUFFICIENT_BALANCE_MESSAGE = "That amount is larger than this wallet's balance.";
+export const QUOTE_UNAVAILABLE_MESSAGE =
+  "There isn't enough gas available for this rescue right now. Please try again later.";
+export const UPSTREAM_MESSAGE = "The network is unavailable right now. Please try again in a moment.";
+export const BROADCAST_FAILED_MESSAGE = "The rescue didn't go through. Please try again in a moment.";
+export const RELAYER_PAUSED_MESSAGE = "Rescues are paused right now. Please try again later.";
 
 /**
  * @param {number} status

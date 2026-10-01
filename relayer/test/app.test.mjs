@@ -22,6 +22,7 @@ describe("relayer HTTP kill switch", () => {
       });
       assert.equal(quote.status, 503);
       assert.equal(quote.body.error, "relayer_paused");
+      assert.equal(quote.body.message, "Rescues are paused right now. Please try again later.");
       assert.equal(quote.headers.get("access-control-allow-origin"), "http://localhost:5173");
       assert.equal(quoteCalls(), 0);
 
@@ -32,6 +33,7 @@ describe("relayer HTTP kill switch", () => {
       });
       assert.equal(rescue.status, 503);
       assert.equal(rescue.body.error, "relayer_paused");
+      assert.equal(rescue.body.message, "Rescues are paused right now. Please try again later.");
       assert.equal(rescue.headers.get("access-control-allow-origin"), "http://localhost:5173");
       assert.equal(rescueCalls(), 0);
     });

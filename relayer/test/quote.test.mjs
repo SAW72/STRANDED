@@ -119,7 +119,7 @@ describe("quote builder", () => {
     await assert.rejects(buildQuote({ user: USER, tokenIn: EOA, amountIn: "1" }), (err) => {
       assert.equal(err.status, 400);
       assert.equal(err.error, "token_not_contract");
-      assert.match(err.publicMessage, /no contract code/);
+      assert.equal(err.publicMessage, "That token isn't supported for rescue.");
       return true;
     });
     assert.equal(reserved(), 0);
@@ -178,7 +178,10 @@ describe("quote builder", () => {
     await assert.rejects(buildQuote(oneToken), (err) => {
       assert.equal(err.status, 502);
       assert.equal(err.error, "quote_unavailable");
-      assert.match(err.publicMessage, /not have enough native gas/);
+      assert.equal(
+        err.publicMessage,
+        "There isn't enough gas available for this rescue right now. Please try again later.",
+      );
       return true;
     });
     assert.equal(reserved(), 0);
@@ -229,7 +232,7 @@ describe("quote builder", () => {
     await assert.rejects(split.buildQuote({ user: USER, tokenIn: TOKEN, amountIn: "100", amountSwap: "99" }), (err) => {
       assert.equal(err.status, 400);
       assert.equal(err.error, "invalid_amount_split");
-      assert.match(err.publicMessage, /amountSwap \+ feeAmount must be < amountIn/);
+      assert.equal(err.publicMessage, "That amount isn't valid. Please check it and try again.");
       return true;
     });
     assert.equal(reserved() + split.reserved(), 0);

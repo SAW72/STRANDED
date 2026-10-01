@@ -1,5 +1,14 @@
 import { encodeFunctionData, keccak256 } from "viem";
-import { AMOUNT_TOO_SMALL_MESSAGE, UPSTREAM_MESSAGE, fail } from "./httpError.mjs";
+import {
+  AMOUNT_TOO_SMALL_MESSAGE,
+  INSUFFICIENT_BALANCE_MESSAGE,
+  INVALID_AMOUNT_MESSAGE,
+  INVALID_TOKEN_ADDRESS_MESSAGE,
+  QUOTE_UNAVAILABLE_MESSAGE,
+  TOKEN_NOT_CONTRACT_MESSAGE,
+  UPSTREAM_MESSAGE,
+  fail,
+} from "./httpError.mjs";
 import { parseQuoteBody } from "./quoteRequest.mjs";
 import { slipMinAmountOut, splitRescueAmounts } from "./quoteMath.mjs";
 
@@ -109,7 +118,7 @@ export function createBuildQuote(deps) {
     const tokenIn = parsed.tokenIn || tokenAddress;
     const amountIn = parsed.amountIn;
     if (!tokenIn) {
-      throw fail(400, "invalid_address", "tokenIn must be an 0x address (20 bytes).");
+      throw fail(400, "invalid_address", INVALID_TOKEN_ADDRESS_MESSAGE);
     }
 
     let code;
@@ -119,11 +128,7 @@ export function createBuildQuote(deps) {
       throw upstream(log, err);
     }
     if (!contractCodePresent(code)) {
-      throw fail(
-        400,
-        "token_not_contract",
-        "tokenIn has no contract code. Use an allowlisted token contract, not a wallet address.",
-      );
+      throw fail(400, "token_not_contract", TOKEN_NOT_CONTRACT_MESSAGE);
     }
 
     let bal;
@@ -138,7 +143,7 @@ export function createBuildQuote(deps) {
       throw upstream(log, err);
     }
     if (bal < amountIn) {
-      throw fail(400, "insufficient_balance", "Amount is larger than this wallet's token balance.");
+      throw fail(400, "insufficient_balance", INSUFFICIENT_BALANCE_MESSAGE);
     }
 
     let tokenSymbol;
@@ -167,7 +172,7 @@ export function createBuildQuote(deps) {
       ({ amountSwap, feeAmount, amountRemainder } = splitRescueAmounts(amountIn, parsed.amountSwap));
     } catch (err) {
       if (err && err.status === 400) {
-        throw fail(400, "invalid_amount_split", "amountSwap + feeAmount must be < amountIn");
+        throw fail(400, "invalid_amount_split", INVALID_AMOUNT_MESSAGE);
       }
       throw err;
     }
@@ -190,7 +195,7 @@ export function createBuildQuote(deps) {
       throw upstream(log, err);
     }
     if (routerEth < payAmount) {
-      throw fail(502, "quote_unavailable", "The swap router does not have enough native gas for this quote.");
+      throw fail(502, "quote_unavailable", QUOTE_UNAVAILABLE_MESSAGE);
     }
 
     const minAmountOut = slipMinAmountOut(payAmount);

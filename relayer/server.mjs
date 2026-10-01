@@ -3,7 +3,7 @@ import { privateKeyToAccount } from "viem/accounts";
 import { arbitrumSepolia } from "viem/chains";
 import { createRelayerApp } from "./app.mjs";
 import { parseTrustedProxyHops } from "./clientIp.mjs";
-import { asBroadcastFailure, fail } from "./httpError.mjs";
+import { INVALID_AMOUNT_MESSAGE, MISSING_USER_MESSAGE, asBroadcastFailure, fail } from "./httpError.mjs";
 import { createKillSwitch, parseEnvFlag } from "./killSwitch.mjs";
 import { createNonceStore } from "./nonceStore.mjs";
 import { createBuildQuote, encodeSwapData } from "./quote.mjs";
@@ -178,7 +178,7 @@ const buildQuote = createBuildQuote({
 function asOrder(raw) {
   try {
     if (!raw || typeof raw !== "object") {
-      throw fail(400, "missing_user", "user is required.");
+      throw fail(400, "missing_user", MISSING_USER_MESSAGE);
     }
     return {
       user: raw.user,
@@ -198,7 +198,7 @@ function asOrder(raw) {
     };
   } catch (err) {
     if (err && err.error && Number.isInteger(err.status)) throw err;
-    throw fail(400, "invalid_amount", "Rescue order amounts must be whole numbers of token units.");
+    throw fail(400, "invalid_amount", INVALID_AMOUNT_MESSAGE);
   }
 }
 

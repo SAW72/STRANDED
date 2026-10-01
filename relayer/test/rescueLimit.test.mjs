@@ -115,7 +115,11 @@ describe("rescue limiter", () => {
     const third = await created.begin("0x3333333333333333333333333333333333333333", IP);
     assert.equal(third.ok, false);
     assert.equal(third.decision.code, "rate_limited_ip");
-    assert.match(third.decision.message, /this network/);
+    assert.equal(
+      third.decision.message,
+      `Too many rescues from this network. You can try again at ${third.decision.retryAt}.`,
+    );
+    assert.equal(third.decision.message.includes("limit"), false);
 
     const otherIp = await created.begin("0x3333333333333333333333333333333333333333", "198.51.100.8");
     assert.equal(otherIp.ok, true);

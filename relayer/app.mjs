@@ -1,7 +1,7 @@
 import http from "node:http";
 import { timingSafeEqual } from "node:crypto";
 import { clientIp } from "./clientIp.mjs";
-import { fail, toPublicError } from "./httpError.mjs";
+import { INVALID_JSON_MESSAGE, RELAYER_PAUSED_MESSAGE, fail, toPublicError } from "./httpError.mjs";
 import { RELAYER_PAUSED } from "./killSwitch.mjs";
 import { parseQuoteBody, parseRescueUser } from "./quoteRequest.mjs";
 import { errorFromLimit } from "./rescueLimit.mjs";
@@ -59,22 +59,22 @@ export function readBody(req) {
     req.on("end", () => {
       const raw = Buffer.concat(chunks).toString("utf8");
       if (!raw.trim()) {
-        reject(fail(400, "invalid_json", "Request body is empty. Send a JSON object."));
+        reject(fail(400, "invalid_json", INVALID_JSON_MESSAGE));
         return;
       }
       try {
         const parsed = JSON.parse(raw);
         if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-          reject(fail(400, "invalid_json", "Request body must be a JSON object."));
+          reject(fail(400, "invalid_json", INVALID_JSON_MESSAGE));
           return;
         }
         resolve(parsed);
       } catch {
-        reject(fail(400, "invalid_json", "Request body is not valid JSON."));
+        reject(fail(400, "invalid_json", INVALID_JSON_MESSAGE));
       }
     });
     req.on("error", () => {
-      reject(fail(400, "invalid_json", "Request body could not be read."));
+      reject(fail(400, "invalid_json", INVALID_JSON_MESSAGE));
     });
   });
 }
@@ -123,7 +123,7 @@ export function createRelayerApp(deps) {
 
   function refuseIfPaused(res, req) {
     if (!killSwitch.isPaused()) return false;
-    json(res, req, 503, { ok: false, error: RELAYER_PAUSED }, corsHeaders);
+    json(res, req, 503, { ok: false, error: RELAYER_PAUSED, message: RELAYER_PAUSED_MESSAGE }, corsHeaders);
     return true;
   }
 

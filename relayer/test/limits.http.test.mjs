@@ -133,7 +133,11 @@ describe("rescue limits over HTTP", () => {
         });
         assert.equal(spoofSameClient.status, 429);
         assert.equal(spoofSameClient.body.error, "rate_limited_ip");
-        assert.match(spoofSameClient.body.message, /this network/);
+        assert.equal(
+          spoofSameClient.body.message,
+          `Too many rescues from this network. You can try again at ${spoofSameClient.body.retryAt}.`,
+        );
+        assert.equal(spoofSameClient.body.message.includes("limit"), false);
         assert.ok(spoofSameClient.body.retryAfter >= 1);
         assert.equal(spoofSameClient.headers.get("retry-after"), String(spoofSameClient.body.retryAfter));
         assert.equal(rescueCalls(), 1);
@@ -178,7 +182,10 @@ describe("rescue limits over HTTP", () => {
       const third = await post(url, "/v1/rescues", { body: rescueBody() });
       assert.equal(third.status, 429);
       assert.equal(third.body.error, "rate_limited_wallet");
-      assert.match(third.body.message, /used its 2 rescues/);
+      assert.equal(
+        third.body.message,
+        `Too many rescues from this wallet. You can try again at ${third.body.retryAt}.`,
+      );
     });
 
     const disabled = parseRescueLimitConfig({
@@ -305,12 +312,23 @@ describe("readable quote and rescue errors", () => {
         assert.equal(res.text.includes("SECRET"), false);
         assert.equal(res.text.toLowerCase().includes("stack"), false);
         assert.equal(res.headers.get("access-control-allow-origin"), ORIGIN);
-        if (code === "wrong_chain") assert.equal(res.body.message, "this Relayer is Arb Sepolia only");
-        if (code === "invalid_address" && String(body).includes("tokenIn")) {
-          assert.match(res.body.message, /tokenIn/);
+        if (code === "wrong_chain") {
+          assert.equal(res.body.message, "This rescue only works on Arbitrum Sepolia.");
         }
-        if (code === "invalid_address" && String(body).includes("0x1234")) {
-          assert.match(res.body.message, /user/);
+        if (code === "invalid_address" && String(body).includes("tokenIn")) {
+          assert.equal(res.body.message, "That token address doesn't look right.");
+        }
+        if (code === "invalid_address" && (String(body).includes("0x1234") || String(body).includes("0xzz"))) {
+          assert.equal(res.body.message, "That wallet address doesn't look right.");
+        }
+        if (code === "invalid_amount") {
+          assert.equal(res.body.message, "That amount isn't valid. Please check it and try again.");
+        }
+        if (code === "invalid_json") {
+          assert.equal(res.body.message, "That request doesn't look right. Please try again.");
+        }
+        if (code === "missing_user") {
+          assert.equal(res.body.message, "A wallet address is required.");
         }
       }
       assert.equal(quoteCalls(), 0);
@@ -372,7 +390,7 @@ describe("readable quote and rescue errors", () => {
         });
         assert.equal(res.status, 400);
         assert.equal(res.body.error, "token_not_contract");
-        assert.match(res.body.message, /no contract code/);
+        assert.equal(res.body.message, "That token isn't supported for rescue.");
       },
     );
 
@@ -417,7 +435,10 @@ describe("readable quote and rescue errors", () => {
         const res = await post(url, "/v1/quotes");
         assert.equal(res.status, 502);
         assert.equal(res.body.error, "quote_unavailable");
-        assert.match(res.body.message, /not have enough native gas/);
+        assert.equal(
+          res.body.message,
+          "There isn't enough gas available for this rescue right now. Please try again later.",
+        );
       },
     );
 

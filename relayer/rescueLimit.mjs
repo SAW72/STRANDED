@@ -72,8 +72,8 @@ function windowDecision(code, events, limit, nowMs, windowMs) {
     code === "rate_limited_wallet"
       ? limit === 1
         ? `This wallet already got a rescue. You can try again at ${retryAt}.`
-        : `This wallet already used its ${limit} rescues for this period. You can try again at ${retryAt}.`
-      : `Too many rescues from this network already went through (limit ${limit}). You can try again at ${retryAt}.`;
+        : `Too many rescues from this wallet. You can try again at ${retryAt}.`
+      : `Too many rescues from this network. You can try again at ${retryAt}.`;
   return { limited: true, code, message, retryAfter, retryAt, inProgress: false };
 }
 

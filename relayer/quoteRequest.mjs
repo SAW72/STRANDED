@@ -1,4 +1,12 @@
-import { ARB_SEPOLIA_ONLY, fail } from "./httpError.mjs";
+import {
+  ARB_SEPOLIA_ONLY,
+  INVALID_AMOUNT_MESSAGE,
+  INVALID_JSON_MESSAGE,
+  INVALID_TOKEN_ADDRESS_MESSAGE,
+  INVALID_WALLET_ADDRESS_MESSAGE,
+  MISSING_USER_MESSAGE,
+  fail,
+} from "./httpError.mjs";
 
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
 
@@ -16,36 +24,26 @@ function trimmed(value) {
  * @param {{ allowZero?: boolean }} [opts]
  */
 export function parseWholeAmount(value, field, opts = {}) {
-  const label = field || "amountIn";
+  void field;
   if (typeof value === "bigint") {
     if (value < 0n || (!opts.allowZero && value === 0n)) {
-      throw fail(400, "invalid_amount", `${label} must be a positive whole number of token units.`);
+      throw fail(400, "invalid_amount", INVALID_AMOUNT_MESSAGE);
     }
     return value;
   }
   if (typeof value === "number") {
-    if (!Number.isSafeInteger(value)) {
-      throw fail(
-        400,
-        "invalid_amount",
-        `${label} must be a base-10 string of token units, not a JSON number.`,
-      );
-    }
-    if (value < 0 || (!opts.allowZero && value === 0)) {
-      throw fail(400, "invalid_amount", `${label} must be a positive whole number of token units.`);
+    if (!Number.isSafeInteger(value) || value < 0 || (!opts.allowZero && value === 0)) {
+      throw fail(400, "invalid_amount", INVALID_AMOUNT_MESSAGE);
     }
     return BigInt(value);
   }
   const s = trimmed(value);
-  if (!s) {
-    throw fail(400, "invalid_amount", `${label} is required and must be a positive whole number of token units.`);
-  }
-  if (!/^[0-9]+$/.test(s)) {
-    throw fail(400, "invalid_amount", `${label} must be a positive whole number of token units (base-10).`);
+  if (!s || !/^[0-9]+$/.test(s)) {
+    throw fail(400, "invalid_amount", INVALID_AMOUNT_MESSAGE);
   }
   const n = BigInt(s);
   if (!opts.allowZero && n === 0n) {
-    throw fail(400, "invalid_amount", `${label} must be greater than zero.`);
+    throw fail(400, "invalid_amount", INVALID_AMOUNT_MESSAGE);
   }
   return n;
 }
@@ -57,21 +55,21 @@ export function parseWholeAmount(value, field, opts = {}) {
  */
 export function parseQuoteBody(body, opts = {}) {
   if (!body || typeof body !== "object" || Array.isArray(body)) {
-    throw fail(400, "invalid_json", "Request body must be a JSON object.");
+    throw fail(400, "invalid_json", INVALID_JSON_MESSAGE);
   }
   const defaultChainId = Number(opts.defaultChainId ?? 421614);
   const userRaw = body.user;
   if (userRaw === undefined || userRaw === null || trimmed(userRaw) === "") {
-    throw fail(400, "missing_user", "user is required.");
+    throw fail(400, "missing_user", MISSING_USER_MESSAGE);
   }
   if (!isAddress(userRaw)) {
-    throw fail(400, "invalid_address", "user must be an 0x address (20 bytes).");
+    throw fail(400, "invalid_address", INVALID_WALLET_ADDRESS_MESSAGE);
   }
 
   let tokenIn;
   if (body.tokenIn !== undefined && body.tokenIn !== null && trimmed(body.tokenIn) !== "") {
     if (!isAddress(body.tokenIn)) {
-      throw fail(400, "invalid_address", "tokenIn must be an 0x address (20 bytes).");
+      throw fail(400, "invalid_address", INVALID_TOKEN_ADDRESS_MESSAGE);
     }
     tokenIn = trimmed(body.tokenIn);
   }
@@ -106,15 +104,15 @@ export function parseQuoteBody(body, opts = {}) {
 /** Wallet that would receive the rescue. Invalid input is a 400, not a limit hit. */
 export function parseRescueUser(body) {
   if (!body || typeof body !== "object" || Array.isArray(body)) {
-    throw fail(400, "invalid_json", "Request body must be a JSON object.");
+    throw fail(400, "invalid_json", INVALID_JSON_MESSAGE);
   }
   const order = body.order;
   const user = order && typeof order === "object" ? order.user : undefined;
   if (user === undefined || user === null || trimmed(user) === "") {
-    throw fail(400, "missing_user", "user is required.");
+    throw fail(400, "missing_user", MISSING_USER_MESSAGE);
   }
   if (!isAddress(user)) {
-    throw fail(400, "invalid_address", "user must be an 0x address (20 bytes).");
+    throw fail(400, "invalid_address", INVALID_WALLET_ADDRESS_MESSAGE);
   }
   return trimmed(user);
 }
