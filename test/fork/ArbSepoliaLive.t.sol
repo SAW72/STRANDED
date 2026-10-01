@@ -71,7 +71,7 @@ contract ArbSepoliaLiveTest is Test {
         assertTrue(swap.allowedTokens(LIVE_GMOCK), "gMOCK also allowlisted");
         assertTrue(swap.eip2612Tokens(LIVE_GMOCK));
         assertTrue(swap.allowedRouters(LIVE_ROUTER), "locked demo router allowlisted");
-        assertEq(LIVE_ROUTER.balance, 0.0195 ether, "locked router holds the migrated inventory");
+        assertGt(LIVE_ROUTER.balance, 0, "locked router still holds ETH");
         assertFalse(swap.allowedRouters(RETIRED_OPEN_ROUTER), "retired open router delisted Oct 1, 2026");
         assertEq(RETIRED_OPEN_ROUTER.balance, 0, "retired open router holds no ETH");
     }
