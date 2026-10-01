@@ -91,8 +91,17 @@ contract ArbSepoliaH1Test is Test {
         assertEq(swap.owner(), LIVE_OWNER);
         assertTrue(_codeHas(LIVE_SWAP, bytes4(keccak256("setTokenAllowed(address,bool)"))));
         assertTrue(_codeHas(LIVE_SWAP, bytes4(keccak256("setEip2612Token(address,bool)"))));
-        assertTrue(swap.allowedTokens(LIVE_GRTT) && swap.eip2612Tokens(LIVE_GRTT));
-        assertTrue(swap.allowedTokens(LIVE_GMOCK) && swap.eip2612Tokens(LIVE_GMOCK));
+        address demo = vm.envOr("DEMO_TOKEN", address(0));
+        if (swap.allowedTokens(LIVE_GRTT)) {
+            assertTrue(swap.eip2612Tokens(LIVE_GRTT));
+            assertTrue(swap.allowedTokens(LIVE_GMOCK) && swap.eip2612Tokens(LIVE_GMOCK));
+        } else {
+            assertFalse(swap.eip2612Tokens(LIVE_GRTT));
+            assertFalse(swap.allowedTokens(LIVE_GMOCK) || swap.eip2612Tokens(LIVE_GMOCK));
+            if (demo != address(0)) {
+                assertTrue(swap.allowedTokens(demo) && swap.eip2612Tokens(demo));
+            }
+        }
         assertTrue(swap.allowedRouters(LIVE_ROUTER));
         assertGe(IERC20(LIVE_GRTT).balanceOf(DEMO_HOLDER), 1 ether);
 
@@ -136,12 +145,13 @@ contract ArbSepoliaH1Test is Test {
         assertEq(token.balanceOf(DEMO_HOLDER), 2 ether);
         assertEq(token.balanceOf(LIVE_OWNER), 18 ether);
 
+        bool grttWasAllowed = swap.allowedTokens(LIVE_GRTT);
         vm.prank(LIVE_OWNER);
         swap.setEip2612Token(address(token), true);
         assertTrue(swap.allowedTokens(address(token)));
         assertTrue(swap.eip2612Tokens(address(token)));
-        // The open tokens are still allowlisted until the script's later txs.
-        assertTrue(swap.allowedTokens(LIVE_GRTT));
+        // This setter does not delist. Before Phase B, GRTT stays allowed.
+        assertEq(swap.allowedTokens(LIVE_GRTT), grttWasAllowed);
     }
 
     /// @dev The four owner txs, on a fork, using the address `new` returns.
@@ -150,7 +160,8 @@ contract ArbSepoliaH1Test is Test {
     ///      get paid from the router.
     function test_live_afterH1Migration_readyWithNewToken() public onlyFork {
         uint256 inventory = LIVE_ROUTER.balance;
-        assertEq(inventory, 0.0195 ether);
+        // Full 20 SDEMO can draw at most 0.01 ETH. Inventory must cover that floor.
+        assertGe(inventory, 0.01 ether);
 
         GatedDemoToken token = new GatedDemoToken();
         vm.startPrank(LIVE_OWNER);
@@ -213,76 +224,188 @@ contract ArbSepoliaH1Test is Test {
         migration.run();
     }
 
-    function test_live_scriptFreshRun() public onlyFork {
+    function test_live_phaseA_grttStillWorksAndSdemoWorks() public onlyFork {
+        if (!swap.allowedTokens(LIVE_GRTT)) {
+            uint256 pk = uint256(keccak256("phase-a-grtt-closed")) | 1;
+            address user = vm.addr(pk);
+            vm.deal(user, 0);
+            _mint(LIVE_GRTT, user, 1 ether);
+            assertFalse(_rescue(LIVE_GRTT, user, pk), "delisted GRTT does not pay");
+            address demo = _demoToken();
+            assertTrue(swap.allowedTokens(demo) && swap.eip2612Tokens(demo));
+            uint256 spk = uint256(keccak256("phase-a-sdemo-closed")) | 1;
+            address suser = vm.addr(spk);
+            vm.deal(suser, 0);
+            vm.prank(DEMO_HOLDER);
+            GatedDemoToken(demo).transfer(suser, 1 ether);
+            assertTrue(_rescue(demo, suser, spk), "SDEMO still rescues after Phase B");
+            return;
+        }
         MigrateH1GatedDemoToken migration = new MigrateH1GatedDemoToken();
-        uint256 nonce = vm.getNonce(LIVE_OWNER);
-        address deployed = migration.migrate(
-            MigrateH1GatedDemoToken.Config({existingToken: address(0), sender: LIVE_OWNER})
-        );
-        assertEq(vm.getNonce(LIVE_OWNER), nonce + 4, "fresh run is CREATE plus three setters");
-        GatedDemoToken token = GatedDemoToken(deployed);
-        assertEq(token.totalSupply(), 20 ether);
-        assertEq(token.balanceOf(DEMO_HOLDER), 2 ether);
-        assertEq(token.balanceOf(LIVE_OWNER), 18 ether);
-        assertTrue(swap.eip2612Tokens(deployed) && swap.allowedTokens(deployed));
-        assertFalse(swap.allowedTokens(LIVE_GRTT) || swap.eip2612Tokens(LIVE_GRTT));
-        assertFalse(swap.allowedTokens(LIVE_GMOCK) || swap.eip2612Tokens(LIVE_GMOCK));
+        address deployed = migration.migrate(_cfg(address(0), MigrateH1GatedDemoToken.Phase.A));
+        assertTrue(swap.allowedTokens(deployed) && swap.eip2612Tokens(deployed));
+        assertTrue(swap.allowedTokens(LIVE_GRTT) && swap.eip2612Tokens(LIVE_GRTT), "Phase A must not delist");
+        assertTrue(swap.allowedTokens(LIVE_GMOCK) && swap.eip2612Tokens(LIVE_GMOCK));
+
+        uint256 grttPk = uint256(keccak256("phase-a-grtt")) | 1;
+        address grttUser = vm.addr(grttPk);
+        vm.deal(grttUser, 0);
+        _mint(LIVE_GRTT, grttUser, 1 ether);
+        assertTrue(_rescue(LIVE_GRTT, grttUser, grttPk), "GRTT still rescues after Phase A");
+        assertEq(grttUser.balance, 0.0001 ether);
+
+        uint256 sdemoPk = uint256(keccak256("phase-a-sdemo")) | 1;
+        address sdemoUser = vm.addr(sdemoPk);
+        vm.deal(sdemoUser, 0);
+        vm.prank(DEMO_HOLDER);
+        GatedDemoToken(deployed).transfer(sdemoUser, 1 ether);
+        assertTrue(_rescue(deployed, sdemoUser, sdemoPk), "SDEMO rescues after Phase A");
+        assertEq(sdemoUser.balance, 0.0001 ether);
+        assertEq(GatedDemoToken(deployed).totalSupply(), 20 ether);
     }
 
-    function test_live_scriptResumeAfterCreate() public onlyFork {
+    function test_live_phaseB_afterA() public onlyFork {
+        if (!swap.allowedTokens(LIVE_GRTT)) {
+            _assertPhaseBNoop(_demoToken());
+            return;
+        }
+        MigrateH1GatedDemoToken migration = new MigrateH1GatedDemoToken();
+        address deployed = migration.migrate(_cfg(address(0), MigrateH1GatedDemoToken.Phase.A));
+        uint256 nonce = vm.getNonce(LIVE_OWNER);
+        address again = migration.migrate(_cfg(deployed, MigrateH1GatedDemoToken.Phase.B));
+        assertEq(again, deployed);
+        assertEq(vm.getNonce(LIVE_OWNER), nonce + 2, "Phase B is the two delists");
+        assertFalse(swap.allowedTokens(LIVE_GRTT) || swap.eip2612Tokens(LIVE_GRTT));
+        assertFalse(swap.allowedTokens(LIVE_GMOCK) || swap.eip2612Tokens(LIVE_GMOCK));
+        assertTrue(swap.allowedTokens(deployed) && swap.eip2612Tokens(deployed));
+    }
+
+    function test_live_phaseB_withoutA_reverts() public onlyFork {
+        GatedDemoToken token = new GatedDemoToken();
+        assertFalse(swap.allowedTokens(address(token)));
+        MigrateH1GatedDemoToken migration = new MigrateH1GatedDemoToken();
+        bool grtt = swap.allowedTokens(LIVE_GRTT);
+        bool gmock = swap.allowedTokens(LIVE_GMOCK);
+        vm.expectRevert(bytes("MigrateH1: Phase A not applied"));
+        migration.migrate(_cfg(address(token), MigrateH1GatedDemoToken.Phase.B));
+        assertEq(swap.allowedTokens(LIVE_GRTT), grtt, "refused delist leaves GRTT unchanged");
+        assertEq(swap.allowedTokens(LIVE_GMOCK), gmock);
+    }
+
+    function test_live_phaseB_existingTokenUnset_reverts() public onlyFork {
+        MigrateH1GatedDemoToken migration = new MigrateH1GatedDemoToken();
+        bool grtt = swap.allowedTokens(LIVE_GRTT);
+        bool gmock = swap.allowedTokens(LIVE_GMOCK);
+        vm.expectRevert(bytes("MigrateH1: set EXISTING_TOKEN"));
+        migration.migrate(_cfg(address(0), MigrateH1GatedDemoToken.Phase.B));
+        assertEq(swap.allowedTokens(LIVE_GRTT), grtt);
+        assertEq(swap.allowedTokens(LIVE_GMOCK), gmock);
+    }
+
+    function test_live_phaseA_rerunIsNoop() public onlyFork {
+        if (!swap.allowedTokens(LIVE_GRTT)) {
+            address demo = _demoToken();
+            MigrateH1GatedDemoToken migration = new MigrateH1GatedDemoToken();
+            vm.expectRevert(bytes("MigrateH1: Phase A delisted GRTT"));
+            migration.migrate(_cfg(demo, MigrateH1GatedDemoToken.Phase.A));
+            assertFalse(swap.allowedTokens(LIVE_GRTT));
+            assertTrue(swap.allowedTokens(demo) && swap.eip2612Tokens(demo));
+            return;
+        }
+        MigrateH1GatedDemoToken migration = new MigrateH1GatedDemoToken();
+        address first = migration.migrate(_cfg(address(0), MigrateH1GatedDemoToken.Phase.A));
+        uint256 nonce = vm.getNonce(LIVE_OWNER);
+        address second = migration.migrate(_cfg(first, MigrateH1GatedDemoToken.Phase.A));
+        assertEq(second, first);
+        assertEq(vm.getNonce(LIVE_OWNER), nonce, "re-running Phase A sends nothing");
+        assertTrue(swap.allowedTokens(LIVE_GRTT) && swap.allowedTokens(LIVE_GMOCK));
+        assertTrue(swap.eip2612Tokens(first));
+    }
+
+    function test_live_phaseA_resumeAfterCreateOnly() public onlyFork {
+        if (!swap.allowedTokens(LIVE_GRTT)) {
+            GatedDemoToken token = new GatedDemoToken();
+            MigrateH1GatedDemoToken migration = new MigrateH1GatedDemoToken();
+            vm.expectRevert(bytes("MigrateH1: Phase A delisted GRTT"));
+            migration.migrate(_cfg(address(token), MigrateH1GatedDemoToken.Phase.A));
+            assertFalse(swap.eip2612Tokens(address(token)), "revert rolls the allowlist back");
+            return;
+        }
         GatedDemoToken token = new GatedDemoToken();
         assertFalse(swap.eip2612Tokens(address(token)));
         MigrateH1GatedDemoToken migration = new MigrateH1GatedDemoToken();
         uint256 nonce = vm.getNonce(LIVE_OWNER);
-        address deployed = migration.migrate(
-            MigrateH1GatedDemoToken.Config({existingToken: address(token), sender: LIVE_OWNER})
-        );
-        assertEq(deployed, address(token), "resume does not deploy a second token");
-        assertEq(vm.getNonce(LIVE_OWNER), nonce + 3, "resume after CREATE sends the three setters");
-        assertEq(token.totalSupply(), 20 ether);
-        assertTrue(swap.eip2612Tokens(address(token)));
-        assertFalse(swap.allowedTokens(LIVE_GRTT));
-        assertFalse(swap.allowedTokens(LIVE_GMOCK));
-    }
-
-    function test_live_scriptResumeAfterCreateAndAllowlist() public onlyFork {
-        GatedDemoToken token = new GatedDemoToken();
-        vm.prank(LIVE_OWNER);
-        swap.setEip2612Token(address(token), true);
-        MigrateH1GatedDemoToken migration = new MigrateH1GatedDemoToken();
-        uint256 nonce = vm.getNonce(LIVE_OWNER);
-        address deployed = migration.migrate(
-            MigrateH1GatedDemoToken.Config({existingToken: address(token), sender: LIVE_OWNER})
-        );
+        address deployed = migration.migrate(_cfg(address(token), MigrateH1GatedDemoToken.Phase.A));
         assertEq(deployed, address(token));
-        assertEq(vm.getNonce(LIVE_OWNER), nonce + 2, "allowlist already true, so only the two delists");
-        assertTrue(swap.eip2612Tokens(address(token)));
-        assertFalse(swap.allowedTokens(LIVE_GRTT) || swap.allowedTokens(LIVE_GMOCK));
+        assertEq(vm.getNonce(LIVE_OWNER), nonce + 1, "resume after CREATE sends only setEip2612Token");
+        assertTrue(swap.allowedTokens(LIVE_GRTT));
+        assertEq(token.totalSupply(), 20 ether);
     }
 
-    function test_live_scriptFullRerunIsNoop() public onlyFork {
+    function test_live_phaseB_rerunIsNoop() public onlyFork {
+        if (!swap.allowedTokens(LIVE_GRTT)) {
+            _assertPhaseBNoop(_demoToken());
+            return;
+        }
         MigrateH1GatedDemoToken migration = new MigrateH1GatedDemoToken();
-        address first = migration.migrate(
-            MigrateH1GatedDemoToken.Config({existingToken: address(0), sender: LIVE_OWNER})
-        );
+        address deployed = migration.migrate(_cfg(address(0), MigrateH1GatedDemoToken.Phase.A));
+        migration.migrate(_cfg(deployed, MigrateH1GatedDemoToken.Phase.B));
         uint256 nonce = vm.getNonce(LIVE_OWNER);
-        uint256 supply = GatedDemoToken(first).totalSupply();
-        address second = migration.migrate(
-            MigrateH1GatedDemoToken.Config({existingToken: first, sender: LIVE_OWNER})
-        );
-        assertEq(second, first, "full re-run keeps the same token");
-        assertEq(vm.getNonce(LIVE_OWNER), nonce, "full re-run sends no transaction");
-        assertEq(GatedDemoToken(first).totalSupply(), supply);
+        address again = migration.migrate(_cfg(deployed, MigrateH1GatedDemoToken.Phase.B));
+        assertEq(again, deployed);
+        assertEq(vm.getNonce(LIVE_OWNER), nonce, "re-running Phase B sends nothing");
         assertFalse(swap.allowedTokens(LIVE_GRTT) || swap.allowedTokens(LIVE_GMOCK));
+        assertTrue(swap.allowedTokens(deployed) && swap.eip2612Tokens(deployed));
+    }
+
+    function test_live_phaseB_partialResume() public onlyFork {
+        if (!swap.allowedTokens(LIVE_GRTT) && !swap.allowedTokens(LIVE_GMOCK)) {
+            _assertPhaseBNoop(_demoToken());
+            return;
+        }
+        MigrateH1GatedDemoToken migration = new MigrateH1GatedDemoToken();
+        address deployed = migration.migrate(_cfg(address(0), MigrateH1GatedDemoToken.Phase.A));
+        vm.prank(LIVE_OWNER);
+        swap.setTokenAllowed(LIVE_GRTT, false);
+        assertTrue(swap.allowedTokens(LIVE_GMOCK));
+        uint256 nonce = vm.getNonce(LIVE_OWNER);
+        migration.migrate(_cfg(deployed, MigrateH1GatedDemoToken.Phase.B));
+        assertEq(vm.getNonce(LIVE_OWNER), nonce + 1, "skips the token that is already delisted");
+        assertFalse(swap.allowedTokens(LIVE_GRTT) || swap.allowedTokens(LIVE_GMOCK));
+        assertTrue(swap.allowedTokens(deployed) && swap.eip2612Tokens(deployed));
     }
 
     function test_live_scriptExistingTokenWrongSupplyReverts() public onlyFork {
         NotFixedSdemo token = new NotFixedSdemo();
         MigrateH1GatedDemoToken migration = new MigrateH1GatedDemoToken();
         vm.expectRevert(bytes("MigrateH1: EXISTING_TOKEN supply"));
-        migration.migrate(
-            MigrateH1GatedDemoToken.Config({existingToken: address(token), sender: LIVE_OWNER})
-        );
+        migration.migrate(_cfg(address(token), MigrateH1GatedDemoToken.Phase.A));
+    }
+
+    function _cfg(
+        address existingToken,
+        MigrateH1GatedDemoToken.Phase phase
+    ) internal pure returns (MigrateH1GatedDemoToken.Config memory) {
+        return MigrateH1GatedDemoToken.Config({existingToken: existingToken, sender: LIVE_OWNER, phase: phase});
+    }
+
+    /// @dev After Phase B the suite reads `DEMO_TOKEN` instead of requiring GRTT.
+    function _demoToken() internal view returns (address demo) {
+        demo = vm.envOr("DEMO_TOKEN", address(0));
+        assertTrue(demo != address(0), "set DEMO_TOKEN after GRTT is delisted");
+    }
+
+    function _assertPhaseBNoop(
+        address demo
+    ) internal {
+        MigrateH1GatedDemoToken migration = new MigrateH1GatedDemoToken();
+        uint256 nonce = vm.getNonce(LIVE_OWNER);
+        address again = migration.migrate(_cfg(demo, MigrateH1GatedDemoToken.Phase.B));
+        assertEq(again, demo);
+        assertEq(vm.getNonce(LIVE_OWNER), nonce, "Phase B sends nothing once both tokens are delisted");
+        assertFalse(swap.allowedTokens(LIVE_GRTT) || swap.eip2612Tokens(LIVE_GRTT));
+        assertFalse(swap.allowedTokens(LIVE_GMOCK) || swap.eip2612Tokens(LIVE_GMOCK));
+        assertTrue(swap.allowedTokens(demo) && swap.eip2612Tokens(demo));
     }
 
     function _rescue(

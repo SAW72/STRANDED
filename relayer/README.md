@@ -6,7 +6,7 @@ Runtime secrets stay in the environment. Do not put `RELAYER_PRIVATE_KEY` in a f
 
 ## Rescue limits
 
-GRTT can be minted by anyone, and each successful rescue pays gas from the router inventory (up to 0.001 ETH). These limits are a **mitigation** so one wallet or one IP cannot empty that inventory during the hackathon. They are not a substitute for restricting GRTT `mint` or capping router payouts. That change is `GatedDemoToken` ("Stranded Demo Token", symbol SDEMO) plus the owner script in the contracts package. After that script is signed, set `DEMO_TOKEN` (or `TOKEN_ADDRESS`) to the deployed token. Unset, `TOKEN_ADDRESS` stays live GRTT. Do not paste a nonce-predicted address.
+GRTT can be minted by anyone, and each successful rescue pays gas from the router inventory (up to 0.001 ETH). These limits are a **mitigation** so one wallet or one IP cannot empty that inventory during the hackathon. They are not a substitute for restricting GRTT `mint` or capping router payouts. That change is `GatedDemoToken` ("Stranded Demo Token", symbol SDEMO) plus the owner script in the contracts package. After Phase A of that script, set `DEMO_TOKEN` to the SDEMO address from the CREATE receipt and restart. Leave `TOKEN_ADDRESS`. `DEMO_TOKEN` wins. Unset, `TOKEN_ADDRESS` stays live GRTT. Do not paste a nonce-predicted address. Ordered steps: `docs/SDEMO_MIGRATION_RUNBOOK.md`.
 
 Defaults apply when the variables are **unset**, including on the live Render service:
 

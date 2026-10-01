@@ -66,10 +66,18 @@ contract ArbSepoliaLiveTest is Test {
     }
 
     function test_live_allowlists() public onlyFork {
-        assertTrue(swap.allowedTokens(LIVE_GRTT), "GRTT is the demo token");
-        assertTrue(swap.eip2612Tokens(LIVE_GRTT));
-        assertTrue(swap.allowedTokens(LIVE_GMOCK), "gMOCK also allowlisted");
-        assertTrue(swap.eip2612Tokens(LIVE_GMOCK));
+        address demo = vm.envOr("DEMO_TOKEN", address(0));
+        if (swap.allowedTokens(LIVE_GRTT)) {
+            assertTrue(swap.eip2612Tokens(LIVE_GRTT), "GRTT is the demo token");
+            assertTrue(swap.allowedTokens(LIVE_GMOCK), "gMOCK also allowlisted");
+            assertTrue(swap.eip2612Tokens(LIVE_GMOCK));
+        } else {
+            assertFalse(swap.eip2612Tokens(LIVE_GRTT), "GRTT delisted");
+            assertFalse(swap.allowedTokens(LIVE_GMOCK) || swap.eip2612Tokens(LIVE_GMOCK));
+            if (demo != address(0)) {
+                assertTrue(swap.allowedTokens(demo) && swap.eip2612Tokens(demo), "DEMO_TOKEN stays allowlisted");
+            }
+        }
         assertTrue(swap.allowedRouters(LIVE_ROUTER), "locked demo router allowlisted");
         assertGt(LIVE_ROUTER.balance, 0, "locked router still holds ETH");
         assertFalse(swap.allowedRouters(RETIRED_OPEN_ROUTER), "retired open router delisted Oct 1, 2026");
@@ -129,11 +137,19 @@ contract ArbSepoliaLiveTest is Test {
         assertFalse(h.hasCanonicalPermit2Getter);
         assertFalse(h.hasRescueReceipt);
 
-        GasRescueLens.AllowlistCheck memory a = lens.arbDemoAllowlist(LIVE_OWNER, 0);
+        address demo = vm.envOr("DEMO_TOKEN", address(0));
+        bool grttOpen = swap.allowedTokens(LIVE_GRTT);
+        address tokenForLens = grttOpen || demo == address(0) ? LIVE_GRTT : demo;
+        GasRescueLens.AllowlistCheck memory a =
+            lens.allowlistCheck(LIVE_RELAYER, tokenForLens, LIVE_ROUTER, LIVE_OWNER, 0);
         assertTrue(a.relayerAllowed);
-        assertTrue(a.tokenAllowed);
-        assertTrue(a.tokenEip2612);
         assertTrue(a.routerAllowed);
+        if (grttOpen || demo != address(0)) {
+            assertTrue(a.tokenAllowed);
+            assertTrue(a.tokenEip2612);
+        } else {
+            assertFalse(a.tokenAllowed, "GRTT delisted and DEMO_TOKEN unset");
+        }
 
         address dryNative = ArbSepoliaDemoPath.DRY_NATIVE_TO;
         GasRescueLens.HackQuestReport memory hq = lens.hackQuestReport(LIVE_OWNER, 0, 0, dryNative, bytes32(0));
@@ -142,8 +158,13 @@ contract ArbSepoliaLiveTest is Test {
         assertTrue(hq.readiness.permit2Off);
         assertTrue(hq.readiness.notPaused);
         assertTrue(hq.readiness.relayerOk);
-        assertTrue(hq.readiness.tokenAllowed);
-        assertTrue(hq.readiness.tokenEip2612);
+        if (grttOpen) {
+            assertTrue(hq.readiness.tokenAllowed);
+            assertTrue(hq.readiness.tokenEip2612);
+        } else {
+            assertFalse(hq.readiness.tokenAllowed, "default HackQuest report still reads GRTT");
+            assertFalse(hq.readiness.tokenEip2612);
+        }
         assertTrue(hq.readiness.routerAllowed);
         assertFalse(hq.readiness.userFunded, "amountIn 0 is a probe; never funded");
         assertFalse(hq.readiness.ready, "ready requires amountIn>0 plus a real GRTT balance");
