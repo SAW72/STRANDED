@@ -28,7 +28,9 @@ contract GasRescueLens {
     address public constant LIVE_ARB_WETH = 0x980B62Da83eFf3D4576C647993b0c1D7faf17c73;
     address public constant LIVE_ARB_GRTT = 0x5649fF51123D534044aA7E6cBc8762698Ffed713;
     address public constant LIVE_ARB_GMOCK = 0x30006e29a23c713070136F56db1BDf2A8B82B318;
-    address public constant LIVE_ARB_ROUTER = 0x680410c7f64e06EB7e80dc7B5c149f7855e225A8;
+    /// @dev `LockedDemoSwapRouter`, live since the 2026-10-01 migration (0.0195 ETH).
+    ///      Retired open router `0x6804…25A8` (delisted Oct 1, 2026) is not this constant.
+    address public constant LIVE_ARB_ROUTER = 0xFE22f32eF7a8f64B6c9E1CCAe31817B54184f7fc;
     address public constant LIVE_BASE_WETH = 0x4200000000000000000000000000000000000006;
     address public constant LIVE_BASE_TOKEN = 0xE36c35cbF0373D77D00732f7B92dB4fB8fd37166;
     address public constant LIVE_BASE_ROUTER = 0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4;

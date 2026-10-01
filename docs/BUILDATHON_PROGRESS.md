@@ -6,6 +6,8 @@ Dated commits / PRs on this file are the Hacky evidence trail. Prior work on `ma
 
 **Redeploy / broadcast = Spencer keys only.** Agents never hold keys, never `--broadcast`, never submit to HackQuest.
 
+**2026-10-01 read (current):** hot wallet `0x8240124dc78a27c80354Ca813Df12aa2888A9AF6` holds **0.214961419621579600 ETH** (`cast balance`, 2026-10-01). `HackQuestStatus` recommends `live-submit-ok-if-user-funded`. Day notes below keep the 2026-09-17 ~0.015 ETH reading as history. Live demo router is `LockedDemoSwapRouter` `0xFE22f32eF7a8f64B6c9E1CCAe31817B54184f7fc`. Retired open router `0x680410c7f64e06EB7e80dc7B5c149f7855e225A8` (delisted Oct 1, 2026).
+
 ## 2026-09-14 — Wallet UX rebase onto Day-2 main (PR #2)
 
 **PR:** https://github.com/SAW72/STRANDED/pull/2 (branch `cursor/wallet-ux-base-sepolia-0413`)
@@ -38,10 +40,10 @@ No keys. No broadcast. No mainnet.
 | WETH | `0x980B62Da83eFf3D4576C647993b0c1D7faf17c73` |
 | Demo token **GRTT** | `0x5649fF51123D534044aA7E6cBc8762698Ffed713` |
 | Also allowlisted gMOCK | `0x30006e29a23c713070136F56db1BDf2A8B82B318` |
-| Mock router | `0x680410c7f64e06EB7e80dc7B5c149f7855e225A8` |
+| Retired open router (Day-1 mock; delisted Oct 1, 2026) | `0x680410c7f64e06EB7e80dc7B5c149f7855e225A8` |
 | GasRescueLens | _not deployed — Spencer `DeployGasRescueLens` + `--broadcast` only_ |
 
-Live read (2026-09-14): `paused=false`, `permit2=address(0)`, `permit2Enabled=false`, relayer allowlisted, owner ≠ relayer, GRTT + gMOCK EIP-2612 allowlisted, router allowlisted. F-1 `setPermit2` reverts `Permit2Immutable`. Missing vs tip: `CANONICAL_PERMIT2()` getter (F-5) and `rescueReceipt` (registry proof).
+Live read (2026-09-14): `paused=false`, `permit2=address(0)`, `permit2Enabled=false`, relayer allowlisted, owner ≠ relayer, GRTT + gMOCK EIP-2612 allowlisted, the then-live mock router allowlisted. That router is the retired open router in the table above (delisted Oct 1, 2026, 0 ETH). Live router as of 2026-10-01: `LockedDemoSwapRouter` `0xFE22f32eF7a8f64B6c9E1CCAe31817B54184f7fc` (0.0195 ETH, allowlisted). F-1 `setPermit2` reverts `Permit2Immutable`. Missing vs tip: `CANONICAL_PERMIT2()` getter (F-5) and `rescueReceipt` (registry proof).
 
 ### Base Sepolia (documented, not the Day-1 primary)
 
@@ -85,7 +87,7 @@ Judges can cite the **view path** and the documented gap. The judged swap was **
 
 ### Arb Sepolia path (relayer / wallet)
 
-Encoding (live mock router `0x6804…` = `MockSwapRouter.swapExact`):
+Encoding (then-live mock router, retired open router `0x6804…25A8` (delisted Oct 1, 2026) = `MockSwapRouter.swapExact`; `LockedDemoSwapRouter` keeps this selector):
 
 ```
 swapData = abi.encodeWithSelector(swapExact(address,uint256,address), tokenIn, amountSwap, nativeTo)

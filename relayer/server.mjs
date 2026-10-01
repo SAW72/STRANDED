@@ -224,7 +224,7 @@ async function readNativeOut(amountSwap) {
     if (quoted > 0n) return { payAmount: quoted, quoteSource: "locked-demo-router" };
     return { payAmount: 0n, quoteSource: "locked-demo-router" };
   } catch {
-    // Live open MockSwapRouter exposes only a fixed payAmount().
+    // Routers without `quote` (including the retired open MockSwapRouter) expose only a fixed payAmount().
   }
   const payAmount = await publicClient.readContract({
     address: /** @type {`0x${string}`} */ (ROUTER),

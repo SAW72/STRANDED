@@ -14,18 +14,25 @@ import {GasRescueLens} from "../src/GasRescueLens.sol";
 ///
 /// Optional env:
 ///   GAS_RESCUE_SWAP_ADDRESS   default documented live Arb swap
-///   GAS_RESCUE_LENS_ADDRESS   if unset, constructs Lens in-script (not broadcast)
-///   HACKQUEST_USER            readiness user (default fixture 0x1111…)
+///   GAS_RESCUE_LENS_ADDRESS   if unset, constructs Lens in-script (not broadcast).
+///                             That Lens uses `GasRescueLens.LIVE_ARB_ROUTER`
+///                             `0xFE22f32eF7a8f64B6c9E1CCAe31817B54184f7fc`
+///                             (locked demo router, migrated 2026-10-01).
+///   HACKQUEST_USER            readiness user. Default is GRTT holder
+///                             `0x5BFd…BA37` (nonce 0 unused on 2026-10-01).
 ///   HACKQUEST_NONCE           default 0
-///   HACKQUEST_AMOUNT_IN       default 0 = probe (userFunded/ready false; other
-///                             flags still populate). Set >0 for a real-rescue
-///                             preflight (`balanceOf(user) >= amountIn`).
+///   HACKQUEST_AMOUNT_IN       default 1e18 so that holder reports
+///                             `routerAllowed=true` and `ready=true` when the
+///                             locked router is allowlisted. Set 0 for the
+///                             probe (`userFunded` / `ready` stay false).
 ///   HACKQUEST_NATIVE_TO       path-hash recipient (default fixture 0x1111…)
 ///   HACKQUEST_PATH_HASH       optional quoted hash (flags wallet dry 0xbbb…)
 ///
-/// Day-5 JSON (no keys, no broadcast): Day-4 fields plus judge fixture path.
-/// When the live hot wallet is underfunded (~0.015 vs 0.10 ETH),
-/// `recommendedJudgePath=fixture-demo-no-top-up` and `liveSubmitBlocked=true`.
+/// Day-5 JSON (no keys, no broadcast): Day-4 fields plus judge path.
+/// Hot wallet read 2026-10-01 is above the 0.10 ETH floor, so the default
+/// script reports `recommendedJudgePath=live-submit-ok-if-user-funded`.
+/// If the hot wallet later falls under 0.10 ETH, the same script reports
+/// `fixture-demo-no-top-up` and `liveSubmitBlocked=true`.
 /// Do not remake the demo video. Do not rewrite Relayer fee math (#26 owns that).
 contract HackQuestStatus is Script {
     uint256 internal constant BASE_SEPOLIA_CHAIN_ID = 84_532;
@@ -34,6 +41,9 @@ contract HackQuestStatus is Script {
     address internal constant LIVE_BASE_SWAP = 0x21A1ADf810e64B5bd1d530D31abA6856b8DEf688;
     address internal constant LIVE_RELAYER = 0x8240124dc78a27c80354Ca813Df12aa2888A9AF6;
     address internal constant DRY_NATIVE_TO = 0x1111111111111111111111111111111111111111;
+    /// @dev GRTT holder used for the default funded preflight (read 2026-10-01).
+    address internal constant DEMO_GRTT_HOLDER = 0x5BFd261b1eF7e61Bfea1ebfC87bDD8F4244BBA37;
+    uint256 internal constant DEMO_AMOUNT_IN = 1 ether;
     /// @dev Spencer / Chain Ops target before a live `rescueWithPermit` submit.
     uint256 internal constant HOT_WALLET_MIN_WEI = 0.10 ether;
     /// @dev Issue #24 Tokenomics: MATCH current Relayer numbers. USD-hybrid is
@@ -49,9 +59,9 @@ contract HackQuestStatus is Script {
 
     function run() external {
         _requireTestnet();
-        address user = vm.envOr("HACKQUEST_USER", DRY_NATIVE_TO);
+        address user = vm.envOr("HACKQUEST_USER", DEMO_GRTT_HOLDER);
         uint256 nonce = vm.envOr("HACKQUEST_NONCE", uint256(0));
-        uint256 amountIn = vm.envOr("HACKQUEST_AMOUNT_IN", uint256(0));
+        uint256 amountIn = vm.envOr("HACKQUEST_AMOUNT_IN", DEMO_AMOUNT_IN);
         address nativeTo = vm.envOr("HACKQUEST_NATIVE_TO", DRY_NATIVE_TO);
         bytes32 quoted = vm.envOr("HACKQUEST_PATH_HASH", bytes32(0));
 

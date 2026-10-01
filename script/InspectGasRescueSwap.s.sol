@@ -11,8 +11,9 @@ import {IGasRescueSwapViews} from "../src/interfaces/IGasRescueSwapViews.sol";
 ///     --rpc-url "$ARB_SEPOLIA_RPC_URL" --chain-id 421614
 ///
 /// Optional env: GAS_RESCUE_SWAP_ADDRESS (defaults to documented live swap for the chain).
-/// Day-5: also prints hot-wallet underfund and the recommended fixture/demo
-/// judge path so a live submit is not implied when the hot key is ~0.015 ETH.
+/// Day-5: also prints hot-wallet underfund and the recommended judge path.
+/// The floor is 0.10 ETH. The 2026-10-01 balance is above that floor, so the
+/// script reports `live-submit-ok-if-user-funded`. The 2026-09-17 reading was ~0.015 ETH.
 contract InspectGasRescueSwap is Script {
     uint256 internal constant BASE_SEPOLIA_CHAIN_ID = 84_532;
     uint256 internal constant ARB_SEPOLIA_CHAIN_ID = 421_614;
@@ -21,7 +22,10 @@ contract InspectGasRescueSwap is Script {
     address internal constant LIVE_RELAYER = 0x8240124dc78a27c80354Ca813Df12aa2888A9AF6;
     address internal constant LIVE_ARB_GRTT = 0x5649fF51123D534044aA7E6cBc8762698Ffed713;
     address internal constant LIVE_ARB_GMOCK = 0x30006e29a23c713070136F56db1BDf2A8B82B318;
-    address internal constant LIVE_ARB_ROUTER = 0x680410c7f64e06EB7e80dc7B5c149f7855e225A8;
+    /// @dev Live `LockedDemoSwapRouter` after the 2026-10-01 migration.
+    address internal constant LIVE_ARB_ROUTER = 0xFE22f32eF7a8f64B6c9E1CCAe31817B54184f7fc;
+    /// @dev Retired open `MockSwapRouter`, delisted Oct 1, 2026. Balance 0.
+    address internal constant RETIRED_OPEN_ROUTER = 0x680410c7f64e06EB7e80dc7B5c149f7855e225A8;
     address internal constant LIVE_BASE_TOKEN = 0xE36c35cbF0373D77D00732f7B92dB4fB8fd37166;
     address internal constant LIVE_BASE_ROUTER = 0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4;
     bytes4 internal constant PERMIT2_IMMUTABLE_SELECTOR = 0xe8d9f070;
@@ -74,7 +78,12 @@ contract InspectGasRescueSwap is Script {
             console2.log("GRTT allowed     ", swap.allowedTokens(LIVE_ARB_GRTT));
             console2.log("GRTT eip2612     ", swap.eip2612Tokens(LIVE_ARB_GRTT));
             console2.log("gMOCK allowed    ", swap.allowedTokens(LIVE_ARB_GMOCK));
+            console2.log("router           ", LIVE_ARB_ROUTER);
             console2.log("router allowed   ", swap.allowedRouters(LIVE_ARB_ROUTER));
+            console2.log("router wei       ", LIVE_ARB_ROUTER.balance);
+            console2.log("retired router   ", RETIRED_OPEN_ROUTER);
+            console2.log("retired allowed  ", swap.allowedRouters(RETIRED_OPEN_ROUTER));
+            console2.log("retired wei      ", RETIRED_OPEN_ROUTER.balance);
         } else {
             console2.log("token allowed    ", swap.allowedTokens(LIVE_BASE_TOKEN));
             console2.log("token eip2612    ", swap.eip2612Tokens(LIVE_BASE_TOKEN));

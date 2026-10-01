@@ -25,12 +25,10 @@ library ArbSepoliaDemoPath {
     address internal constant WETH = 0x980B62Da83eFf3D4576C647993b0c1D7faf17c73;
     address internal constant GRTT = 0x5649fF51123D534044aA7E6cBc8762698Ffed713;
     address internal constant GMOCK = 0x30006e29a23c713070136F56db1BDf2A8B82B318;
-    /// @dev Live open `MockSwapRouter` (setters are permissionless on this
-    ///      deployment). `LockedDemoSwapRouter` keeps this `swapExact` selector.
-    ///      Allowlist the replacement via `script/DeployLockedDemoSwapRouter.s.sol`
-    ///      before treating router inventory as safe. Do not change this constant
-    ///      until that broadcast lands.
-    address internal constant ROUTER = 0x680410c7f64e06EB7e80dc7B5c149f7855e225A8;
+    /// @dev Live `LockedDemoSwapRouter` `0xFE22…f7fc` (migrated 2026-10-01, 0.0195 ETH).
+    ///      Keeps the `swapExact` selector. Retired open router `0x6804…25A8`
+    ///      (delisted Oct 1, 2026) is not this constant.
+    address internal constant ROUTER = 0xFE22f32eF7a8f64B6c9E1CCAe31817B54184f7fc;
 
     /// @dev Fixture-only user / nativeTo used by wallet dry mocks. Not a live EOA.
     address internal constant DRY_NATIVE_TO = 0x1111111111111111111111111111111111111111;
@@ -40,7 +38,7 @@ library ArbSepoliaDemoPath {
     uint256 internal constant DEMO_FEE_AMOUNT = 0.01 ether;
     uint256 internal constant DEMO_AMOUNT_REMAINDER = 0.79 ether;
 
-    /// @dev `swapExact(address,uint256,address)` — live mock router + `MockSwapRouter`.
+    /// @dev `swapExact(address,uint256,address)` — live locked router + `MockSwapRouter`.
     bytes4 internal constant SWAP_EXACT_SELECTOR = bytes4(keccak256("swapExact(address,uint256,address)"));
 
     /// @dev Wallet / Relayer dry-mock placeholder. Fails `PathMismatch` on-chain.

@@ -26,7 +26,7 @@ export const ARB_SEPOLIA_DEPLOY = {
   tokenSymbol: "GRTT",
   feeTo: "0x30466A210961c0C2C13AF0A9d35dfC6E8858bA9D",
   gasRescue: "0x65e712222745A8FCCbF038A90Fa75caB0867993D",
-  router: "0x680410c7f64e06EB7e80dc7B5c149f7855e225A8",
+  router: "0xFE22f32eF7a8f64B6c9E1CCAe31817B54184f7fc",
 } as const;
 
 /** Relayer dry-mock amounts: 1e18 in, 0.2e18 swap, 0.01e18 fee, 0.79e18 remainder. */
