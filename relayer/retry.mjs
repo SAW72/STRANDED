@@ -32,6 +32,9 @@ const PERMANENT_MARKERS = [
   "user rejected",
   "user denied",
   "simulation_failed",
+  "execution reverted",
+  "executionrevertederror",
+  "contractfunctionrevertederror",
 ];
 
 const TRANSIENT_MARKERS = [
@@ -55,8 +58,13 @@ const TRANSIENT_MARKERS = [
   "internal json-rpc",
   "header not found",
   "nonce too low",
+  "noncetoolow",
+  "lower than the current nonce",
   "nonce has already been used",
   "nonce_expired",
+  "nonce-expired",
+  "nonce expired",
+  "nonceexpired",
   "replacement transaction underpriced",
   "replacement underpriced",
   "already known",
@@ -65,28 +73,70 @@ const TRANSIENT_MARKERS = [
   "server error",
 ];
 
+function pushPart(parts, value) {
+  if (value === undefined || value === null || value === "") return;
+  if (typeof value === "string" || typeof value === "number" || typeof value === "bigint") {
+    parts.push(String(value));
+  }
+}
+
+function pushError(parts, err) {
+  if (!err || typeof err !== "object") return;
+  pushPart(parts, err.shortMessage);
+  pushPart(parts, err.details);
+  pushPart(parts, err.message);
+  pushPart(parts, err.name);
+  pushPart(parts, err.code);
+  pushPart(parts, err.errorName);
+  if (Array.isArray(err.metaMessages)) {
+    for (const line of err.metaMessages) pushPart(parts, line);
+  }
+}
+
+/**
+ * viem BaseError.walk(fn) requires a predicate. walk(true) throws
+ * TypeError ("fn is not a function" / "true is not a function") and used to
+ * abort the retry loop. Walk the cause chain with a predicate, and if walk
+ * itself throws, fall back to this error's own fields.
+ */
 function blob(err) {
-  if (!err) return "";
-  const parts = [
-    err.shortMessage,
-    err.details,
-    err.walk?.(true)?.message,
-    err.message,
-    err.name,
-    err.code,
-    err.cause?.message,
-    err.cause?.code,
-  ];
-  return parts
-    .filter((p) => p !== undefined && p !== null)
-    .join(" ")
-    .toLowerCase();
+  if (!err || typeof err !== "object") return "";
+  const parts = [];
+  let walked = false;
+  if (typeof err.walk === "function") {
+    try {
+      err.walk((inner) => {
+        walked = true;
+        pushError(parts, inner);
+        return false;
+      });
+    } catch {
+      walked = false;
+      parts.length = 0;
+    }
+  }
+  if (!walked) {
+    pushError(parts, err);
+    if (err.cause && typeof err.cause === "object") pushError(parts, err.cause);
+  }
+  return parts.join(" ").toLowerCase();
+}
+
+/**
+ * "expired" is a permanent marker, and it is also a substring of
+ * nonce_expired / nonce-expired. Strip that nonce family before the
+ * permanent scan so those cases stay transient and are retried. Other
+ * "expired" errors (deadline, order) stay permanent.
+ */
+function withoutNonceExpiry(text) {
+  return text.replace(/nonce[_\-\s]?expired/g, " ");
 }
 
 export function isTransientBroadcastError(err) {
   const text = blob(err);
   if (!text) return false;
-  if (PERMANENT_MARKERS.some((m) => text.includes(m))) return false;
+  const permanentText = withoutNonceExpiry(text);
+  if (PERMANENT_MARKERS.some((m) => permanentText.includes(m))) return false;
   return TRANSIENT_MARKERS.some((m) => text.includes(m));
 }
 
@@ -116,7 +166,12 @@ export async function withBroadcastRetry(fn, opts = {}) {
       return await fn(attempt);
     } catch (err) {
       lastErr = err;
-      const transient = isTransientBroadcastError(err);
+      let transient = false;
+      try {
+        transient = isTransientBroadcastError(err);
+      } catch {
+        transient = false;
+      }
       const delayMs = attempt < maxAttempts && transient ? backoffMs(attempt, baseDelayMs) : 0;
       const message = err && (err.shortMessage || err.message || String(err));
       log({
@@ -125,7 +180,9 @@ export async function withBroadcastRetry(fn, opts = {}) {
         maxAttempts,
         transient,
         delayMs,
-        message: String(message || "unknown").slice(0, 240),
+        message: String(message || "unknown")
+          .replace(/https?:\/\/\S+/gi, "[url]")
+          .slice(0, 240),
       });
       if (!transient || attempt === maxAttempts) {
         throw err;
