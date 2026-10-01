@@ -50,6 +50,7 @@ import {
   ROUTER_HELPER,
   ROUTER_LABEL,
   SAMPLE_BADGE,
+  SAMPLE_MODE_NOTE,
   SIGN_LOCKED,
   SIGN_LOCKED_MISSING,
   SUBMIT_RESCUE_ERROR,
@@ -107,6 +108,7 @@ import { fetchRescueQuote, hasRequiredQuoteFields, type QuoteSource, type Rescue
 import { receiptFromSubmit, type RescueReceiptView } from "./lib/receipt";
 import { submitRescue } from "./lib/rescues";
 import { RescueReceipt } from "./RescueReceipt";
+import { demoBannerText, tokenDisclosure } from "./lib/tokenDisclosure";
 import {
   StrandedCelebration,
   StrandedHero,
@@ -342,6 +344,12 @@ export function App() {
     errorMessage: quoteUserMessage,
   });
 
+  const demoSymbol =
+    (typeof tokenSymbol === "string" ? tokenSymbol : null) ??
+    quote?.tokenSymbol ??
+    receipt?.tokenSymbol ??
+    null;
+
   const phase = rescuePhase({
     quote: quoteReady ? quote : null,
     detailsConfirmed,
@@ -540,6 +548,9 @@ export function App() {
 
   return (
     <main className="app">
+      <p className="demo-banner" role="note">
+        {demoBannerText(demoSymbol)}
+      </p>
       <StrandedCelebration kind={celebration} onDone={() => setCelebration(null)} />
       <StrandedHero onPlay={() => setCelebration("rescue")} />
 
@@ -645,15 +656,11 @@ export function App() {
             disabled={useFixture}
           />
         </label>
-        {useFixture && (
-          <p className="muted">
-            Sample mode uses the fixture amounts below. Entering a live amount is disabled so we do
-            not invent a Relayer price.
-          </p>
-        )}
+        {useFixture && <p className="muted">{SAMPLE_MODE_NOTE}</p>}
         <button className="btn" type="button" disabled={tokenBalance === undefined || useFixture} onClick={() => void fillMax()}>
           Use full balance
         </button>
+        <p className="token-disclosure">{tokenDisclosure(demoSymbol)}</p>
       </section>
 
       {receipt ? (
@@ -666,6 +673,7 @@ export function App() {
       <section className="card">
         <h2>4. {REVIEW_TITLE}</h2>
         <p className="subtitle">{REVIEW_SUBTITLE}</p>
+        <p className="token-disclosure">{tokenDisclosure(demoSymbol)}</p>
 
         {quoteSource === "fixture" && (
           <div className="banner banner-sample" role="status">

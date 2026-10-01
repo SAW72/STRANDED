@@ -17,6 +17,7 @@ import {
 import { CopyValue } from "./CopyValue";
 import { formatNativeOut, formatTokenAmountWithSymbol } from "./lib/format";
 import type { RescueReceiptView } from "./lib/receipt";
+import { tokenDisclosure } from "./lib/tokenDisclosure";
 
 function Row({ label, value, help }: { label: string; value: ReactNode; help: string }) {
   return (
@@ -42,6 +43,7 @@ export function RescueReceipt({
     <section className="card" data-testid="rescue-receipt" aria-live="polite">
       <h2>{RECEIPT_TITLE}</h2>
       <p className="subtitle">{RECEIPT_SUBTITLE}</p>
+      <p className="token-disclosure">{tokenDisclosure(symbol)}</p>
       <div className="banner banner-ok" role="status">
         {RECEIPT_TITLE}
       </div>
