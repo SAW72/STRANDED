@@ -25,6 +25,11 @@ library ArbSepoliaDemoPath {
     address internal constant WETH = 0x980B62Da83eFf3D4576C647993b0c1D7faf17c73;
     address internal constant GRTT = 0x5649fF51123D534044aA7E6cBc8762698Ffed713;
     address internal constant GMOCK = 0x30006e29a23c713070136F56db1BDf2A8B82B318;
+    /// @dev Live open `MockSwapRouter` (setters are permissionless on this
+    ///      deployment). `LockedDemoSwapRouter` keeps this `swapExact` selector.
+    ///      Allowlist the replacement via `script/DeployLockedDemoSwapRouter.s.sol`
+    ///      before treating router inventory as safe. Do not change this constant
+    ///      until that broadcast lands.
     address internal constant ROUTER = 0x680410c7f64e06EB7e80dc7B5c149f7855e225A8;
 
     /// @dev Fixture-only user / nativeTo used by wallet dry mocks. Not a live EOA.

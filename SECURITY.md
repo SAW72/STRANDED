@@ -20,6 +20,14 @@ The long write-up is [docs/AUDIT-FINDINGS.md](docs/AUDIT-FINDINGS.md) (2026-09-0
 
 [docs/AUDIT-FINDINGS.md](docs/AUDIT-FINDINGS.md) Finding 1 said a 1-wei `tokenIn` donation permanently halted rescues of that token, because `_sweepDust` did not move `tokenIn`. On this HEAD `_sweepDust` does move it, and both entrypoints call that sweep before the pull. Do not treat Finding 1 as open.
 
+## Live demo router (Arb Sepolia)
+
+The judged rescue is still `GasRescueSwap` `0x65e712222745A8FCCbF038A90Fa75caB0867993D`. Its allowlisted demo router `0x680410c7f64e06EB7e80dc7B5c149f7855e225A8` is the open `MockSwapRouter`. On 2026-10-01 it held **0.0195 ETH** and `payAmount()` was **0.0001 ETH**. `setPayAmount` has no access control. `swapExact` pays that amount even when `amountIn` is 0, so anyone can take the inventory. If it is emptied, every live rescue quote fails.
+
+`LockedDemoSwapRouter` is the replacement. Only the rescue contract may call `swapExact`. The call pulls the tokens (short deliveries revert). ETH paid back to the rescue is `amountIn * rate / denominator`, capped by `maxPayout`. Settings and `withdrawEth` are owner-only. `test_nonOwnerCannotDrain` covers a stranger calling the setters, `withdrawEth`, and `swapExact`.
+
+The open deployment cannot be upgraded. The owner broadcasts `script/DeployLockedDemoSwapRouter.s.sol` (testnet only, no agent `--broadcast`). That script moves the open router's ETH into the new router and flips the allowlist. Source `MockSwapRouter` setters are `onlyOwner`, and a zero-token swap reverts, so a future mock deploy is not open the same way.
+
 ## Still open
 
 - Permit2 unit tests use a mock that accepts any signature. They do not prove a wallet digest would verify on canonical Permit2. The production witness type string was checked by hand; a fork test is still the gap (AUDIT-FINDINGS Finding 2).

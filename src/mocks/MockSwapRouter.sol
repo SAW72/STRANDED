@@ -1,13 +1,18 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 import {IWETH} from "../interfaces/IWETH.sol";
 
-/// @dev Minimal router: pulls `tokenIn` and pays native or WETH per `payAmount`.
+/// @dev Test double for `GasRescueSwap`. The live Arb Sepolia deployment of
+///      this contract had open setters, so anyone could set `payAmount` to
+///      the balance and call `swapExact` with `amountIn = 0` to take the ETH.
+///      Setters are owner-only (deployer). A swap that would take zero tokens
+///      reverts. Production demo inventory belongs on `LockedDemoSwapRouter`.
 ///      `pathHash` in tests is `keccak256` of the `swapExact` calldata.
-contract MockSwapRouter {
+contract MockSwapRouter is Ownable {
     uint256 public payAmount;
     bool public payAsWeth;
     IWETH public weth;
@@ -18,18 +23,20 @@ contract MockSwapRouter {
     address public attackTarget;
     bytes public attackCalldata;
 
+    constructor() Ownable(msg.sender) {}
+
     receive() external payable {}
 
     function setPayAmount(
         uint256 amount
-    ) external {
+    ) external onlyOwner {
         payAmount = amount;
     }
 
     function setPayAsWeth(
         bool enabled,
         address weth_
-    ) external {
+    ) external onlyOwner {
         payAsWeth = enabled;
         weth = IWETH(weth_);
     }
@@ -37,7 +44,7 @@ contract MockSwapRouter {
     function configureReenter(
         address target,
         bytes calldata data
-    ) external {
+    ) external onlyOwner {
         reenter = true;
         attackTarget = target;
         attackCalldata = data;
@@ -45,7 +52,7 @@ contract MockSwapRouter {
 
     function setPullAmount(
         uint256 amount
-    ) external {
+    ) external onlyOwner {
         customPull = true;
         pullAmount = amount;
     }
@@ -62,9 +69,8 @@ contract MockSwapRouter {
         }
 
         uint256 take = customPull ? pullAmount : amountIn;
-        if (take > 0) {
-            require(IERC20(tokenIn).transferFrom(msg.sender, address(this), take), "pull failed");
-        }
+        require(take > 0, "tokens required");
+        require(IERC20(tokenIn).transferFrom(msg.sender, address(this), take), "pull failed");
 
         uint256 amount = payAmount;
         if (payAsWeth) {
