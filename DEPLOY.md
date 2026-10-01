@@ -10,7 +10,7 @@ The wallet host is a Render static site named `stranded`, built from `render.yam
 
 Use the wallet at https://strandedtoken.trade. `www.strandedtoken.trade` redirects to that apex.
 
-https://gas-rescue.onrender.com is only the Render origin host for the static site. The live relayer's CORS allowlist is `https://strandedtoken.trade` alone, so a page opened on `gas-rescue.onrender.com` gets no `Access-Control-Allow-Origin` and rescue requests from it are blocked.
+https://gas-rescue.onrender.com is only the Render origin host for the static site. The live relayer's CORS allowlist is `https://strandedtoken.trade`, `http://localhost:5173`, and `http://127.0.0.1:5173` (the last two are for local Vite dev). A page opened on `gas-rescue.onrender.com` gets no `Access-Control-Allow-Origin` and rescue requests from it are blocked.
 
 The Arb Sepolia Relayer is the web service `stranded-relayer-arb` at https://stranded-relayer-arb.onrender.com.
 
@@ -30,10 +30,10 @@ The wallet must be used at https://strandedtoken.trade. https://gas-rescue.onren
 On **stranded-relayer-arb**:
 
 - `RELAYER_PRIVATE_KEY` — 32-byte hex private key of the allowlisted relayer (`0x8240…9AF6`). Include `0x` or not; the server normalizes it. Never paste the address. Never commit it.
-- `CORS_ORIGINS` — comma-separated, no trailing slash. The live relayer allows only the wallet origin:
+- `CORS_ORIGINS` — comma-separated, no trailing slash. The live relayer allows the production wallet origin and the local Vite dev origins:
 
 ```
-https://strandedtoken.trade
+https://strandedtoken.trade,http://localhost:5173,http://127.0.0.1:5173
 ```
 
 Do not add `https://gas-rescue.onrender.com`. That host is not on the allowlist, and rescue requests from it are blocked. CORS is read at boot, so restart the Relayer after any change.
