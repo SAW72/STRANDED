@@ -62,6 +62,9 @@ const TRANSIENT_MARKERS = [
   "lower than the current nonce",
   "nonce has already been used",
   "nonce_expired",
+  "nonce-expired",
+  "nonce expired",
+  "nonceexpired",
   "replacement transaction underpriced",
   "replacement underpriced",
   "already known",
@@ -119,10 +122,21 @@ function blob(err) {
   return parts.join(" ").toLowerCase();
 }
 
+/**
+ * "expired" is a permanent marker, and it is also a substring of
+ * nonce_expired / nonce-expired. Strip that nonce family before the
+ * permanent scan so those cases stay transient and are retried. Other
+ * "expired" errors (deadline, order) stay permanent.
+ */
+function withoutNonceExpiry(text) {
+  return text.replace(/nonce[_\-\s]?expired/g, " ");
+}
+
 export function isTransientBroadcastError(err) {
   const text = blob(err);
   if (!text) return false;
-  if (PERMANENT_MARKERS.some((m) => text.includes(m))) return false;
+  const permanentText = withoutNonceExpiry(text);
+  if (PERMANENT_MARKERS.some((m) => permanentText.includes(m))) return false;
   return TRANSIENT_MARKERS.some((m) => text.includes(m));
 }
 

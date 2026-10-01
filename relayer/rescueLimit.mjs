@@ -1,5 +1,6 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { ipBucketKey } from "./clientIp.mjs";
 import { fail } from "./httpError.mjs";
 import { isAddress } from "./quoteRequest.mjs";
 
@@ -146,7 +147,7 @@ export function createRescueLimiter(opts = {}) {
     const atMs = now();
     prune(atMs);
     const wKey = walletKey(wallet);
-    const ipKey = ip ? String(ip) : "";
+    const ipKey = ipBucketKey(ip);
     const walletEvents = events.filter((event) => event.wallet === wKey);
     const ipEvents = ipKey ? events.filter((event) => event.ip === ipKey) : [];
     if (config.perWallet != null && walletEvents.length >= config.perWallet) {
@@ -203,7 +204,7 @@ export function createRescueLimiter(opts = {}) {
         .filter(validStoredEvent)
         .map((event) => ({
           wallet: walletKey(event.wallet),
-          ip: typeof event.ip === "string" ? event.ip : "",
+          ip: typeof event.ip === "string" ? ipBucketKey(event.ip) : "",
           atMs: event.atMs,
         }));
       prune(now());
@@ -236,7 +237,7 @@ export function createRescueLimiter(opts = {}) {
     const decision = evaluate(wallet, ip);
     if (decision.limited) return { ok: false, decision };
     const wKey = walletKey(wallet);
-    const ipKey = ip ? String(ip) : "";
+    const ipKey = ipBucketKey(ip);
     if (config.perWallet != null) bump(inflightWallet, wKey);
     if (config.perIp != null && ipKey) bump(inflightIp, ipKey);
     let done = false;

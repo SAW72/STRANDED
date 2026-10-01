@@ -12,11 +12,15 @@
  * Cloudflare address shared by many visitors, so keying on it would throttle
  * unrelated judges together.
  *
- * Prefer CF-Connecting-IP / True-Client-IP when Cloudflare set a single IP.
- * Otherwise walk X-Forwarded-For from the right and skip
+ * Prefer CF-Connecting-IP when Cloudflare set a single IP. True-Client-IP is
+ * not a fallback: Cloudflare sets it only on Enterprise, so a client can
+ * supply it. Otherwise walk X-Forwarded-For from the right and skip
  * TRUSTED_PROXY_HOPS platform addresses (default 1, the Cloudflare hop).
  * A chain that is shorter than that suffix is a direct connection: use the
  * rightmost hop, not the leftmost.
+ *
+ * IPv6 rate-limit keys are the /64 prefix. IPv4, including IPv4-mapped IPv6
+ * (::ffff:a.b.c.d), stays one bucket per address.
  */
 
 const DISABLED_HOPS = new Set(["off", "false", "none"]);
@@ -28,24 +32,104 @@ function headerValue(req, name) {
   return String(value);
 }
 
-export function normalizeIp(raw) {
-  if (raw == null) return "";
+function parseIpv4(s) {
+  const parts = s.split(".");
+  if (parts.length !== 4) return null;
+  const nums = [];
+  for (const part of parts) {
+    if (!/^\d{1,3}$/.test(part)) return null;
+    const n = Number(part);
+    if (n > 255) return null;
+    nums.push(n);
+  }
+  return nums;
+}
+
+function stripIpDecorations(raw) {
   let s = String(raw).trim().replace(/^"|"$/g, "");
   if (!s) return "";
-  if (s.startsWith("[") && s.endsWith("]")) s = s.slice(1, -1);
+  const bracketed = s.match(/^\[([^\]]+)\](?::\d+)?$/);
+  if (bracketed) s = bracketed[1];
+  else {
+    const v4Port = s.match(/^(\d{1,3}(?:\.\d{1,3}){3}):\d+$/);
+    if (v4Port) s = v4Port[1];
+  }
   const zone = s.indexOf("%");
   if (zone !== -1) s = s.slice(0, zone);
-  if (s.toLowerCase().startsWith("::ffff:")) s = s.slice(7);
-  if (/^\d{1,3}(?:\.\d{1,3}){3}$/.test(s)) {
-    const ok = s.split(".").every((part) => {
-      if (!/^\d{1,3}$/.test(part)) return false;
-      const n = Number(part);
-      return n >= 0 && n <= 255;
-    });
-    return ok ? s : "";
+  return s;
+}
+
+/**
+ * Canonical address. IPv6 is eight lowercase groups with :: expanded.
+ * IPv4-mapped IPv6 (::ffff:a.b.c.d and the hex form) is the IPv4 address.
+ * Brackets, a trailing port, and a zone id are stripped. Empty if invalid.
+ */
+export function normalizeIp(raw) {
+  if (raw == null) return "";
+  const s = stripIpDecorations(raw);
+  if (!s) return "";
+
+  let body = s;
+  if (s.includes(".")) {
+    const lastColon = s.lastIndexOf(":");
+    const v4part = lastColon === -1 ? s : s.slice(lastColon + 1);
+    const nums = parseIpv4(v4part);
+    if (!nums) return "";
+    if (lastColon === -1) return nums.join(".");
+    const hi = ((nums[0] << 8) | nums[1]).toString(16);
+    const lo = ((nums[2] << 8) | nums[3]).toString(16);
+    body = `${s.slice(0, lastColon + 1)}${hi}:${lo}`;
   }
-  if (s.includes(":") && /^[0-9a-f:]+$/i.test(s) && s.length <= 45) return s.toLowerCase();
-  return "";
+
+  body = body.toLowerCase();
+  if (!body.includes(":") || !/^[0-9a-f:]+$/.test(body) || body.length > 45) return "";
+  if ((body.match(/::/g) || []).length > 1) return "";
+
+  let head = [];
+  let tail = [];
+  if (body.includes("::")) {
+    const [h, t] = body.split("::");
+    head = h ? h.split(":") : [];
+    tail = t ? t.split(":") : [];
+  } else {
+    head = body.split(":");
+  }
+  const groupsOk = (groups) => groups.every((g) => g.length >= 1 && g.length <= 4 && /^[0-9a-f]+$/.test(g));
+  if (!groupsOk(head) || !groupsOk(tail)) return "";
+  const missing = 8 - head.length - tail.length;
+  if (body.includes("::")) {
+    if (missing < 1) return "";
+  } else if (missing !== 0) {
+    return "";
+  }
+  const groups = [...head, ...Array(missing).fill("0"), ...tail].map((g) => g.padStart(4, "0"));
+  if (groups.length !== 8) return "";
+  const mapped =
+    groups[0] === "0000" &&
+    groups[1] === "0000" &&
+    groups[2] === "0000" &&
+    groups[3] === "0000" &&
+    groups[4] === "0000" &&
+    groups[5] === "ffff";
+  if (mapped) {
+    const hi = Number.parseInt(groups[6], 16);
+    const lo = Number.parseInt(groups[7], 16);
+    return `${(hi >> 8) & 255}.${hi & 255}.${(lo >> 8) & 255}.${lo & 255}`;
+  }
+  return groups.join(":");
+}
+
+/**
+ * Rate-limit key. IPv4 (and IPv4-mapped IPv6) is the address itself.
+ * IPv6 is the expanded /64 network address, so two hosts in one prefix share it.
+ */
+export function ipBucketKey(raw) {
+  const ip = normalizeIp(raw);
+  if (!ip) return "";
+  if (!ip.includes(":")) return ip;
+  const groups = ip.split(":");
+  if (groups.length !== 8) return "";
+  return `${groups[0]}:${groups[1]}:${groups[2]}:${groups[3]}:0000:0000:0000:0000`;
 }
 
 /** @param {string | undefined} raw */
@@ -78,7 +162,7 @@ function singleClientHeader(req, name) {
  * @param {{ trustedProxyHops?: number }} [opts]
  */
 export function clientIp(req, opts = {}) {
-  const cf = singleClientHeader(req, "cf-connecting-ip") || singleClientHeader(req, "true-client-ip");
+  const cf = singleClientHeader(req, "cf-connecting-ip");
   if (cf) return cf;
 
   const hops = Number.isInteger(opts.trustedProxyHops) ? opts.trustedProxyHops : 1;

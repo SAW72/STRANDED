@@ -140,6 +140,52 @@ describe("broadcast retry bounds", () => {
     assert.equal(n, 3);
   });
 
+  it("retries nonce_expired and nonce-expired but not other expired errors", async () => {
+    assert.equal(isTransientBroadcastError(new Error("nonce_expired")), true);
+    assert.equal(isTransientBroadcastError(new Error("nonce-expired")), true);
+    assert.equal(isTransientBroadcastError(new Error("Nonce expired")), true);
+    assert.equal(isTransientBroadcastError(new Error("deadline expired")), false);
+    assert.equal(isTransientBroadcastError(new Error("OrderExpired")), false);
+
+    let n = 0;
+    const hash = await withBroadcastRetry(
+      async () => {
+        n += 1;
+        if (n < 2) throw new Error("nonce_expired");
+        return "0xabc";
+      },
+      { maxAttempts: 3, baseDelayMs: 1, sleep: async () => {} },
+    );
+    assert.equal(hash, "0xabc");
+    assert.equal(n, 2);
+
+    let dashed = 0;
+    const dashedHash = await withBroadcastRetry(
+      async () => {
+        dashed += 1;
+        if (dashed < 2) throw new Error("nonce-expired");
+        return "0xdef";
+      },
+      { maxAttempts: 3, baseDelayMs: 1, sleep: async () => {} },
+    );
+    assert.equal(dashedHash, "0xdef");
+    assert.equal(dashed, 2);
+
+    let permanent = 0;
+    await assert.rejects(
+      () =>
+        withBroadcastRetry(
+          async () => {
+            permanent += 1;
+            throw new Error("deadline expired");
+          },
+          { maxAttempts: 4, sleep: async () => assert.fail("should not sleep") },
+        ),
+      /deadline expired/,
+    );
+    assert.equal(permanent, 1);
+  });
+
   it("does not retry viem contract reverts", async () => {
     const reverted = new ContractFunctionRevertedError({
       abi: [],

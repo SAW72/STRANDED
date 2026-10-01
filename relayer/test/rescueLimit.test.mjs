@@ -121,6 +121,36 @@ describe("rescue limiter", () => {
     assert.equal(otherIp.ok, true);
   });
 
+  it("shares one IPv6 bucket inside a /64 and separates different prefixes", async () => {
+    const { created } = limiter({ config: { perWallet: 10, perIp: 1, windowMs: 1000 } });
+    await created.ready;
+    const first = await created.begin(USER, "2001:db8:1:2::1");
+    assert.equal(first.ok, true);
+    await first.finish(true);
+
+    const samePrefix = await created.begin(OTHER, "[2001:DB8:1:2:ffff::ffff%eth0]:443");
+    assert.equal(samePrefix.ok, false);
+    assert.equal(samePrefix.decision.code, "rate_limited_ip");
+
+    const otherPrefix = await created.begin("0x3333333333333333333333333333333333333333", "2001:db8:1:3::1");
+    assert.equal(otherPrefix.ok, true);
+  });
+
+  it("buckets IPv4-mapped IPv6 as the IPv4 address", async () => {
+    const { created } = limiter({ config: { perWallet: 10, perIp: 1, windowMs: 1000 } });
+    await created.ready;
+    const mapped = await created.begin(USER, "::ffff:203.0.113.9");
+    assert.equal(mapped.ok, true);
+    await mapped.finish(true);
+
+    const same = await created.begin(OTHER, "203.0.113.9");
+    assert.equal(same.ok, false);
+    assert.equal(same.decision.code, "rate_limited_ip");
+
+    const other = await created.begin("0x3333333333333333333333333333333333333333", "::ffff:203.0.113.10");
+    assert.equal(other.ok, true);
+  });
+
   it("does not count a failed or in-flight rescue that is released", async () => {
     const { created } = limiter();
     await created.ready;

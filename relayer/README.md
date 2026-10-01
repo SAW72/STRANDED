@@ -22,7 +22,7 @@ Defaults apply when the variables are **unset**, including on the live Render se
 
 The IP default is 3, not 1. One judge needs a single rescue, which the wallet limit already covers. Three leaves room for a second wallet or a teammate on the same network, and still stops one address from taking the ~19 max payouts that drain the router. Set `RESCUE_LIMIT_PER_IP=0` only if judges share a VPN and hit the backstop.
 
-Only a **successful** broadcast counts. A reverted simulation, a rejected quote, or an in-flight rescue that fails does not count. A second request while the first broadcast is still running gets 429 with an "already in progress" message and a short `retryAfter` (30 seconds), not the 4-hour window.
+Only a **successful** broadcast counts. A reverted simulation, a rejected quote, or an in-flight rescue that fails does not count. A rescue which broadcasts and then reverts on chain still uses up the wallet and IP slot. A second request while the first broadcast is still running gets 429 with an "already in progress" message and a short `retryAfter` (30 seconds), not the 4-hour window.
 
 Limits are checked after the body is validated and **before** quote RPC, nonce reservation, simulation, or broadcast. `GET /health` stays 200. The kill switch still returns `503` `relayer_paused` before the limiter runs. CORS is unchanged: allowed origins are echoed, including on 429 and 400.
 
@@ -32,10 +32,11 @@ Counts are stored in `$DATA_DIR/rescue-limits.json` (same directory as the rescu
 
 Render fronts the service with Cloudflare. A client-supplied leftmost `X-Forwarded-For` value is spoofable, because the proxy appends instead of replacing the header. The rightmost value is usually a shared Cloudflare address.
 
-1. Use `CF-Connecting-IP` or `True-Client-IP` when it is a single IP (Cloudflare overwrites these).
+1. Use `CF-Connecting-IP` when it is a single IP (Cloudflare overwrites it). `True-Client-IP` is ignored.
 2. Otherwise walk `X-Forwarded-For` from the right, skip `TRUSTED_PROXY_HOPS` (default 1), and take that hop.
 3. If the chain is shorter than the trusted suffix, use the rightmost hop.
-4. With no forwarding headers, use the socket address. IPv4-mapped IPv6 (`::ffff:a.b.c.d`) is normalized.
+4. With no forwarding headers, use the socket address. Addresses are normalized (expanded `::`, lowercase, no zone id, brackets, or port). IPv4-mapped IPv6 (`::ffff:a.b.c.d`) is the IPv4 address.
+5. IPv6 clients share one rate-limit bucket per `/64`. IPv4 stays one bucket per address.
 
 ### 429 body
 
