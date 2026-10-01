@@ -90,7 +90,7 @@ The Relayer hot key is **not** stored in `.env`, the workspace, or any generated
 
 | Variable | Purpose |
 | --- | --- |
-| `PRIVATE_KEY` | Deployer (owner). Must not equal `RELAYER_ADDRESS`. Local demo scripts only. |
+| `PRIVATE_KEY` | Deployer (owner) for the other local scripts. Must not equal `RELAYER_ADDRESS`. `DeployLockedDemoSwapRouter` does not read it; that script uses `--account` / `--sender`. |
 | `RELAYER_ADDRESS` | First allowlisted relayer hot key. |
 | `RELAYER_PRIVATE_KEY` | **GitHub Actions secret only.** Relayer signer. Injected at runtime; never written to disk. |
 | `WETH_ADDRESS` | Required. Set per testnet; no mainnet fallback. |
@@ -123,6 +123,16 @@ forge script script/DeployGasRescueSwap.s.sol:DeployGasRescueSwap \
 ```
 
 The script reverts on any chain other than 84532 / 421614. Constructor: `initialOwner = deployer`, `initialRelayer = RELAYER_ADDRESS`, `weth = WETH_ADDRESS`.
+
+Locked demo router (keystore, no `PRIVATE_KEY`). Agents must not pass `--broadcast`. On Arb Sepolia this reverts while `0xFE22f32eF7a8f64B6c9E1CCAe31817B54184f7fc` is allowlisted unless `FORCE_NEW_ROUTER=true`.
+
+```bash
+forge script script/DeployLockedDemoSwapRouter.s.sol:DeployLockedDemoSwapRouter \
+  --account <keystore> \
+  --sender 0x30466A210961c0C2C13AF0A9d35dfC6E8858bA9D \
+  --rpc-url "$ARB_SEPOLIA_RPC_URL" \
+  --chain-id 421614
+```
 
 Demo execute (test user key only): `script/RescueSwap.s.sol`.
 
@@ -183,7 +193,7 @@ relayer/                           # Arb Sepolia POST /v1/quotes (Render)
 
 Arb demo path (live Relayer + `ArbSepoliaDemoPath`): `pathHash = keccak256(swapExact(tokenIn, amountSwap, nativeTo))` for SDEMO. Wallet fixtures keep placeholder `0xbbb…` and must not be submitted. See [docs/BUILDATHON_PROGRESS.md](docs/BUILDATHON_PROGRESS.md) Day-5. Live QA: [docs/QA_ARB_SEPOLIA_RESCUE.md](docs/QA_ARB_SEPOLIA_RESCUE.md).
 
-**Demo router.** On 2026-10-01 the owner migrated the Arb Sepolia demo router. Retired open router `0x6804…25A8` (delisted Oct 1, 2026) was an unlocked `MockSwapRouter`: anyone could `setPayAmount` and then `swapExact` without tokens and take its ETH (0.0195 ETH inventory, 0.0001 ETH payout, read before the migration). That inventory moved to `LockedDemoSwapRouter` `0xFE22f32eF7a8f64B6c9E1CCAe31817B54184f7fc`, which holds 0.0195 ETH. `GasRescueSwap` `allowedRouters` is true for the new router and false for the retired one. `src/LockedDemoSwapRouter.sol` only swaps for the rescue contract, pulls the tokens, pays proportionally, and caps the payout. Owner settings only. Do not `--broadcast` `script/DeployLockedDemoSwapRouter.s.sol` again: the migration already ran, and a second broadcast deploys another router. The Relayer prefers `quote(amountSwap)` and falls back to `payAmount()` when a router has no `quote`. Repo `render.yaml` names the same locked router. The live Render `ROUTER_ADDRESS` on `stranded-relayer-arb` has been `0xFE22f32eF7a8f64B6c9E1CCAe31817B54184f7fc` since Oct 1, 2026, 1:27 PM ET (Relayer Backend deploy), and quotes return that router. Fee math is unchanged (1% fee, ~20% swap slice, 100 bps slip).
+**Demo router.** On 2026-10-01 the owner migrated the Arb Sepolia demo router. Retired open router `0x680410c7f64e06EB7e80dc7B5c149f7855e225A8` (delisted Oct 1, 2026) was an unlocked `MockSwapRouter`: anyone could `setPayAmount` and then `swapExact` without tokens and take its ETH (0.0195 ETH inventory, 0.0001 ETH payout, read before the migration). The contract is still open (`owner()` is absent). **DO-NOT-FUND.** That inventory moved to `LockedDemoSwapRouter` `0xFE22f32eF7a8f64B6c9E1CCAe31817B54184f7fc`, which holds 0.0195 ETH, via one-shot migrator `0x8f838a6A29EA8E8b0C6E2baCBdaD8b0cA3c25231` (tx `0x9e1c8034cfd9697acfc5783e99926205a96a62efc15e078cea2400880203b9e6`). The migrator source was removed after the pull. The contract stays on chain, its runtime rejects ETH, and it has no withdraw. **DO-NOT-FUND.** `GasRescueSwap` `allowedRouters` is true for the locked router and false for the retired one. `src/LockedDemoSwapRouter.sol` only swaps for the rescue contract, pulls the tokens, pays proportionally, and caps the payout. Owner settings only. `script/DeployLockedDemoSwapRouter.s.sol` is keyless (`--account <keystore> --sender 0x30466A210961c0C2C13AF0A9d35dfC6E8858bA9D`). On 421614 it reverts while the locked router is allowlisted unless `FORCE_NEW_ROUTER=true`. A forced re-run delists `PRIOR_LOCKED_ROUTER` (default `0xFE22…f7fc`), never `0x6804…25A8`. Agents must not pass `--broadcast`. The Relayer prefers `quote(amountSwap)` and falls back to `payAmount()` when a router has no `quote`. Repo `render.yaml` names the same locked router. The live Render `ROUTER_ADDRESS` on `stranded-relayer-arb` has been `0xFE22f32eF7a8f64B6c9E1CCAe31817B54184f7fc` since Oct 1, 2026, 1:27 PM ET (Relayer Backend deploy), and quotes return that router. Fee math is unchanged (1% fee, ~20% swap slice, 100 bps slip).
 
 Live Arb bytecode **lacks** tip `CANONICAL_PERMIT2()` and `rescueReceipt` — judged v1 `rescueWithPermit` is still OK. Redeploy is Spencer-only: [docs/REDEPLOY-GASRESCUESWAP.md](docs/REDEPLOY-GASRESCUESWAP.md). Permit2 stays **disabled** on both deploys. Owner `0x30466A210961c0C2C13AF0A9d35dfC6E8858bA9D`. Demo video: https://youtu.be/GzAfCQwoq88
 

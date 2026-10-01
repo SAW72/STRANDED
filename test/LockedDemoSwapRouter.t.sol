@@ -8,31 +8,6 @@ import {LockedDemoSwapRouter} from "../src/LockedDemoSwapRouter.sol";
 import {MockERC20} from "../src/mocks/MockERC20.sol";
 import {MockFeeOnTransferToken} from "../src/mocks/MockFeeOnTransferToken.sol";
 import {MockSwapRouter} from "../src/mocks/MockSwapRouter.sol";
-import {OpenDemoRouterMigrator} from "../script/DeployLockedDemoSwapRouter.s.sol";
-
-/// @dev The pre-fix demo router: open `setPayAmount`, and `swapExact` pays ETH
-///      even when `amountIn` is zero. Used only to prove the migrator moves that
-///      inventory. Not a deployment target.
-contract LegacyOpenRouter {
-    uint256 public payAmount;
-
-    function setPayAmount(
-        uint256 amount
-    ) external {
-        payAmount = amount;
-    }
-
-    function swapExact(
-        address,
-        uint256,
-        address
-    ) external {
-        (bool sent,) = payable(msg.sender).call{value: payAmount}("");
-        require(sent, "native pay failed");
-    }
-
-    receive() external payable {}
-}
 
 contract LockedDemoSwapRouterTest is Test {
     uint256 internal constant RATE_NUMERATOR = 500_000_000_000_000; // 0.0005 ETH per 1 token
@@ -141,24 +116,6 @@ contract LockedDemoSwapRouterTest is Test {
         vm.stopPrank();
 
         assertEq(address(router).balance, 1 ether);
-    }
-
-    function test_migratorMovesOpenInventory() public {
-        vm.chainId(421_614);
-        LegacyOpenRouter legacy = new LegacyOpenRouter();
-        vm.deal(address(legacy), 0.0195 ether);
-
-        new OpenDemoRouterMigrator(address(legacy), address(router), address(token));
-
-        assertEq(address(legacy).balance, 0);
-        assertEq(address(router).balance, 0.0195 ether);
-
-        address attacker = makeAddr("attacker");
-        vm.prank(attacker);
-        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, attacker));
-        router.withdrawEth(attacker, 0.0195 ether);
-        assertEq(address(router).balance, 0.0195 ether);
-        assertEq(attacker.balance, 0);
     }
 
     function test_mockNonOwnerCannotDrain() public {

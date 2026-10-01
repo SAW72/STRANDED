@@ -3,104 +3,81 @@ pragma solidity ^0.8.24;
 
 import {Script, console2} from "forge-std/Script.sol";
 
-import {GasRescueSwap} from "../src/GasRescueSwap.sol";
 import {LockedDemoSwapRouter} from "../src/LockedDemoSwapRouter.sol";
 
-/// @notice One-shot pull of the open demo router's ETH into `newRouter`.
-///         Used once on Arb Sepolia on 2026-10-01. The retired open
-///         `MockSwapRouter` paid `payAmount` even when no tokens moved.
-///         This constructor used that bug once, on testnet, and forwarded the
-///         entire balance. It is not a withdrawal for the locked router.
-///         The source balance is now 0, so a second call reverts
-///         `NothingToMigrate`. Broadcast = owner key only. Do not point it
-///         at any other protocol.
-contract OpenDemoRouterMigrator {
-    error WrongChain();
-    error ZeroAddress();
-    error NothingToMigrate();
-    error CallFailed();
-
-    constructor(
-        address oldRouter,
-        address newRouter,
-        address tokenIn
-    ) {
-        if (block.chainid != 421_614 && block.chainid != 84_532) revert WrongChain();
-        if (oldRouter == address(0) || newRouter == address(0) || tokenIn == address(0)) revert ZeroAddress();
-        uint256 bal = oldRouter.balance;
-        if (bal == 0) revert NothingToMigrate();
-
-        (bool setOk,) = oldRouter.call(abi.encodeWithSignature("setPayAmount(uint256)", bal));
-        if (!setOk) revert CallFailed();
-        (bool swapOk,) = oldRouter.call(
-            abi.encodeWithSignature("swapExact(address,uint256,address)", tokenIn, uint256(0), newRouter)
-        );
-        if (!swapOk) revert CallFailed();
-
-        uint256 got = address(this).balance;
-        (bool sent,) = payable(newRouter).call{value: got}("");
-        if (!sent || address(this).balance != 0) revert CallFailed();
-    }
-
-    receive() external payable {}
+/// @notice Owner surface this script calls on `GasRescueSwap`. A local mock with
+///         the same three methods is enough for tests. Live Arb Sepolia uses
+///         `0x65e712222745A8FCCbF038A90Fa75caB0867993D`.
+interface ILockedRouterRescue {
+    function owner() external view returns (address);
+    function allowedRouters(
+        address router
+    ) external view returns (bool);
+    function setRouterAllowed(
+        address router,
+        bool allowed
+    ) external;
 }
 
 /// @notice Deploy `LockedDemoSwapRouter` on Base Sepolia (84532) or Arb Sepolia (421614).
 ///         Refuses every other chain. No mainnet path.
 ///
-///         Broadcast = Spencer's owner key only (`0x3046…bA9D` on the live Arb swap).
-///         Agents must never pass `--broadcast`.
+///         Keyless. This script does not read `PRIVATE_KEY`. `forge script` sets
+///         `msg.sender` from `--account` / `--sender`, and `run()` broadcasts as
+///         that account. Agents must never pass `--broadcast`.
 ///
-///         MIGRATION DONE (2026-10-01, chain 421614). Do not broadcast this
-///         script again to finish it. `LIVE_ARB_OPEN_ROUTER` stays the
-///         migration SOURCE: retired open router `0x6804…25A8` (delisted
-///         Oct 1, 2026, balance 0). Inventory is on `LockedDemoSwapRouter`
-///         `0xFE22f32eF7a8f64B6c9E1CCAe31817B54184f7fc` (0.0195 ETH).
-///         `GasRescueSwap.allowedRouters` is true for that router and false
-///         for the source. `run()` still deploys a fresh router and, with
-///         `ALLOWLIST_ON_RESCUE` default true, allowlists that new address
-///         and delists the source. That is a second router, not a replay.
-///         The ETH pull is skipped when the source balance is 0
-///         (`OpenDemoRouterMigrator` reverts `NothingToMigrate` if called).
+///         forge script script/DeployLockedDemoSwapRouter.s.sol:DeployLockedDemoSwapRouter \
+///           --account <keystore> \
+///           --sender 0x30466A210961c0C2C13AF0A9d35dfC6E8858bA9D \
+///           --rpc-url "$ARB_SEPOLIA_RPC_URL" \
+///           --chain-id 421614
 ///
-///         Default rate pays 0.0001 ETH for the canonical 0.2-token slice
-///         (the open mock's `payAmount` before the 2026-10-01 migration)
-///         and caps a swap at 0.001 ETH.
+///         MIGRATION DONE (2026-10-01, chain 421614). The one-shot pull source was
+///         removed. The migrator contract stays on chain at
+///         `0x8f838a6A29EA8E8b0C6E2baCBdaD8b0cA3c25231` (tx
+///         `0x9e1c8034cfd9697acfc5783e99926205a96a62efc15e078cea2400880203b9e6`).
+///         Its runtime rejects ETH. DO-NOT-FUND.
 ///
-/// Required env:
-///   PRIVATE_KEY                 owner key. Must equal `GasRescueSwap.owner()` to allowlist.
-///   GAS_RESCUE_SWAP_ADDRESS     live rescue the router will accept swaps from
-/// Optional:
+///         On 421614, `run()` reverts when `allowedRouters(0xFE22…f7fc)` is
+///         already true unless `FORCE_NEW_ROUTER=true`. A forced re-run delists
+///         `PRIOR_LOCKED_ROUTER` (default that locked router), never the retired
+///         open router `0x680410c7f64e06EB7e80dc7B5c149f7855e225A8` (still open,
+///         DO-NOT-FUND).
+///
+///         Default rate pays 0.0001 ETH for the canonical 0.2-token slice and
+///         caps a swap at 0.001 ETH.
+///
+/// Optional env:
+///   GAS_RESCUE_SWAP_ADDRESS     live rescue. Defaults to the Arb swap on 421614.
 ///   RATE_NUMERATOR              default 5e14 (0.0005 ETH per 1e18 token)
 ///   RATE_DENOMINATOR            default 1e18
 ///   MAX_PAYOUT                  default 0.001 ether
-///   FUND_WEI                    extra ETH from the owner, on top of a migration
-///   MIGRATE_OLD_ROUTER          default true. Pull is a no-op when the source
-///                               balance is 0. Do not rebroadcast; see notice above.
-///   OLD_ROUTER_ADDRESS          default Arb retired open router `0x6804…25A8`
-///                               (delisted Oct 1, 2026) on chain 421614. Migration
-///                               SOURCE. Do not point this at the locked router.
-///   TOKEN_ADDRESS               calldata-only for the zero-token legacy pull. Default Arb GRTT.
-///   ALLOWLIST_ON_RESCUE         default true. Allow the new router and remove the old one.
+///   FUND_WEI                    extra ETH from the owner
+///   ALLOWLIST_ON_RESCUE         default true. Allow the new router and delist the prior locked one.
+///   FORCE_NEW_ROUTER            default false. Required on 421614 once 0xFE22…f7fc is allowlisted.
+///   PRIOR_LOCKED_ROUTER         delist target when allowlisting. Default on 421614 is 0xFE22…f7fc.
 contract DeployLockedDemoSwapRouter is Script {
     uint256 internal constant BASE_SEPOLIA_CHAIN_ID = 84_532;
     uint256 internal constant ARB_SEPOLIA_CHAIN_ID = 421_614;
 
-    address internal constant LIVE_ARB_RESCUE = 0x65e712222745A8FCCbF038A90Fa75caB0867993D;
-    /// @dev Migration SOURCE. Completed 2026-10-01. Do not retarget this at the
-    ///      locked router `0xFE22…f7fc`. Retired open router, delisted Oct 1, 2026.
-    address internal constant LIVE_ARB_OPEN_ROUTER = 0x680410c7f64e06EB7e80dc7B5c149f7855e225A8;
-    address internal constant LIVE_ARB_GRTT = 0x5649fF51123D534044aA7E6cBc8762698Ffed713;
+    address public constant LIVE_ARB_RESCUE = 0x65e712222745A8FCCbF038A90Fa75caB0867993D;
+    /// @dev Live locked router. Allowlisted 2026-10-01. Re-run guard reads this address.
+    address public constant LIVE_ARB_LOCKED_ROUTER = 0xFE22f32eF7a8f64B6c9E1CCAe31817B54184f7fc;
+    /// @dev Retired open router, still open, delisted Oct 1, 2026. Never a delist target.
+    address public constant LIVE_ARB_OPEN_ROUTER = 0x680410c7f64e06EB7e80dc7B5c149f7855e225A8;
+    /// @dev Foundry's default script sender. `keccak256("foundry default caller")`.
+    ///      Named apart from forge-std's internal `FOUNDRY_DEFAULT_SENDER` so the
+    ///      public getter is visible to tests.
+    address public constant DEFAULT_SCRIPT_SENDER = 0x1804c8AB1F12E6bbf3894d4083f33e07309d1f38;
 
-    function run() external {
+    function run() external returns (LockedDemoSwapRouter router) {
         uint256 chainId = block.chainid;
         require(
             chainId == BASE_SEPOLIA_CHAIN_ID || chainId == ARB_SEPOLIA_CHAIN_ID,
             "DeployLockedDemoSwapRouter: testnet only (84532 or 421614)"
         );
+        require(msg.sender != DEFAULT_SCRIPT_SENDER, "DeployLockedDemoSwapRouter: refusing Foundry default sender");
 
-        uint256 deployerKey = vm.envUint("PRIVATE_KEY");
-        address deployer = vm.addr(deployerKey);
         address rescueAddr = vm.envOr("GAS_RESCUE_SWAP_ADDRESS", address(0));
         if (rescueAddr == address(0) && chainId == ARB_SEPOLIA_CHAIN_ID) rescueAddr = LIVE_ARB_RESCUE;
         require(rescueAddr != address(0), "GAS_RESCUE_SWAP_ADDRESS required");
@@ -109,35 +86,41 @@ contract DeployLockedDemoSwapRouter is Script {
         uint256 rateDenominator = vm.envOr("RATE_DENOMINATOR", uint256(1e18));
         uint256 maxPayout = vm.envOr("MAX_PAYOUT", uint256(0.001 ether));
         uint256 fundWei = vm.envOr("FUND_WEI", uint256(0));
-        bool migrate = vm.envOr("MIGRATE_OLD_ROUTER", true);
         bool allowlist = vm.envOr("ALLOWLIST_ON_RESCUE", true);
+        bool forceNew = vm.envOr("FORCE_NEW_ROUTER", false);
 
-        address oldRouter = vm.envOr("OLD_ROUTER_ADDRESS", address(0));
-        if (oldRouter == address(0) && chainId == ARB_SEPOLIA_CHAIN_ID) oldRouter = LIVE_ARB_OPEN_ROUTER;
-        address tokenIn = vm.envOr("TOKEN_ADDRESS", address(0));
-        if (tokenIn == address(0) && chainId == ARB_SEPOLIA_CHAIN_ID) tokenIn = LIVE_ARB_GRTT;
+        address priorLocked = vm.envOr("PRIOR_LOCKED_ROUTER", address(0));
+        if (priorLocked == address(0) && chainId == ARB_SEPOLIA_CHAIN_ID) priorLocked = LIVE_ARB_LOCKED_ROUTER;
+        if (allowlist && priorLocked == LIVE_ARB_OPEN_ROUTER) {
+            revert("DeployLockedDemoSwapRouter: refusing to delist the retired open router");
+        }
 
-        GasRescueSwap rescue = GasRescueSwap(payable(rescueAddr));
+        ILockedRouterRescue rescue = ILockedRouterRescue(rescueAddr);
         if (allowlist) {
-            require(deployer == rescue.owner(), "PRIVATE_KEY must be the GasRescueSwap owner to allowlist");
+            require(
+                msg.sender == rescue.owner(),
+                "DeployLockedDemoSwapRouter: sender must be the GasRescueSwap owner to allowlist"
+            );
+        }
+        if (chainId == ARB_SEPOLIA_CHAIN_ID && rescue.allowedRouters(LIVE_ARB_LOCKED_ROUTER) && !forceNew) {
+            revert("DeployLockedDemoSwapRouter: locked router already allowlisted; set FORCE_NEW_ROUTER=true");
         }
 
-        // Migration completed 2026-10-01. Source balance is 0, so the pull below
-        // does not run. Broadcasting still deploys a new LockedDemoSwapRouter and
-        // (ALLOWLIST_ON_RESCUE default true) allowlists that new address.
-        // Do not rebroadcast. Live router: 0xFE22f32eF7a8f64B6c9E1CCAe31817B54184f7fc.
-        vm.startBroadcast(deployerKey);
-        LockedDemoSwapRouter router =
+        // `msg.sender` is the keystore account under
+        // `forge script --account <keystore> --sender <owner>`.
+        // Passing it (instead of a bare `startBroadcast()`) keeps that same
+        // account as the signer. A bare call would broadcast Foundry tests as
+        // the default sender, which this guard rejects.
+        address deployer = msg.sender;
+        vm.startBroadcast(deployer);
+        router =
             new LockedDemoSwapRouter{value: fundWei}(deployer, rescueAddr, rateNumerator, rateDenominator, maxPayout);
-
-        if (migrate && oldRouter != address(0) && oldRouter.balance > 0) {
-            require(tokenIn != address(0), "TOKEN_ADDRESS required to migrate the open router");
-            new OpenDemoRouterMigrator(oldRouter, address(router), tokenIn);
-        }
 
         if (allowlist) {
             rescue.setRouterAllowed(address(router), true);
-            if (oldRouter != address(0)) rescue.setRouterAllowed(oldRouter, false);
+            if (priorLocked != address(0) && priorLocked != address(router)) {
+                rescue.setRouterAllowed(priorLocked, false);
+            }
         }
         vm.stopBroadcast();
 
@@ -148,6 +131,7 @@ contract DeployLockedDemoSwapRouter is Script {
         console2.log("payAmount demo   ", router.payAmount());
         console2.log("maxPayout        ", router.maxPayout());
         console2.log("inventory        ", address(router).balance);
-        if (oldRouter != address(0)) console2.log("old router       ", oldRouter);
+        console2.log("force new        ", forceNew);
+        if (priorLocked != address(0)) console2.log("prior locked     ", priorLocked);
     }
 }
