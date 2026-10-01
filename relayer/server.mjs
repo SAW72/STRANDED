@@ -3,10 +3,20 @@ import { privateKeyToAccount } from "viem/accounts";
 import { arbitrumSepolia } from "viem/chains";
 import { createRelayerApp } from "./app.mjs";
 import { parseTrustedProxyHops } from "./clientIp.mjs";
-import { INVALID_AMOUNT_MESSAGE, MISSING_USER_MESSAGE, asBroadcastFailure, fail } from "./httpError.mjs";
+import {
+  INVALID_AMOUNT_MESSAGE,
+  MISSING_USER_MESSAGE,
+  PATH_MISMATCH_MESSAGE,
+  ROUTER_NOT_ALLOWED_MESSAGE,
+  asBroadcastFailure,
+  fail,
+  logSimulationFailure,
+  simulationFailure,
+} from "./httpError.mjs";
 import { createKillSwitch, parseEnvFlag } from "./killSwitch.mjs";
 import { createNonceStore } from "./nonceStore.mjs";
 import { createBuildQuote, encodeSwapData } from "./quote.mjs";
+import { rescueAbi } from "./rescueAbi.mjs";
 import { createRescueLog, orderLogSummary } from "./rescueLog.mjs";
 import { createRescueLimiter, parseRescueLimitConfig } from "./rescueLimit.mjs";
 import { DEFAULT_BASE_DELAY_MS, DEFAULT_MAX_ATTEMPTS, withBroadcastRetry } from "./retry.mjs";
@@ -93,42 +103,6 @@ const usedNoncesAbi = [
       { name: "nonce", type: "uint256" },
     ],
     outputs: [{ name: "used", type: "bool" }],
-  },
-];
-
-const rescueAbi = [
-  {
-    type: "function",
-    name: "rescueWithPermit",
-    stateMutability: "nonpayable",
-    inputs: [
-      {
-        name: "order",
-        type: "tuple",
-        components: [
-          { name: "user", type: "address" },
-          { name: "tokenIn", type: "address" },
-          { name: "amountIn", type: "uint256" },
-          { name: "feeAmount", type: "uint256" },
-          { name: "feeTo", type: "address" },
-          { name: "amountSwap", type: "uint256" },
-          { name: "minAmountOut", type: "uint256" },
-          { name: "to", type: "address" },
-          { name: "nativeTo", type: "address" },
-          { name: "router", type: "address" },
-          { name: "pathHash", type: "bytes32" },
-          { name: "chainId", type: "uint256" },
-          { name: "deadline", type: "uint256" },
-          { name: "nonce", type: "uint256" },
-        ],
-      },
-      { name: "orderSignature", type: "bytes" },
-      { name: "v", type: "uint8" },
-      { name: "r", type: "bytes32" },
-      { name: "s", type: "bytes32" },
-      { name: "swapData", type: "bytes" },
-    ],
-    outputs: [],
   },
 ];
 
@@ -221,10 +195,10 @@ async function submitRescue(body) {
     const swapData =
       body.swapData || encodeSwapData(order.tokenIn, order.amountSwap, order.nativeTo);
     if (keccak256(swapData) !== order.pathHash) {
-      throw Object.assign(new Error("PathMismatch"), { status: 400, error: "path_mismatch" });
+      throw fail(400, "path_mismatch", PATH_MISMATCH_MESSAGE);
     }
     if (order.router.toLowerCase() !== ROUTER.toLowerCase()) {
-      throw Object.assign(new Error("RouterNotAllowed"), { status: 400, error: "router_not_allowed" });
+      throw fail(400, "router_not_allowed", ROUTER_NOT_ALLOWED_MESSAGE);
     }
     const args = [
       order,
@@ -243,15 +217,8 @@ async function submitRescue(body) {
         args,
       });
     } catch (err) {
-      const name = err && (err.shortMessage || err.name || "");
-      const revert = err && (err.data?.errorName || err.errorName || "");
-      const detail = String(name).replace(/https?:\/\/\S+/gi, "[url]").slice(0, 180);
-      console.error("relayer_error simulation_failed", detail, String(revert).slice(0, 80));
-      throw Object.assign(new Error("simulation_failed"), {
-        status: 502,
-        error: "simulation_failed",
-        revert: String(revert || name || "unknown"),
-      });
+      logSimulationFailure(err);
+      throw simulationFailure(err);
     }
     const txHash = await withBroadcastRetry(
       async (attempt) => {
