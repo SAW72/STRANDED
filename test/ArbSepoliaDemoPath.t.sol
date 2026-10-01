@@ -86,7 +86,7 @@ contract ArbSepoliaDemoPathTest is Test {
     function test_liveAddresses_pinned() public pure {
         assertEq(ArbSepoliaDemoPath.CHAIN_ID, 421_614);
         assertEq(ArbSepoliaDemoPath.SWAP, 0x65e712222745A8FCCbF038A90Fa75caB0867993D);
-        assertEq(ArbSepoliaDemoPath.ROUTER, 0x680410c7f64e06EB7e80dc7B5c149f7855e225A8);
+        assertEq(ArbSepoliaDemoPath.ROUTER, 0xFE22f32eF7a8f64B6c9E1CCAe31817B54184f7fc);
         assertEq(ArbSepoliaDemoPath.RELAYER, 0x8240124dc78a27c80354Ca813Df12aa2888A9AF6);
         assertTrue(ArbSepoliaDemoPath.OWNER != ArbSepoliaDemoPath.RELAYER);
     }

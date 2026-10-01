@@ -20,7 +20,10 @@ contract ArbSepoliaLiveTest is Test {
     address internal constant LIVE_WETH = 0x980B62Da83eFf3D4576C647993b0c1D7faf17c73;
     address internal constant LIVE_GRTT = 0x5649fF51123D534044aA7E6cBc8762698Ffed713;
     address internal constant LIVE_GMOCK = 0x30006e29a23c713070136F56db1BDf2A8B82B318;
-    address internal constant LIVE_ROUTER = 0x680410c7f64e06EB7e80dc7B5c149f7855e225A8;
+    /// @dev Live `LockedDemoSwapRouter` (migrated 2026-10-01).
+    address internal constant LIVE_ROUTER = 0xFE22f32eF7a8f64B6c9E1CCAe31817B54184f7fc;
+    /// @dev Retired open `MockSwapRouter`, delisted Oct 1, 2026.
+    address internal constant RETIRED_OPEN_ROUTER = 0x680410c7f64e06EB7e80dc7B5c149f7855e225A8;
     address internal constant CANONICAL_PERMIT2 = 0x000000000022D473030F116dDEE9F6B43aC78BA3;
 
     bytes32 internal constant FROZEN_ORDER_TYPEHASH = keccak256(
@@ -67,7 +70,10 @@ contract ArbSepoliaLiveTest is Test {
         assertTrue(swap.eip2612Tokens(LIVE_GRTT));
         assertTrue(swap.allowedTokens(LIVE_GMOCK), "gMOCK also allowlisted");
         assertTrue(swap.eip2612Tokens(LIVE_GMOCK));
-        assertTrue(swap.allowedRouters(LIVE_ROUTER));
+        assertTrue(swap.allowedRouters(LIVE_ROUTER), "locked demo router allowlisted");
+        assertGt(LIVE_ROUTER.balance, 0, "locked router still holds ETH");
+        assertFalse(swap.allowedRouters(RETIRED_OPEN_ROUTER), "retired open router delisted Oct 1, 2026");
+        assertEq(RETIRED_OPEN_ROUTER.balance, 0, "retired open router holds no ETH");
     }
 
     function test_live_criticalSelectors() public onlyFork {

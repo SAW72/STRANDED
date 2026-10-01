@@ -7,14 +7,14 @@ Scripted **read-only** checks first, then optional **Spencer-keys-only** sign / 
 **Judged product:** `GasRescueSwap` v1 at [`0x65e712222745A8FCCbF038A90Fa75caB0867993D`](https://sepolia.arbiscan.io/address/0x65e712222745A8FCCbF038A90Fa75caB0867993D) (Arb Sepolia `421614`).
 
 **Relayer:** https://stranded-relayer-arb.onrender.com — **KNOW** healthy (`live`, `stubRpc=false`) as of 2026-09-17.  
-**Relayer hot wallet:** `0x8240124dc78a27c80354Ca813Df12aa2888A9AF6` — **KNOW** ~**0.015 ETH**; needs **~0.10 ETH** on Arb Sepolia before a live submit (Spencer / Chain Ops).
+**Relayer hot wallet:** `0x8240124dc78a27c80354Ca813Df12aa2888A9AF6` — **KNOW** **0.214961419621579600 ETH** (`cast balance`, 2026-10-01), above the **~0.10 ETH** live-submit floor. `HackQuestStatus` recommends `live-submit-ok-if-user-funded`. The 2026-09-17 reading was ~0.015 ETH.
 
 ### KNOW gaps (2026-09-17)
 
 | Item | Status | Owner |
 | --- | --- | --- |
 | Relayer health | Live, `stubRpc=false`, chain `421614`, swap `0x65e7…993D` | — |
-| Hot wallet ETH | ~0.015 vs ~0.10 — live submit blocked | Spencer / Chain Ops |
+| Hot wallet ETH | 0.214961419621579600 ETH on 2026-10-01 (was ~0.015 on 2026-09-17). Above the 0.10 floor. `recommendedJudgePath=live-submit-ok-if-user-funded` | Spencer / Chain Ops still owns the key |
 | Fee quote | **MATCH** current Relayer math: **1% of `tokenIn`** service fee; **~20%** swapped for gas (not a fee); **100 bps** slip fail-closed. USD floor/cap/skip is deferred — **not** a live Relayer bug. Do **not** invent Sepolia USD prices. | Relayer Backend (do not rewrite fee math here) |
 | Live vs tip | Live lacks `rescueReceipt` + `CANONICAL_PERMIT2()`. Judged v1 `rescueWithPermit` still OK | Optional Spencer redeploy |
 | Lens | Not on-chain. `HackQuestStatus` constructs in-script | Optional Spencer `DeployGasRescueLens` |
@@ -23,19 +23,19 @@ Scripted **read-only** checks first, then optional **Spencer-keys-only** sign / 
 
 ---
 
-## Fixture / demo without top-up (recommended judge path)
+## Judge path (2026-10-01)
 
-**Do not wait for a hot-wallet top-up.** Spencer / Chain Ops owns `0x8240…9AF6` (~0.015 ETH vs ~0.10). Live `rescueWithPermit` submit stays blocked until that top-up. The judged product already works. The demo video already exists — **do not remake**.
+Hot wallet `0x8240…9AF6` holds **0.214961419621579600 ETH** (`cast balance`, 2026-10-01). That is above the 0.10 ETH floor. Read-only `HackQuestStatus` reports `hotWalletUnderfunded=false`, `liveSubmitBlocked=false`, and `recommendedJudgePath=live-submit-ok-if-user-funded`. A live submit still needs a funded user and Spencer's keys. The demo video already exists — **do not remake**.
 
-Judges and QA should use this path (no keys, no `--broadcast`, no Relayer `POST /v1/rescues`):
+The 2026-09-17 reading was ~0.015 ETH, and the script then recommended `fixture-demo-no-top-up`. If the hot wallet falls under 0.10 ETH again, that fixture path is the recommendation. Until then, judges use the funded path:
 
 1. `forge test -vv` — offline units + script JSON (CI). Also `forge build` (SignOrder must compile).
 2. Wallet: leave Relayer URL empty → labeled **Sample · not live** fixture. Confirm-details still gates. Do not POST fixture signatures.
-3. Read-only `HackQuestStatus` (section 4a): expect `buildathon=2026-09-17-day5`, `hotWalletUnderfunded=true`, `liveSubmitBlocked=true`, `recommendedJudgePath=fixture-demo-no-top-up`, `demoVideoExists=true`, `judgeNote` as below.
-4. Read-only `InspectGasRescueSwap` (section 3): Permit2 off, allowlists, drift line, plus the same underfunded / fixture recommendation.
+3. Read-only `HackQuestStatus` (section 4a): expect `buildathon=2026-09-17-day5`, `routerAllowed=true`, `ready=true`, `hotWalletUnderfunded=false`, `liveSubmitBlocked=false`, `recommendedJudgePath=live-submit-ok-if-user-funded`, `demoVideoExists=true`.
+4. Read-only `InspectGasRescueSwap` (section 3): Permit2 off, locked router allowlisted, retired open router delisted, drift line.
 5. Cite the existing demo video in README Live. Do not remake it.
 
-Live Relayer `/health` and a `POST /v1/quotes` (section 5) are optional evidence. They do **not** require a top-up. Skip section 6 (sign / submit) unless Spencer has topped up the hot wallet and is running keys locally.
+Live Relayer `/health` and a `POST /v1/quotes` (section 5) are optional evidence. Section 6 (sign / submit) stays Spencer's keys only.
 
 `HackQuestStatus` / Inspect `judgeNote` when underfunded:
 
@@ -100,9 +100,7 @@ cast balance 0x8240124dc78a27c80354Ca813Df12aa2888A9AF6 \
   --rpc-url "$ARB_SEPOLIA_RPC_URL" --ether
 ```
 
-**Expect ≥ 0.10 ETH** before a live `rescueWithPermit`. Below that, quotes may still work; the submit will fail when the hot key cannot pay gas. Read 2026-09-17: **~0.015 ETH** — Spencer top-up required before a judged live job.
-
-**Judges do not wait here.** Use [Fixture / demo without top-up](#fixture--demo-without-top-up-recommended-judge-path). `HackQuestStatus` reports `liveSubmitBlocked=true` and `recommendedJudgePath=fixture-demo-no-top-up` until Spencer tops up.
+**Expect ≥ 0.10 ETH** before a live `rescueWithPermit`. Below that, quotes may still work; the submit will fail when the hot key cannot pay gas. Read 2026-09-17: **~0.015 ETH**. Read 2026-10-01: **0.214961419621579600 ETH**. `HackQuestStatus` reports `liveSubmitBlocked=false` and `recommendedJudgePath=live-submit-ok-if-user-funded` while the balance stays at or above 0.10 ETH.
 
 Spencer tops up **Arb Sepolia** ETH only (not mainnet). Arbiscan: https://sepolia.arbiscan.io/address/0x8240124dc78a27c80354Ca813Df12aa2888A9AF6
 
@@ -128,11 +126,12 @@ forge script script/InspectGasRescueSwap.s.sol:InspectGasRescueSwap \
 | `permit2` | `0x0000…0000` |
 | `permit2Enabled` | `false` |
 | `relayer allowed` | `true` (hot `0x8240…9AF6`) |
-| `hot underfunded` / `live submit blocked` | **`true`** while hot ETH &lt; 0.10 |
-| `recommended path` | `fixture-demo-no-top-up` while underfunded |
+| `hot underfunded` / `live submit blocked` | **`false`** on the 2026-10-01 read (0.214961419621579600 ETH). **`true`** if hot ETH later falls under 0.10 |
+| `recommended path` | `live-submit-ok-if-user-funded` on that read. `fixture-demo-no-top-up` if the hot wallet falls under 0.10 ETH |
 | `GRTT allowed` / `eip2612` | `true` (`0x5649fF51123D534044aA7E6cBc8762698Ffed713`) |
 | `gMOCK allowed` | `true` |
-| `router allowed` | `true` (`0x680410c7f64e06EB7e80dc7B5c149f7855e225A8`) |
+| `router` / `router allowed` / `router wei` | `0xFE22f32eF7a8f64B6c9E1CCAe31817B54184f7fc`, `true`, `19500000000000000` (0.0195 ETH) |
+| `retired router` / `retired allowed` / `retired wei` | retired open router `0x680410c7f64e06EB7e80dc7B5c149f7855e225A8` (delisted Oct 1, 2026), `false`, `0` |
 | `setPermit2 is F-1 immutable` | `true` |
 
 **Known live-vs-tip drift (do not claim redeploy):** `has CANONICAL_PERMIT2 getter` and `has rescueReceipt` are **false** on 2026-09-14 live bytecode. The script prints a `DRIFT` line. See [REDEPLOY-GASRESCUESWAP.md](REDEPLOY-GASRESCUESWAP.md) — Spencer only.
@@ -143,41 +142,43 @@ forge script script/InspectGasRescueSwap.s.sol:InspectGasRescueSwap \
 
 Day-3 fail-closed Lens: **`amountIn == 0` is a probe**. Individual flags still populate. `userFunded=false`, `ready=false`, `probeOnly=true`. A real rescue needs `HACKQUEST_AMOUNT_IN > 0` **and** `balanceOf(user) >= amountIn`.
 
-### 4a. Probe (default `HACKQUEST_AMOUNT_IN=0`, no keys)
+### 4a. Default funded preflight (no keys)
 
 ```bash
 forge script script/HackQuestStatus.s.sol:HackQuestStatus \
   --rpc-url "$ARB_SEPOLIA_RPC_URL" --chain-id 421614
 ```
 
-**Expect JSON fields:**
+Default `HACKQUEST_USER` is GRTT holder `0x5BFd261b1eF7e61Bfea1ebfC87bDD8F4244BBA37` and default `HACKQUEST_AMOUNT_IN` is `1e18`. The in-script Lens checks locked router `0xFE22f32eF7a8f64B6c9E1CCAe31817B54184f7fc`. Set `HACKQUEST_AMOUNT_IN=0` for the Day-3 probe (`ready=false`, `probeOnly=true`).
 
-| Field | Probe (`amountIn` 0) |
+**Expect JSON fields (default, 2026-10-01):**
+
+| Field | Default funded preflight |
 | --- | --- |
 | `product` | `GasRescueSwap` |
 | `buildathon` | `2026-09-17-day5` |
 | `chainId` | `421614` |
 | `swap` | `0x65e7…993D` |
+| `user` | `0x5BFd261b1eF7e61Bfea1ebfC87bDD8F4244BBA37` |
+| `amountIn` | `1000000000000000000` |
 | `boundToLiveArb` | `true` |
 | `permit2Enabled` | `false` |
 | `permit2Off` | `true` |
-| `notPaused` / `relayerOk` / `tokenAllowed` / `tokenEip2612` / `routerAllowed` | `true` on live |
-| `amountInPositive` | `false` |
-| `probeOnly` | `true` |
-| `userFunded` | `false` |
-| `ready` | **`false`** (fail-closed; do not treat as a green rescue) |
+| `notPaused` / `relayerOk` / `tokenAllowed` / `tokenEip2612` / `routerAllowed` | `true` |
+| `amountInPositive` | `true` |
+| `probeOnly` | `false` |
+| `userFunded` | `true` |
+| `ready` | **`true`** |
 | `hotWallet` | `0x8240124dc78a27c80354Ca813Df12aa2888A9AF6` |
-| `hotWalletUnderfunded` | **`true`** while hot ETH &lt; 0.10 (`hotWalletMinWei=1e17`) |
-| `liveSubmitBlocked` | **`true`** while underfunded (same predicate) |
-| `recommendedJudgePath` | `fixture-demo-no-top-up` while underfunded |
+| `hotWalletUnderfunded` | **`false`** on the 2026-10-01 read (0.214961419621579600 ETH; floor `hotWalletMinWei=1e17`) |
+| `liveSubmitBlocked` | **`false`** while the hot wallet stays at or above 0.10 ETH |
+| `recommendedJudgePath` | `live-submit-ok-if-user-funded` |
 | `demoVideoExists` | `true` (do not remake) |
-| `judgeNote` | `hot-wallet-underfunded-Spencer-blocked; recommended=fixture-demo-without-top-up; demo-video-exists-do-not-remake` |
+| `judgeNote` | `hot-wallet-meets-0.10-ETH-floor; live-submit-still-Spencer-keys-only; fixture-demo-remains-valid` |
 | `feePostureNote` | `match=flat-1pct-tokenIn; amountSwap=20pct-gas-topup-not-fee; slip=100bps-fail-closed; usd-hybrid=deferred-not-a-relayer-bug; owner=Relayer-Backend-do-not-rewrite` |
 | `hasRescueReceipt` / `rescueReceiptSupported` / `hasCanonicalPermit2Getter` | `false` on live |
 | `liveVsTip` | `live-lacks-rescueReceipt-and-canonicalPermit2-do-not-claim-redeploy` |
 | Fixture `nativeTo=0x1111…1111` `grttDemoPathHash` | `0xf2fa57d446a79240cf3043e9e9f82fd28d8719d264bc89de7d81b8eb167b3c47` |
-
-Default `HACKQUEST_USER` is fixture `0x1111…1111` (not a live EOA). That is fine for a probe.
 
 ### 4b. Real-rescue preflight (`amountIn > 0`)
 
@@ -273,9 +274,9 @@ Required extra env: `PRIVATE_KEY` = **relayer** hot key (`0x8240…9AF6`), `USER
 | Check | Pass |
 | --- | --- |
 | Relayer `/health` | `ok`, `421614`, `stubRpc=false`, swap + hot wallet match |
-| Hot wallet ETH | ≥ ~0.10 for a **live submit only**. Fixture/demo **passes** while ~0.015 and `liveSubmitBlocked=true` |
-| `InspectGasRescueSwap` | Permit2 off, not paused, GRTT + router + relayer allowlisted; prints fixture recommendation when underfunded |
-| Probe `HackQuestStatus` | flags green, **`ready=false`**, `probeOnly=true`, Day-5 `recommendedJudgePath=fixture-demo-no-top-up` while underfunded |
+| Hot wallet ETH | 0.214961419621579600 ETH on 2026-10-01, above the ~0.10 floor. `liveSubmitBlocked=false`. The 2026-09-17 reading was ~0.015 ETH |
+| `InspectGasRescueSwap` | Permit2 off, not paused, GRTT + locked router + relayer allowlisted; retired open router not allowlisted |
+| Default `HackQuestStatus` | `routerAllowed=true`, **`ready=true`**, `recommendedJudgePath=live-submit-ok-if-user-funded`. `HACKQUEST_AMOUNT_IN=0` is still the probe (`ready=false`) |
 | Funded `HackQuestStatus` | `ready=true` only with `amountIn>0` and a real GRTT balance |
 | Live quote | nonzero `amountIn`; path is `swapExact`, not `0xbbb…`; fee MATCH 1% / 20% gas top-up / 100 bps (do not rewrite) |
 | Sign / broadcast | Spencer machine only; testnet `421614`; Permit2 never enabled |
@@ -294,7 +295,8 @@ Live still **lacks** `rescueReceipt` / `CANONICAL_PERMIT2()`. Day-5 `HackQuestSt
 | WETH | `0x980B62Da83eFf3D4576C647993b0c1D7faf17c73` |
 | GRTT | `0x5649fF51123D534044aA7E6cBc8762698Ffed713` |
 | gMOCK | `0x30006e29a23c713070136F56db1BDf2A8B82B318` |
-| Mock router | `0x680410c7f64e06EB7e80dc7B5c149f7855e225A8` |
+| Locked demo router | `0xFE22f32eF7a8f64B6c9E1CCAe31817B54184f7fc` |
+| Retired open router (delisted Oct 1, 2026) | `0x680410c7f64e06EB7e80dc7B5c149f7855e225A8` |
 | Relayer URL | https://stranded-relayer-arb.onrender.com |
 
 ---

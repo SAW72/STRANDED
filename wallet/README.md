@@ -115,7 +115,7 @@ Arb Sepolia fixture / `.env.example` deploy addrs (421614):
 | `tokenIn` / MockERC20Permit **GRTT** | `0x5649fF51123D534044aA7E6cBc8762698Ffed713` |
 | `feeTo` (Owner) | `0x30466A210961c0C2C13AF0A9d35dfC6E8858bA9D` |
 | GasRescueSwap | `0x65e712222745A8FCCbF038A90Fa75caB0867993D` |
-| `router` | `0x680410c7f64e06EB7e80dc7B5c149f7855e225A8` |
+| `router` | `0xFE22f32eF7a8f64B6c9E1CCAe31817B54184f7fc` (`LockedDemoSwapRouter`, migrated 2026-10-01). Retired open router `0x680410c7f64e06EB7e80dc7B5c149f7855e225A8` (delisted Oct 1, 2026) |
 
 `amountSwap + feeAmount + amountRemainder` must equal `amountIn`. `safeRecipient` is not accepted. The old fee-skim shape (`amount` / `token` only) fails closed.
 
