@@ -156,7 +156,6 @@ contract ArbSepoliaLiveTest is Test {
 
     function test_live_hackQuestStatus_day5Fields() public onlyFork {
         HackQuestStatus script = new HackQuestStatus();
-        vm.setEnv("GAS_RESCUE_SWAP_ADDRESS", vm.toString(LIVE_SWAP));
 
         string memory json = script.reportJson(LIVE_OWNER, 0, 0, ArbSepoliaDemoPath.DRY_NATIVE_TO, bytes32(0));
         assertTrue(_contains(json, '"product":"GasRescueSwap"'));

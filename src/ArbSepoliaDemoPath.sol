@@ -23,6 +23,11 @@ library ArbSepoliaDemoPath {
     address internal constant OWNER = 0x30466A210961c0C2C13AF0A9d35dfC6E8858bA9D;
     address internal constant RELAYER = 0x8240124dc78a27c80354Ca813Df12aa2888A9AF6;
     address internal constant WETH = 0x980B62Da83eFf3D4576C647993b0c1D7faf17c73;
+    /// @dev Live open GRTT. The demo-token default for scripts, the lens, and
+    ///      this path library. Do not replace it with a nonce-predicted address.
+    ///      After Spencer signs the H1 migration, `HackQuestStatus.run` reads
+    ///      env `DEMO_TOKEN` and passes that address to `demoToken`. A zero
+    ///      address keeps this constant. Do not paste a nonce-predicted address.
     address internal constant GRTT = 0x5649fF51123D534044aA7E6cBc8762698Ffed713;
     address internal constant GMOCK = 0x30006e29a23c713070136F56db1BDf2A8B82B318;
     /// @dev Live `LockedDemoSwapRouter` `0xFE22…f7fc` (migrated 2026-10-01, 0.0195 ETH).
@@ -80,6 +85,14 @@ library ArbSepoliaDemoPath {
         address tokenIn
     ) internal pure returns (bool) {
         return tokenIn == GRTT || tokenIn == GMOCK;
+    }
+
+    /// @notice Demo token for the judge path. `address(0)` keeps live GRTT.
+    ///         Scripts read env `DEMO_TOKEN` and pass the value here.
+    function demoToken(
+        address configured
+    ) internal pure returns (address) {
+        return configured == address(0) ? GRTT : configured;
     }
 
     /// @notice Dry-mock amounts + caller-chosen `nativeTo` for GRTT or gMOCK.

@@ -277,18 +277,24 @@ Auditor M-1: do not key a per-user payout cap on `swapExact`'s third argument. `
 
 Two auditor options. (1) Restrict mint on both GRTT and gMOCK. No live setter, so this is a new token plus two delists. Owner-only mint is the draft below. A capped public faucet still lets every fresh address take one payout, so it is not used. (2) A global max ETH per hour on the router. The live router has `setMaxPayout`, `setRate`, and `withdrawEth`, and no hourly cap. That needs a new router. Do not edit `script/DeployLockedDemoSwapRouter.s.sol` (separate PR). An hourly cap slows the drain and does not close it. Not chosen.
 
-`script/MigrateH1GatedDemoToken.s.sol` is the owner script. It deploys `GatedDemoToken` (owner-only mint, 2 tokens to `0x5BFd…BA37`), allowlists it with `setEip2612Token`, and delists GRTT and gMOCK with `setTokenAllowed(token, false)` (that call also clears the EIP-2612 flag on live bytecode). Signer is `0x3046…bA9D`.
+`script/MigrateH1GatedDemoToken.s.sol` is the owner script. One run deploys `GatedDemoToken` (owner-only mint, 2e18 to `0x5BFd…BA37`) and then calls `setEip2612Token(deployed, true)` and `setTokenAllowed(token, false)` on GRTT and gMOCK, using the address `new` returned. `setTokenAllowed(false)` also clears the EIP-2612 flag on live bytecode. Signer is `0x3046…bA9D`. The script calls `vm.startBroadcast()` with no key in the repo and reverts on Foundry's default sender `0x1804…1f38`.
+
+`cast logs` of `TokenAllowed` and `Eip2612TokenAllowed` from block 300000000 through latest, then `cast call` of `allowedTokens` and `eip2612Tokens`: only gMOCK (block 305436708) and GRTT (block 305485600) are allowed. WETH is not. No third token, so the owner list has no extra delist.
 
 Simulate, no key, no `--broadcast`:
 
 ```bash
 forge script script/MigrateH1GatedDemoToken.s.sol:MigrateH1GatedDemoToken \
-  --rpc-url "$ARB_SEPOLIA_RPC_URL" --chain-id 421614 -vv
+  --rpc-url "$ARB_SEPOLIA_RPC_URL" \
+  --sender 0x30466A210961c0C2C13AF0A9d35dfC6E8858bA9D \
+  --chain-id 421614 -vv
 ```
 
-Spencer broadcasts from his machine only, with `PRIVATE_KEY` equal to the owner. Do not broadcast from CI or Cursor.
+Spencer broadcasts from his machine only, with `--account` / `--sender` equal to the owner. Do not broadcast from CI or Cursor.
 
-Until he signs, section 4a still expects `tokenAllowed=true` and `ready=true` for the open GRTT holder. After he signs, that default check goes `tokenAllowed=false` and `ready=false`. The fixture demo (empty Relayer URL) still runs. A live submit needs the new token address in the relayer `TOKEN_ADDRESS` and the wallet `VITE_TOKEN_ADDRESS_ARB_SEPOLIA`. This runbook does not change `render.yaml`. The deploy address depends on the owner nonce; read it from the simulation. Do not retarget `GasRescueLens.LIVE_ARB_GRTT` before that contract exists.
+Until he signs, section 4a still expects `tokenAllowed=true` and `ready=true` for the open GRTT holder (`DEMO_TOKEN` unset). After he signs, set one line `DEMO_TOKEN=<deployed>` before the next `HackQuestStatus` run. The in-script Lens then reports `ready=true` for `0x5BFd…BA37` on the new token. Do not paste a nonce-predicted address, and do not retarget `GasRescueLens.LIVE_ARB_GRTT`. The wallet flip is `VITE_TOKEN_ADDRESS_ARB_SEPOLIA`. The relayer flip is `DEMO_TOKEN` or `TOKEN_ADDRESS`. This runbook does not change `render.yaml`.
+
+A judge using their own wallet needs the owner to mint them the new token. Only `0x5BFd…BA37` is pre-funded with 2e18. The remaining drain bound is total new-token supply divided by `amountIn` per rescue, times the payout. Constructor supply 2e18 can fund one rescue at `amountIn = amountSwap = 2e18` (0.001 ETH cap) or two demo-slice rescues at `amountIn` 1e18 / `amountSwap` 0.2e18 (0.0001 ETH each, 0.0002 ETH total). Further owner mints raise that bound. The fixture demo (empty Relayer URL) still runs.
 
 `withdrawEth` and `setMaxPayout` exist on the live router. They are a stopgap (pull the 0.0195 ETH, or set the cap to 0). They are not this migration. A public one-per-address faucet would leave the drain open.
 

@@ -11,26 +11,34 @@ import {GatedDemoToken} from "../src/GatedDemoToken.sol";
 ///         from an agent.
 ///
 ///         Live GRTT `0x5649…d713` and gMOCK `0x3000…B318` both have public
-///         `mint` and no `owner()` / mint gate (checked against runtime
-///         bytecode). `setTokenAllowed` and `setEip2612Token` do exist on
-///         live `GasRescueSwap` `0x65e7…993D`. This script does not redeploy
-///         the rescue or the router.
+///         `mint` and no `owner()` / mint gate. `setTokenAllowed` and
+///         `setEip2612Token` exist on live `GasRescueSwap` `0x65e7…993D`.
+///         This script does not redeploy the rescue or the router.
+///
+///         One run deploys `GatedDemoToken` and then calls the three setters
+///         with the address `new` returned. It does not predict a CREATE
+///         address from the owner nonce.
+///
+///         Keyless. `vm.startBroadcast()` uses `--sender` / `--account`.
+///         Foundry's default sender is rejected.
 ///
 ///         Simulate (no key, no broadcast):
 ///
 ///           forge script script/MigrateH1GatedDemoToken.s.sol:MigrateH1GatedDemoToken \
-///             --rpc-url "$ARB_SEPOLIA_RPC_URL" --chain-id 421614 -vv
+///             --rpc-url "$ARB_SEPOLIA_RPC_URL" \
+///             --sender 0x30466A210961c0C2C13AF0A9d35dfC6E8858bA9D \
+///             --chain-id 421614 -vv
 ///
-///         Spencer, on his machine, after reading the simulated address:
+///         Spencer, on his machine, after reading the deployed address:
 ///
 ///           forge script script/MigrateH1GatedDemoToken.s.sol:MigrateH1GatedDemoToken \
-///             --rpc-url "$ARB_SEPOLIA_RPC_URL" --chain-id 421614 --broadcast
+///             --rpc-url "$ARB_SEPOLIA_RPC_URL" --chain-id 421614 \
+///             --account <owner-keystore> \
+///             --sender 0x30466A210961c0C2C13AF0A9d35dfC6E8858bA9D \
+///             --broadcast
 ///
-///         `PRIVATE_KEY` must be the owner key for that broadcast. Unset, the
-///         script simulates from the owner address.
-///
-///         The deploy address depends on the owner's nonce. Do not hardcode
-///         it until this simulation's nonce still matches chain.
+///         Then set `DEMO_TOKEN` (and the wallet / relayer token env) to the
+///         address this run prints. Do not paste a nonce-predicted address.
 interface ILiveSwapAdmin {
     function owner() external view returns (address);
     function setTokenAllowed(
@@ -58,8 +66,13 @@ contract MigrateH1GatedDemoToken is Script {
     address internal constant LIVE_GMOCK = 0x30006e29a23c713070136F56db1BDf2A8B82B318;
     /// @dev Demo GRTT holder. Receives the only tokens this script mints.
     address internal constant DEMO_HOLDER = 0x5BFd261b1eF7e61Bfea1ebfC87bDD8F4244BBA37;
+    /// @dev Foundry's unset script sender. Never a real owner key.
+    address internal constant FOUNDRY_DEFAULT_SENDER = 0x1804c8AB1F12E6bbf3894d4083f33e07309d1f38;
     /// @dev Two 1-token judge rescues (`amountIn` 1e18). Not a public supply.
     uint256 internal constant JUDGE_MINT = 2 ether;
+
+    error FoundryDefaultSender();
+    error SenderNotOwner(address sender);
 
     function run() external {
         require(block.chainid == ARB_SEPOLIA_CHAIN_ID, "MigrateH1: Arb Sepolia 421614 only");
@@ -68,20 +81,26 @@ contract MigrateH1GatedDemoToken is Script {
         require(swap.allowedTokens(LIVE_GRTT) && swap.eip2612Tokens(LIVE_GRTT), "MigrateH1: GRTT not allowlisted");
         require(swap.allowedTokens(LIVE_GMOCK) && swap.eip2612Tokens(LIVE_GMOCK), "MigrateH1: gMOCK not allowlisted");
 
-        uint256 nonce = vm.getNonce(OWNER);
-        address predicted = vm.computeCreateAddress(OWNER, nonce);
+        address sender = msg.sender;
+        if (sender == FOUNDRY_DEFAULT_SENDER) revert FoundryDefaultSender();
+        if (sender != OWNER) revert SenderNotOwner(sender);
 
-        bytes memory allowNew = abi.encodeCall(ILiveSwapAdmin.setEip2612Token, (predicted, true));
+        console2.log("signer           ", sender);
+        console2.log("judge mint       ", JUDGE_MINT);
+        console2.log("demo holder      ", DEMO_HOLDER);
+
+        vm.startBroadcast();
+
+        GatedDemoToken token = new GatedDemoToken(OWNER, DEMO_HOLDER, JUDGE_MINT);
+        address deployed = address(token);
+
+        bytes memory allowNew = abi.encodeCall(ILiveSwapAdmin.setEip2612Token, (deployed, true));
         bytes memory delistGrtt = abi.encodeCall(ILiveSwapAdmin.setTokenAllowed, (LIVE_GRTT, false));
         bytes memory delistGmock = abi.encodeCall(ILiveSwapAdmin.setTokenAllowed, (LIVE_GMOCK, false));
 
-        console2.log("signer           ", OWNER);
-        console2.log("owner nonce      ", nonce);
-        console2.log("predicted token  ", predicted);
-        console2.log("judge mint       ", JUDGE_MINT);
-        console2.log("demo holder      ", DEMO_HOLDER);
-        console2.log("tx1 deploy GatedDemoToken constructor args: owner, holder, 2e18");
-        console2.log("tx2 setEip2612Token(predicted, true)");
+        console2.log("deployed token   ", deployed);
+        console2.log("set DEMO_TOKEN to the deployed address above. Do not use a predicted address.");
+        console2.log("tx2 setEip2612Token(deployed, true)");
         console2.log("target", LIVE_SWAP);
         console2.logBytes(allowNew);
         console2.log("tx3 setTokenAllowed(GRTT, false)  // also clears eip2612 on live bytecode");
@@ -91,28 +110,17 @@ contract MigrateH1GatedDemoToken is Script {
         console2.log("target", LIVE_SWAP);
         console2.logBytes(delistGmock);
 
-        uint256 key = vm.envOr("PRIVATE_KEY", uint256(0));
-        if (key == 0) {
-            vm.startBroadcast(OWNER);
-        } else {
-            require(vm.addr(key) == OWNER, "PRIVATE_KEY must be owner 0x3046...bA9D");
-            vm.startBroadcast(key);
-        }
-
-        GatedDemoToken token = new GatedDemoToken(OWNER, DEMO_HOLDER, JUDGE_MINT);
-        swap.setEip2612Token(address(token), true);
+        swap.setEip2612Token(deployed, true);
         swap.setTokenAllowed(LIVE_GRTT, false);
         swap.setTokenAllowed(LIVE_GMOCK, false);
         vm.stopBroadcast();
 
-        require(address(token) == predicted, "MigrateH1: deploy address mismatch");
         require(token.owner() == OWNER, "MigrateH1: token owner");
         require(token.balanceOf(DEMO_HOLDER) == JUDGE_MINT, "MigrateH1: holder mint");
-        require(swap.allowedTokens(address(token)) && swap.eip2612Tokens(address(token)), "MigrateH1: new token");
+        require(swap.allowedTokens(deployed) && swap.eip2612Tokens(deployed), "MigrateH1: new token");
         require(!swap.allowedTokens(LIVE_GRTT) && !swap.eip2612Tokens(LIVE_GRTT), "MigrateH1: GRTT still allowed");
         require(!swap.allowedTokens(LIVE_GMOCK) && !swap.eip2612Tokens(LIVE_GMOCK), "MigrateH1: gMOCK still allowed");
 
-        console2.log("gated token      ", address(token));
         console2.log("holder balance   ", token.balanceOf(DEMO_HOLDER));
         console2.log("GRTT allowed     ", swap.allowedTokens(LIVE_GRTT));
         console2.log("gMOCK allowed    ", swap.allowedTokens(LIVE_GMOCK));

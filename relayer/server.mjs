@@ -47,7 +47,8 @@ const HOST = process.env.HOST || (process.env.RENDER ? "0.0.0.0" : "127.0.0.1");
 const FEE_TO = process.env.FEE_TO;
 const ROUTER = process.env.ROUTER_ADDRESS;
 const CHAIN_ID = Number(process.env.CHAIN_ID || 421614);
-const TOKEN = process.env.TOKEN_ADDRESS;
+// DEMO_TOKEN overrides TOKEN_ADDRESS after H1. Unset, TOKEN_ADDRESS (live GRTT) stays the demo token.
+const TOKEN = process.env.DEMO_TOKEN || process.env.TOKEN_ADDRESS;
 const DATA_DIR = process.env.DATA_DIR || "./data";
 const ADMIN_SECRET = String(process.env.ADMIN_SECRET || "").trim();
 const BROADCAST_MAX_ATTEMPTS = Number(process.env.BROADCAST_MAX_ATTEMPTS || DEFAULT_MAX_ATTEMPTS);

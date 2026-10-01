@@ -83,6 +83,16 @@ contract ArbSepoliaDemoPathTest is Test {
         );
     }
 
+    function test_demoToken_zeroKeepsLiveGrtt() public pure {
+        assertEq(ArbSepoliaDemoPath.demoToken(address(0)), GRTT);
+        assertEq(ArbSepoliaDemoPath.demoToken(GRTT), GRTT);
+    }
+
+    function test_demoToken_usesConfiguredAddress() public pure {
+        address next = address(uint160(0x1234));
+        assertEq(ArbSepoliaDemoPath.demoToken(next), next);
+    }
+
     function test_liveAddresses_pinned() public pure {
         assertEq(ArbSepoliaDemoPath.CHAIN_ID, 421_614);
         assertEq(ArbSepoliaDemoPath.SWAP, 0x65e712222745A8FCCbF038A90Fa75caB0867993D);

@@ -3,9 +3,16 @@ pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {IERC20Permit} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Permit.sol";
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 
+import {ArbSepoliaDemoPath} from "../../src/ArbSepoliaDemoPath.sol";
 import {GatedDemoToken} from "../../src/GatedDemoToken.sol";
+import {GasRescueLens} from "../../src/GasRescueLens.sol";
+import {IGasRescueSwap} from "../../src/interfaces/IGasRescueSwap.sol";
 import {LockedDemoSwapRouter} from "../../src/LockedDemoSwapRouter.sol";
+import {HackQuestStatus} from "../../script/HackQuestStatus.s.sol";
+import {MigrateH1GatedDemoToken} from "../../script/MigrateH1GatedDemoToken.s.sol";
 
 interface ILiveSwapAdmin {
     function owner() external view returns (address);
@@ -37,9 +44,14 @@ contract ArbSepoliaH1Test is Test {
     address internal constant LIVE_GRTT = 0x5649fF51123D534044aA7E6cBc8762698Ffed713;
     address internal constant LIVE_GMOCK = 0x30006e29a23c713070136F56db1BDf2A8B82B318;
     address internal constant LIVE_ROUTER = 0xFE22f32eF7a8f64B6c9E1CCAe31817B54184f7fc;
+    address internal constant LIVE_RELAYER = 0x8240124dc78a27c80354Ca813Df12aa2888A9AF6;
     address internal constant DEMO_HOLDER = 0x5BFd261b1eF7e61Bfea1ebfC87bDD8F4244BBA37;
+    address internal constant DRY_NATIVE_TO = 0x1111111111111111111111111111111111111111;
+    address internal constant FOUNDRY_DEFAULT_SENDER = 0x1804c8AB1F12E6bbf3894d4083f33e07309d1f38;
 
     bytes4 internal constant MINT_SELECTOR = 0x40c10f19;
+    bytes32 internal constant PERMIT_TYPEHASH =
+        keccak256("Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)");
     bytes4 internal constant OWNER_SELECTOR = 0x8da5cb5b;
 
     ILiveSwapAdmin internal swap;
@@ -133,6 +145,148 @@ contract ArbSepoliaH1Test is Test {
         assertTrue(swap.allowedTokens(LIVE_GRTT));
     }
 
+    /// @dev The four owner txs, on a fork, using the address `new` returns.
+    ///      Readiness stays true for the pre-funded holder once `DEMO_TOKEN`
+    ///      is that address. A fresh 0-ETH address cannot mint it and cannot
+    ///      get paid from the router.
+    function test_live_afterH1Migration_readyWithNewToken() public onlyFork {
+        uint256 inventory = LIVE_ROUTER.balance;
+        assertEq(inventory, 0.0195 ether);
+
+        vm.startPrank(LIVE_OWNER);
+        GatedDemoToken token = new GatedDemoToken(LIVE_OWNER, DEMO_HOLDER, 2 ether);
+        swap.setEip2612Token(address(token), true);
+        swap.setTokenAllowed(LIVE_GRTT, false);
+        swap.setTokenAllowed(LIVE_GMOCK, false);
+        vm.stopPrank();
+
+        assertEq(token.balanceOf(DEMO_HOLDER), 2 ether);
+        assertTrue(swap.allowedTokens(address(token)) && swap.eip2612Tokens(address(token)));
+        assertFalse(swap.allowedTokens(LIVE_GRTT) || swap.eip2612Tokens(LIVE_GRTT));
+        assertFalse(swap.allowedTokens(LIVE_GMOCK) || swap.eip2612Tokens(LIVE_GMOCK));
+
+        HackQuestStatus status = new HackQuestStatus();
+        string memory json = status.reportJson(
+            DEMO_HOLDER, 0, 1 ether, DRY_NATIVE_TO, bytes32(0), address(token), LIVE_SWAP, address(0)
+        );
+
+        assertTrue(_contains(json, '"ready":true'));
+        assertTrue(_contains(json, '"tokenAllowed":true'));
+        assertTrue(_contains(json, '"tokenEip2612":true'));
+        assertTrue(_contains(json, '"userFunded":true'));
+        assertTrue(_contains(json, '"routerAllowed":true'));
+        assertTrue(_contains(json, string.concat('"demoToken":"', vm.toString(address(token)), '"')));
+
+        GasRescueLens lens = new GasRescueLens(LIVE_SWAP);
+        GasRescueLens.RescueReadiness memory holder =
+            lens.rescueReadiness(LIVE_RELAYER, address(token), LIVE_ROUTER, DEMO_HOLDER, 0, 1 ether);
+        assertTrue(holder.ready);
+        assertTrue(holder.tokenAllowed && holder.tokenEip2612 && holder.userFunded && holder.routerAllowed);
+
+        uint256 pk = uint256(keccak256("h1-fork-fresh")) | 1;
+        address attacker = vm.addr(pk);
+        vm.deal(attacker, 0);
+        vm.prank(attacker);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, attacker));
+        token.mint(attacker, 1 ether);
+        assertEq(token.balanceOf(attacker), 0);
+
+        _mint(LIVE_GRTT, attacker, 1 ether);
+        assertGe(IERC20(LIVE_GRTT).balanceOf(attacker), 1 ether);
+
+        assertFalse(_rescue(LIVE_GRTT, attacker, pk), "delisted GRTT must not pay");
+        assertFalse(_rescue(address(token), attacker, pk), "unfunded gated token must not pay");
+        assertEq(LIVE_ROUTER.balance, inventory, "router inventory unchanged");
+        assertEq(attacker.balance, 0, "fresh address received no ETH");
+
+        GasRescueLens.RescueReadiness memory fresh =
+            lens.rescueReadiness(LIVE_RELAYER, address(token), LIVE_ROUTER, attacker, 0, 1 ether);
+        assertFalse(fresh.userFunded);
+        assertFalse(fresh.ready);
+    }
+
+    function test_live_scriptRejectsFoundryDefaultSender() public onlyFork {
+        MigrateH1GatedDemoToken migration = new MigrateH1GatedDemoToken();
+        vm.prank(FOUNDRY_DEFAULT_SENDER);
+        vm.expectRevert(MigrateH1GatedDemoToken.FoundryDefaultSender.selector);
+        migration.run();
+
+        address other = makeAddr("not-owner");
+        vm.prank(other);
+        vm.expectRevert(abi.encodeWithSelector(MigrateH1GatedDemoToken.SenderNotOwner.selector, other));
+        migration.run();
+    }
+
+    function _rescue(
+        address token,
+        address user,
+        uint256 pk
+    ) internal returns (bool ok) {
+        uint256 amountIn = 1 ether;
+        uint256 amountSwap = 0.2 ether;
+        uint256 deadline = block.timestamp + 1 hours;
+        bytes memory swapData = abi.encodeWithSelector(
+            LockedDemoSwapRouter.swapExact.selector, token, amountSwap, user
+        );
+        IGasRescueSwap.Order memory order = IGasRescueSwap.Order({
+            user: user,
+            tokenIn: token,
+            amountIn: amountIn,
+            feeAmount: 0.01 ether,
+            feeTo: LIVE_OWNER,
+            amountSwap: amountSwap,
+            minAmountOut: 0.0001 ether,
+            to: user,
+            nativeTo: user,
+            router: LIVE_ROUTER,
+            pathHash: keccak256(swapData),
+            chainId: ARB_SEPOLIA_CHAIN_ID,
+            deadline: deadline,
+            nonce: 0
+        });
+        bytes32 orderHash = ILiveRescue(LIVE_SWAP).hashOrder(order);
+        (uint8 ov, bytes32 orr, bytes32 os) = vm.sign(pk, orderHash);
+        bytes memory sig = abi.encodePacked(orr, os, ov);
+        (uint8 v, bytes32 r, bytes32 s) = _signPermit(token, user, amountIn, deadline, pk);
+        vm.prank(LIVE_RELAYER);
+        (ok,) = LIVE_SWAP.call(
+            abi.encodeCall(IGasRescueSwap.rescueWithPermit, (order, sig, v, r, s, swapData))
+        );
+    }
+
+    function _signPermit(
+        address token,
+        address user,
+        uint256 value,
+        uint256 deadline,
+        uint256 pk
+    ) internal view returns (uint8 v, bytes32 r, bytes32 s) {
+        bytes32 structHash =
+            keccak256(abi.encode(PERMIT_TYPEHASH, user, LIVE_SWAP, value, IERC20Permit(token).nonces(user), deadline));
+        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", IERC20Permit(token).DOMAIN_SEPARATOR(), structHash));
+        (v, r, s) = vm.sign(pk, digest);
+    }
+
+    function _contains(
+        string memory haystack,
+        string memory needle
+    ) internal pure returns (bool) {
+        bytes memory h = bytes(haystack);
+        bytes memory n = bytes(needle);
+        if (n.length == 0 || n.length > h.length) return false;
+        for (uint256 i = 0; i <= h.length - n.length; i++) {
+            bool match_ = true;
+            for (uint256 j = 0; j < n.length; j++) {
+                if (h[i + j] != n[j]) {
+                    match_ = false;
+                    break;
+                }
+            }
+            if (match_) return true;
+        }
+        return false;
+    }
+
     function _mint(
         address token,
         address to,
@@ -169,4 +323,10 @@ contract ArbSepoliaH1Test is Test {
         }
         return false;
     }
+}
+
+interface ILiveRescue {
+    function hashOrder(
+        IGasRescueSwap.Order calldata order
+    ) external view returns (bytes32);
 }

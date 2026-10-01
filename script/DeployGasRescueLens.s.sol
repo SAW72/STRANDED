@@ -28,8 +28,15 @@ contract DeployGasRescueLens is Script {
     address internal constant LIVE_BASE_SWAP = 0x21A1ADf810e64B5bd1d530D31abA6856b8DEf688;
 
     function prepare() external view {
+        prepareFor(_swap());
+    }
+
+    /// @notice Print constructor args for `swap`. Does not read env.
+    function prepareFor(
+        address swap
+    ) public view {
         _requireTestnet();
-        address swap = _swap();
+        require(swap != address(0), "GAS_RESCUE_SWAP_ADDRESS required");
         bytes memory args = abi.encode(swap);
         console2.log("DeployGasRescueLens prepare (no broadcast)");
         console2.log("chain            ", block.chainid);

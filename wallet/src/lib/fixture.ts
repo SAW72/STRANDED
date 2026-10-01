@@ -4,6 +4,7 @@ import mockBase from "../fixtures/mock-quotes-response-base.json";
 import sampleArb from "../fixtures/sample-swap-quote-arb.json";
 import sampleBase from "../fixtures/sample-swap-quote.json";
 import { ARB_SEPOLIA_CHAIN_ID, BASE_SEPOLIA_CHAIN_ID, type SupportedChainId } from "./chains";
+import { LIVE_ARB_GRTT } from "./demoToken";
 import { parseQuoteResponse, type RescueQuote } from "./quotes";
 
 /** Dry-mock only. Live relayer hashes `swapExact(tokenIn, amountSwap, nativeTo)` — see `demoPath.ts`. */
@@ -22,7 +23,7 @@ export const BASE_SEPOLIA_DEPLOY = {
 /** Arb Sepolia (421614) live deploy — fixtures pin these addrs; quotes stay fixture-only unless Relayer URL is set. */
 export const ARB_SEPOLIA_DEPLOY = {
   chainId: ARB_SEPOLIA_CHAIN_ID,
-  tokenIn: "0x5649fF51123D534044aA7E6cBc8762698Ffed713",
+  tokenIn: LIVE_ARB_GRTT,
   tokenSymbol: "GRTT",
   feeTo: "0x30466A210961c0C2C13AF0A9d35dfC6E8858bA9D",
   gasRescue: "0x65e712222745A8FCCbF038A90Fa75caB0867993D",
