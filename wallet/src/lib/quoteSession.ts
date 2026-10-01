@@ -1,3 +1,5 @@
+import { isRelayerTimeout, RESCUE_SUBMIT_TIMEOUT } from "./relayerError";
+
 /**
  * Quote + signature session. After a confirmed rescue the spent Order (nonce,
  * minAmountOut, deadline) and its signatures must be dropped. Replaying them
@@ -61,3 +63,52 @@ export function quoteSessionAfterRescueError(failure: {
 
 /** Quotes react-query prefix. removeQueries on this key so the same amountIn cannot reuse a spent nonce. */
 export const QUOTES_QUERY_KEY = "quotes" as const;
+
+export type BeforePostSignFailure = {
+  stage: "before-post";
+  signed: null;
+  /** Quote and detailsConfirmed stay. The POST never started, so the nonce is not spent. */
+  dropCachedQuote: false;
+  signError: string;
+};
+
+export type PostingThrowReset = RescueErrorReset & { stage: "posting" };
+
+/**
+ * Catch path for onSign.
+ * Before POST /v1/rescues (wallet signature reject and other pre-post throws), keep the quote.
+ * After posting has started, same reset as a failed rescue: banner stays, confirm clears, quote drops.
+ */
+export function quoteSessionAfterSignThrow(input: {
+  rescuePostAttempted: boolean;
+  error: unknown;
+}): BeforePostSignFailure | PostingThrowReset {
+  if (!input.rescuePostAttempted) {
+    return {
+      stage: "before-post",
+      signed: null,
+      dropCachedQuote: false,
+      signError: thrownText(input.error, "Signature rejected."),
+    };
+  }
+  if (isRelayerTimeout(input.error)) {
+    return {
+      stage: "posting",
+      ...quoteSessionAfterRescueError({
+        message: RESCUE_SUBMIT_TIMEOUT,
+        relayerMessage: true,
+      }),
+    };
+  }
+  return {
+    stage: "posting",
+    ...quoteSessionAfterRescueError({
+      message: thrownText(input.error, "The rescue request failed."),
+    }),
+  };
+}
+
+function thrownText(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message.trim()) return error.message;
+  return fallback;
+}

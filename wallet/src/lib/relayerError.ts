@@ -8,8 +8,15 @@
 export const RESCUE_SERVICE_BUSY =
   "The rescue service is busy or unavailable right now. Please try again in a minute.";
 
+/** POST /v1/quotes timed out. Signing stays blocked because there is no quote. */
 export const RESCUE_SERVICE_TIMEOUT =
   "The rescue service didn't respond. Please try again in a minute.";
+
+/**
+ * POST /v1/rescues timed out. The relayer may still broadcast after the client gives up.
+ */
+export const RESCUE_SUBMIT_TIMEOUT =
+  "The rescue service didn't respond in time. It may still go through, so check your wallet activity before trying again.";
 
 /** Client deadline for POST /v1/quotes and POST /v1/rescues. */
 export const RELAYER_FETCH_TIMEOUT_MS = 25_000;

@@ -6,6 +6,7 @@ import {
   RELAYER_FETCH_TIMEOUT_MS,
   RESCUE_SERVICE_BUSY,
   RESCUE_SERVICE_TIMEOUT,
+  RESCUE_SUBMIT_TIMEOUT,
   busyServiceMessage,
   relayerUserMessage,
   type RelayerMessageContext,
@@ -378,7 +379,9 @@ describe("quote and rescue endpoints", () => {
     const rescue = await submitRescue("http://relayer.test", rescueInput, hang, { timeoutMs: 40 });
     expect(rescue.ok).toBe(false);
     if (rescue.ok) throw new Error("expected rescue timeout");
-    expect(rescue.reason).toBe(RESCUE_SERVICE_TIMEOUT);
+    expect(rescue.reason).toBe(RESCUE_SUBMIT_TIMEOUT);
+    expect(rescue.reason).not.toBe(RESCUE_SERVICE_TIMEOUT);
     expect(rescue.relayerMessage).toBe(true);
+    expect(rescue.reason).not.toMatch(/Relayer|HTTP/);
   });
 });
