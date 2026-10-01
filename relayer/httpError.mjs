@@ -53,7 +53,8 @@ export const SIMULATION_FAILED_MESSAGE =
   "This rescue wouldn't go through right now. Please get a new quote and try again.";
 export const SWAP_FAILED_MESSAGE =
   "There isn't enough gas available for this rescue right now. Please try again later.";
-export const SIGNATURE_MISMATCH_MESSAGE = "The signature didn't match. Please sign again.";
+export const SIGNATURE_MISMATCH_MESSAGE =
+  "The signature didn't match. Please get a new quote and sign again.";
 
 /**
  * @param {number} status

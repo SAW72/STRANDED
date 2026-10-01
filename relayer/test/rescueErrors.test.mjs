@@ -200,6 +200,12 @@ describe("plain rescue error messages", () => {
         pub.body.message,
         name === "SwapFailed" ? SWAP_FAILED_MESSAGE : SIGNATURE_MISMATCH_MESSAGE,
       );
+      if (name === "ERC2612InvalidSigner") {
+        assert.equal(
+          pub.body.message,
+          "The signature didn't match. Please get a new quote and sign again.",
+        );
+      }
       assert.equal(JSON.stringify(pub.body).includes("0xdeadbeef"), false);
       assert.equal(JSON.stringify(pub.body).includes("ContractFunctionRevertedError"), false);
     }
@@ -260,6 +266,10 @@ describe("plain rescue error messages", () => {
     assert.equal(permit.body.error, "simulation_failed");
     assert.equal(permit.body.revert, "ERC2612InvalidSigner");
     assert.equal(permit.body.message, SIGNATURE_MISMATCH_MESSAGE);
+    assert.equal(
+      permit.body.message,
+      "The signature didn't match. Please get a new quote and sign again.",
+    );
     assert.equal(JSON.stringify(permit.body).includes(signer), false);
     assert.equal(JSON.stringify(permit.body).includes(owner), false);
     assert.equal(JSON.stringify(permit.body).includes("0x4b800e46"), false);
