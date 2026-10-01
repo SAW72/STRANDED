@@ -67,9 +67,11 @@ export const QUOTE_IDLE_AMOUNT = "Enter an amount to see the rescue plan.";
 export const QUOTE_IDLE_UNAVAILABLE = "Rescue details aren’t available yet.";
 
 export const FIXTURE_BANNER =
-  "Sample quote — not live. These numbers are a fixture for review, not a Relayer price.";
+  "Sample quote — not live. These numbers are a fixture for review, not a live Relayer quote.";
 export const FIXTURE_HELP =
-  "No Relayer URL is set, so this is a sample rescue for review. It is not a live price.";
+  "No Relayer URL is set, so this is a sample rescue for review. It is not a live quote.";
+export const SAMPLE_MODE_NOTE =
+  "Sample mode uses the fixture amounts below. Entering a live amount is disabled so we do not invent a Relayer quote.";
 export const USE_SAMPLE_LABEL = "Use sample quote";
 export const CLEAR_SAMPLE_LABEL = "Clear sample";
 export const SAMPLE_BADGE = "Sample · not live";

@@ -1,12 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { sampleFixtureQuote } from "./fixture";
 import { buildOrder } from "./order";
+import { QUOTE_ERROR } from "../copy";
 import { fetchRescueQuote } from "./quotes";
 import {
   RELAYER_FETCH_TIMEOUT_MS,
+  RESCUE_COULD_NOT_SEND,
   RESCUE_SERVICE_BUSY,
   RESCUE_SERVICE_TIMEOUT,
   RESCUE_SUBMIT_TIMEOUT,
+  RESCUE_UNREACHABLE,
   busyServiceMessage,
   relayerUserMessage,
   type RelayerMessageContext,
@@ -327,7 +330,8 @@ describe("quote and rescue endpoints", () => {
     expect(rescue.relayerMessage).toBeUndefined();
 
     const bare = await quoteReason(400, { ok: false, error: "invalid_address" });
-    expect(bare.reason).toBe("Relayer POST /v1/quotes returned HTTP 400. Signing is blocked.");
+    expect(bare.reason).toBe(QUOTE_ERROR);
+    expect(bare.reason).not.toMatch(/Relayer POST|HTTP \d+/);
   });
 
   it("uses the busy sentence for a non-JSON 503 and 504, and keeps a JSON message", async () => {
@@ -353,8 +357,8 @@ describe("quote and rescue endpoints", () => {
       error: "gateway",
       message: "Try later from upstream.",
     });
-    expect(json504.reason).not.toBe(RESCUE_SERVICE_BUSY);
-    expect(json504.reason).toMatch(/HTTP 504/);
+    expect(json504.reason).toBe(RESCUE_COULD_NOT_SEND);
+    expect(json504.reason).not.toMatch(/Relayer POST|HTTP \d+|gateway/);
   });
 
   it("times out a hung quote and rescue and blocks the quote", async () => {
@@ -383,5 +387,80 @@ describe("quote and rescue endpoints", () => {
     expect(rescue.reason).not.toBe(RESCUE_SERVICE_TIMEOUT);
     expect(rescue.relayerMessage).toBe(true);
     expect(rescue.reason).not.toMatch(/Relayer|HTTP/);
+  });
+
+  it("uses a plain sentence when the quote or rescue cannot be reached", async () => {
+    const offline: typeof fetch = async () => {
+      throw new Error("offline");
+    };
+    const quote = await fetchRescueQuote("http://relayer.test", quoteParams, offline);
+    expect(quote.ok).toBe(false);
+    if (quote.ok) throw new Error("expected quote failure");
+    expect(quote.reason).toBe(RESCUE_UNREACHABLE);
+    expect(quote.userMessage).toBe(RESCUE_UNREACHABLE);
+    expect(quote.reason).not.toMatch(/Relayer POST|HTTP \d+/);
+
+    const rescue = await submitRescue("http://relayer.test", rescueInput, offline);
+    expect(rescue.ok).toBe(false);
+    if (rescue.ok) throw new Error("expected rescue failure");
+    expect(rescue.reason).toBe(RESCUE_UNREACHABLE);
+    expect(rescue.relayerMessage).toBe(true);
+  });
+
+  it("reads Retry-After when the body has no retry time, and ignores bad values", async () => {
+    const message = `This wallet already got a rescue. You can try again at ${SAME_DAY_ISO}.`;
+    const body = { ok: false, error: "rate_limited_wallet", message };
+
+    const fromSeconds = relayerUserMessage(429, body, { ...context, retryAfterHeader: "3600" });
+    expect(fromSeconds).toBe("This wallet already got a rescue. You can try again at 12:00 PM.");
+
+    const fromDate = relayerUserMessage(429, body, {
+      ...context,
+      retryAfterHeader: "Fri, 02 Oct 2026 22:42:00 GMT",
+    });
+    expect(fromDate).toBe("This wallet already got a rescue. You can try again at Oct 2, 6:42 PM.");
+
+    const bodyWins = {
+      ...body,
+      retryAt: SAME_DAY_ISO,
+    };
+    expect(
+      relayerUserMessage(429, bodyWins, {
+        ...context,
+        retryAfterHeader: "Fri, 02 Oct 2026 22:42:00 GMT",
+      }),
+    ).toBe("This wallet already got a rescue. You can try again at 6:00 PM.");
+
+    const retryAfterWins = relayerUserMessage(
+      429,
+      { ...body, retryAfter: 3600 },
+      { ...context, retryAfterHeader: "Fri, 02 Oct 2026 22:42:00 GMT" },
+    );
+    expect(retryAfterWins).toBe("This wallet already got a rescue. You can try again at 12:00 PM.");
+
+    expect(
+      relayerUserMessage(429, { ...body, retryAt: "2020-01-01T00:00:00.000Z" }, context),
+    ).toBe(message);
+    expect(relayerUserMessage(429, body, { ...context, retryAfterHeader: "nope" })).toBe(message);
+    expect(relayerUserMessage(429, body, { ...context, retryAfterHeader: "-5" })).toBe(message);
+    expect(
+      relayerUserMessage(429, body, { ...context, retryAfterHeader: "Wed, 01 Oct 2025 00:00:00 GMT" }),
+    ).toBe(message);
+    expect(
+      relayerUserMessage(429, { ...body, retryAt: "2026-09-01T00:00:00.000Z", retryAfter: -30 }, {
+        ...context,
+        retryAfterHeader: "3600",
+      }),
+    ).toBe("This wallet already got a rescue. You can try again at 12:00 PM.");
+
+    const fetchImpl: typeof fetch = async () =>
+      new Response(JSON.stringify(body), {
+        status: 429,
+        headers: { "Content-Type": "application/json", "Retry-After": "3600" },
+      });
+    const quote = await fetchRescueQuote("http://relayer.test", quoteParams, fetchImpl, context);
+    expect(quote.ok).toBe(false);
+    if (quote.ok) throw new Error("expected quote failure");
+    expect(quote.reason).toBe("This wallet already got a rescue. You can try again at 12:00 PM.");
   });
 });

@@ -212,6 +212,27 @@ h1 {
   font-size: 0.85rem;
 }
 
+.demo-banner {
+  margin: 0 0 1rem;
+  padding: 0.45rem 0.7rem;
+  border: 1px solid #e6d3a3;
+  border-radius: 12px;
+  background: #fff8e6;
+  color: var(--text);
+  font-size: 0.82rem;
+  line-height: 1.35;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+.token-disclosure {
+  margin: 0.75rem 0 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
 .banner {
   border-radius: 10px;
   padding: 0.75rem 0.85rem;

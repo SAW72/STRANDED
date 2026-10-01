@@ -18,6 +18,24 @@ export const RESCUE_SERVICE_TIMEOUT =
 export const RESCUE_SUBMIT_TIMEOUT =
   "The rescue service didn't respond in time. It may still go through, so check your wallet activity before trying again.";
 
+/** Fetch failed before a response. The request may not have reached the service. */
+export const RESCUE_UNREACHABLE =
+  "We couldn't reach the rescue service. Check your connection and try again.";
+
+/** A throw after POST /v1/rescues started. The broadcast may already be in flight. */
+export const RESCUE_SEND_FAILED =
+  "Something went wrong sending the rescue. Check your wallet activity, then get a new quote and try again.";
+
+export const RESCUE_NOT_AVAILABLE =
+  "The rescue service is not available right now. Please try again in a minute.";
+
+export const RESCUE_COULD_NOT_SEND =
+  "The rescue could not be sent. Request a fresh quote and try again.";
+
+export const SIGNATURE_CANCELLED = "You cancelled the signature in your wallet.";
+
+export const SIGNATURE_FAILED = "Your wallet couldn't sign this request. Please try again.";
+
 /** Client deadline for POST /v1/quotes and POST /v1/rescues. */
 export const RELAYER_FETCH_TIMEOUT_MS = 25_000;
 
@@ -35,6 +53,11 @@ export type RelayerMessageContext = {
   locale?: string;
   /** Test override for {@link RELAYER_FETCH_TIMEOUT_MS}. */
   timeoutMs?: number;
+  /**
+   * `Retry-After` response header. Used for HTTP 429 only when the body has
+   * no usable `retryAt` or `retryAfter`.
+   */
+  retryAfterHeader?: string | null;
 };
 
 function asRecord(body: unknown): Record<string, unknown> | null {
@@ -96,16 +119,40 @@ function formatLocalRetry(when: Date, now: Date, locale?: string): string | null
   }
 }
 
-function retryInstant(body: Record<string, unknown>, now: Date): Date | null {
+function notInThePast(when: Date, now: Date): Date | null {
+  if (Number.isNaN(when.getTime()) || Number.isNaN(now.getTime())) return null;
+  if (when.getTime() < now.getTime()) return null;
+  return when;
+}
+
+function secondsFromNow(seconds: number, now: Date): Date | null {
+  if (!Number.isFinite(seconds) || seconds < 0) return null;
+  return notInThePast(new Date(now.getTime() + seconds * 1000), now);
+}
+
+/** Delta-seconds, or an HTTP-date. Garbage, negative, and past values are ignored. */
+function retryFromHeader(header: string | null | undefined, now: Date): Date | null {
+  if (typeof header !== "string") return null;
+  const trimmed = header.trim();
+  if (!trimmed) return null;
+  if (/^\d+$/.test(trimmed)) return secondsFromNow(Number(trimmed), now);
+  return notInThePast(new Date(trimmed), now);
+}
+
+function retryInstant(
+  body: Record<string, unknown>,
+  now: Date,
+  header: string | null | undefined,
+): Date | null {
   if (typeof body.retryAt === "string" && body.retryAt.trim()) {
-    const at = new Date(body.retryAt.trim());
-    if (!Number.isNaN(at.getTime())) return at;
+    const at = notInThePast(new Date(body.retryAt.trim()), now);
+    if (at) return at;
   }
-  if (typeof body.retryAfter === "number" && Number.isFinite(body.retryAfter) && body.retryAfter >= 0) {
-    const at = new Date(now.getTime() + body.retryAfter * 1000);
-    if (!Number.isNaN(at.getTime())) return at;
+  if (typeof body.retryAfter === "number") {
+    const at = secondsFromNow(body.retryAfter, now);
+    if (at) return at;
   }
-  return null;
+  return retryFromHeader(header, now);
 }
 
 function withLocalTime(message: string, local: string): string {
@@ -162,7 +209,7 @@ export function relayerUserMessage(
     if (status !== 429) return message;
 
     const now = context?.now && !Number.isNaN(context.now.getTime()) ? context.now : new Date();
-    const when = retryInstant(record, now);
+    const when = retryInstant(record, now, context?.retryAfterHeader);
     if (!when) return message;
     const local = formatLocalRetry(when, now, context?.locale);
     if (!local) return message;

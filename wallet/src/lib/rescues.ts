@@ -1,7 +1,10 @@
 import { isAddress, isHex, type Hex } from "viem";
 import type { RescueOrder } from "./order";
 import {
+  RESCUE_COULD_NOT_SEND,
+  RESCUE_NOT_AVAILABLE,
   RESCUE_SUBMIT_TIMEOUT,
+  RESCUE_UNREACHABLE,
   busyServiceMessage,
   isRelayerTimeout,
   relayerFetchSignal,
@@ -76,9 +79,9 @@ function asErrorBody(body: unknown): { error: string; revert: string } {
 }
 
 /**
- * Map Relayer POST /v1/rescues failure JSON into a visible reason.
+ * Map a failed POST /v1/rescues into a visible reason.
  * HTTP 400, 429, and 502 with a `message` use that text (429 times are local).
- * Otherwise the error code stays in the reason.
+ * Other codes are logged by the caller and shown as a fixed sentence.
  */
 export function publicSubmitError(
   status: number,
@@ -89,7 +92,7 @@ export function publicSubmitError(
   if (userMessage) return userMessage;
   const { error, revert } = asErrorBody(body);
   if (status === 404 || error === "not_found") {
-    return "Relayer POST /v1/rescues is not available.";
+    return RESCUE_NOT_AVAILABLE;
   }
   if (error === "insufficient_balance") {
     return "Amount is larger than this wallet's token balance. Request a fresh quote for the remaining balance.";
@@ -106,16 +109,7 @@ export function publicSubmitError(
   if (error === "simulation_failed" && /0x81ceff30|SwapFailed/i.test(revert)) {
     return "The mock swap router is out of native gas, so the swap cannot pay out. Rescue was not broadcast.";
   }
-  if (error === "simulation_failed" && revert) {
-    return `Relayer POST /v1/rescues HTTP ${status} simulation_failed (${revert}). Rescue was not broadcast.`;
-  }
-  if (error === "simulation_failed") {
-    return `Relayer POST /v1/rescues HTTP ${status} simulation_failed. Rescue was not broadcast.`;
-  }
-  if (error) {
-    return `Relayer POST /v1/rescues HTTP ${status} ${error}.`;
-  }
-  return `Relayer POST /v1/rescues returned HTTP ${status}.`;
+  return RESCUE_COULD_NOT_SEND;
 }
 
 /**
@@ -156,9 +150,8 @@ export async function submitRescue(
       console.error("[rescue] POST /v1/rescues timed out", err);
       return { ok: false, reason: RESCUE_SUBMIT_TIMEOUT, relayerMessage: true };
     }
-    const reason = `Could not reach Relayer POST /v1/rescues at ${relayerBase}.`;
-    console.error("[rescue] POST /v1/rescues network error", err);
-    return { ok: false, reason };
+    console.error("[rescue] POST /v1/rescues network error", { url: source, err });
+    return { ok: false, reason: RESCUE_UNREACHABLE, relayerMessage: true };
   }
 
   let body: unknown = null;
@@ -169,9 +162,14 @@ export async function submitRescue(
   }
 
   if (!response.ok) {
+    const messageContext: RelayerMessageContext = {
+      ...context,
+      retryAfterHeader: response.headers.get("Retry-After"),
+    };
     const userMessage =
-      relayerUserMessage(response.status, body, context) ?? busyServiceMessage(response.status, body);
-    const reason = userMessage ?? publicSubmitError(response.status, body, context);
+      relayerUserMessage(response.status, body, messageContext) ??
+      busyServiceMessage(response.status, body);
+    const reason = userMessage ?? publicSubmitError(response.status, body, messageContext);
     console.error("[rescue] POST /v1/rescues failed", {
       status: response.status,
       body,

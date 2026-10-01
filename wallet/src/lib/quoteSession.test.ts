@@ -1,12 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { sampleFixtureQuote } from "./fixture";
 import { canPromptSignatures, rescuePhase } from "./processGate";
-import { RESCUE_SUBMIT_TIMEOUT } from "./relayerError";
+import { RESCUE_SEND_FAILED, RESCUE_SUBMIT_TIMEOUT, RESCUE_UNREACHABLE, SIGNATURE_CANCELLED, SIGNATURE_FAILED } from "./relayerError";
 import {
   QUOTES_QUERY_KEY,
   quoteSessionAfterRescueError,
   quoteSessionAfterRescueSuccess,
   quoteSessionAfterSignThrow,
+  quoteSessionOnNewAttempt,
 } from "./quoteSession";
 
 describe("quoteSessionAfterRescueSuccess", () => {
@@ -71,11 +72,11 @@ describe("quoteSessionAfterRescueError", () => {
 
   it("keeps a plain rescue error when the response is not a relayer message", () => {
     const reset = quoteSessionAfterRescueError({
-      message: "Could not reach Relayer POST /v1/rescues at http://relayer.test.",
+      message: RESCUE_UNREACHABLE,
     });
     expect(reset.submitState).toEqual({
       kind: "error",
-      message: "Could not reach Relayer POST /v1/rescues at http://relayer.test.",
+      message: RESCUE_UNREACHABLE,
     });
     expect(reset.submitState.relayerMessage).toBeUndefined();
     expect(reset.dropCachedQuote).toBe(true);
@@ -121,7 +122,12 @@ describe("quoteSessionAfterSignThrow", () => {
 
     expect(outcome.stage).toBe("posting");
     if (outcome.stage !== "posting") return;
-    expect(outcome.submitState).toEqual({ kind: "error", message: "socket hang up" });
+    expect(outcome.submitState).toEqual({
+      kind: "error",
+      message: RESCUE_SEND_FAILED,
+      relayerMessage: true,
+    });
+    expect(outcome.submitState.kind === "error" && outcome.submitState.message).not.toMatch(/socket hang up/);
     expect(outcome.dropCachedQuote).toBe(true);
     expect(outcome.detailsConfirmed).toBe(false);
 
@@ -161,7 +167,7 @@ describe("quoteSessionAfterSignThrow", () => {
       stage: "before-post",
       signed: null,
       dropCachedQuote: false,
-      signError: "User rejected the request.",
+      signError: SIGNATURE_CANCELLED,
     });
 
     const quoteAfterReject = outcome.dropCachedQuote ? null : stale;
@@ -176,5 +182,48 @@ describe("quoteSessionAfterSignThrow", () => {
         }),
       ),
     ).toBe(true);
+  });
+
+  it("hides viem rejection details and uses a fixed sentence for other signing errors", () => {
+    const viem = new Error(
+      "User rejected the request.\n\nDetails: User rejected the request.\nVersion: viem@2.37.8",
+    );
+    viem.name = "UserRejectedRequestError";
+    const rejected = quoteSessionAfterSignThrow({ rescuePostAttempted: false, error: viem });
+    expect(rejected.stage).toBe("before-post");
+    if (rejected.stage !== "before-post") return;
+    expect(rejected.signError).toBe(SIGNATURE_CANCELLED);
+    expect(rejected.signError).not.toMatch(/viem@|Details:/);
+
+    const coded = quoteSessionAfterSignThrow({
+      rescuePostAttempted: false,
+      error: Object.assign(new Error("denied"), { code: 4001 }),
+    });
+    expect(coded.stage === "before-post" && coded.signError).toBe(SIGNATURE_CANCELLED);
+
+    const other = quoteSessionAfterSignThrow({
+      rescuePostAttempted: false,
+      error: new Error("missing provider"),
+    });
+    expect(other.stage === "before-post" && other.signError).toBe(SIGNATURE_FAILED);
+    expect(other.stage === "before-post" && other.signError).not.toMatch(/missing provider|viem@|Details:/);
+  });
+});
+
+describe("quoteSessionOnNewAttempt", () => {
+  it("clears a previous rescue error and leaves other submit states alone", () => {
+    expect(
+      quoteSessionOnNewAttempt({
+        kind: "error",
+        message: RESCUE_SUBMIT_TIMEOUT,
+        relayerMessage: true,
+      }),
+    ).toEqual({ kind: "idle" });
+    expect(quoteSessionOnNewAttempt({ kind: "idle" })).toEqual({ kind: "idle" });
+    expect(quoteSessionOnNewAttempt({ kind: "posting" })).toEqual({ kind: "posting" });
+    expect(quoteSessionOnNewAttempt({ kind: "ok", txHash: "0xabc" })).toEqual({
+      kind: "ok",
+      txHash: "0xabc",
+    });
   });
 });
