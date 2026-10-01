@@ -28,7 +28,7 @@ Before that migration, the allowlisted demo router was the open `MockSwapRouter`
 
 The inventory now sits on `LockedDemoSwapRouter` `0xFE22f32eF7a8f64B6c9E1CCAe31817B54184f7fc` (0.0195 ETH). `allowedRouters` is true for that router and false for the retired open router, which holds 0 ETH. Only the rescue contract may call `swapExact`. The call pulls the tokens (short deliveries revert). ETH paid back to the rescue is `amountIn * rate / denominator`, capped by `maxPayout`. Settings and `withdrawEth` are owner-only. `test_nonOwnerCannotDrain` covers a stranger calling the setters, `withdrawEth`, and `swapExact`.
 
-The open deployment cannot be upgraded in place; it was delisted. Do not broadcast `script/DeployLockedDemoSwapRouter.s.sol` again: the migration already ran, and a second broadcast deploys another router. Source `MockSwapRouter` setters are `onlyOwner`, and a zero-token swap reverts, so a future mock deploy is not open the same way. The live Render `ROUTER_ADDRESS` flip is a separate step awaiting Spencer's OK.
+The open deployment cannot be upgraded in place; it was delisted. Do not broadcast `script/DeployLockedDemoSwapRouter.s.sol` again: the migration already ran, and a second broadcast deploys another router. Source `MockSwapRouter` setters are `onlyOwner`, and a zero-token swap reverts, so a future mock deploy is not open the same way. The live Render `ROUTER_ADDRESS` on `stranded-relayer-arb` has been `0xFE22f32eF7a8f64B6c9E1CCAe31817B54184f7fc` since Oct 1, 2026, 1:27 PM ET (Relayer Backend deploy), and quotes return that router.
 
 ## Still open
 

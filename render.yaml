@@ -57,9 +57,9 @@ services:
       - key: TOKEN_ADDRESS
         value: "0x5649fF51123D534044aA7E6cBc8762698Ffed713"
       # LockedDemoSwapRouter (migrated 2026-10-01). Retired open router
-      # 0x680410c7f64e06EB7e80dc7B5c149f7855e225A8 is delisted. The live
-      # Render ROUTER_ADDRESS flip is a separate step awaiting Spencer's OK.
-      # Do not merge until then: merge auto-deploys stranded-relayer-arb.
+      # 0x680410c7f64e06EB7e80dc7B5c149f7855e225A8 is delisted. Live
+      # stranded-relayer-arb ROUTER_ADDRESS has been this value since
+      # Oct 1, 2026, 1:27 PM ET (Relayer Backend deploy). Quotes return it.
       - key: ROUTER_ADDRESS
         value: "0xFE22f32eF7a8f64B6c9E1CCAe31817B54184f7fc"
       - key: FEE_TO
