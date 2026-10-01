@@ -28,6 +28,18 @@ describe("quoteUiStatus", () => {
     expect(QUOTE_ERROR.toLowerCase()).not.toMatch(/quotes|clamp|feeamount/);
   });
 
+  it("shows a relayer message as the quote error, and ignores a blank one", () => {
+    const message = "This wallet already got a rescue. You can try again at 6:00 PM.";
+    expect(quoteUiStatus({ ...readyInput, fetchFailed: true, errorMessage: message })).toEqual({
+      kind: "error",
+      message,
+    });
+    expect(quoteUiStatus({ ...readyInput, fetchFailed: true, errorMessage: "  " })).toEqual({
+      kind: "error",
+      message: QUOTE_ERROR,
+    });
+  });
+
   it("does not invent a ready quote when the fetch failed", () => {
     expect(quoteUiStatus({ ...readyInput, fetchFailed: true }).kind).not.toBe("ready");
   });

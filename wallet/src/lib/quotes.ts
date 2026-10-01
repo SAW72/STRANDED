@@ -1,5 +1,6 @@
 import { isAddress, isHex, type Address, type Hex } from "viem";
 import { isSupportedChainId, type SupportedChainId } from "./chains";
+import { busyServiceMessage, relayerUserMessage, type RelayerMessageContext } from "./relayerError";
 
 /** Canonical Relayer / fixture quote. Field names must match the design freeze. */
 export type RescueQuote = {
@@ -29,7 +30,7 @@ export type QuoteSource = "relayer" | "fixture";
 
 export type QuoteFetchResult =
   | { ok: true; quote: RescueQuote; source: QuoteSource }
-  | { ok: false; reason: string };
+  | { ok: false; reason: string; userMessage?: string };
 
 /** Fields the Review rescue screen must show before Confirm details. */
 export const DISPLAY_BEFORE_CONFIRM = [
@@ -364,6 +365,7 @@ export async function fetchRescueQuote(
   relayerBase: string,
   params: QuoteRequest,
   fetchImpl: typeof fetch = fetch,
+  context?: RelayerMessageContext,
 ): Promise<QuoteFetchResult> {
   if (!relayerBase.trim()) {
     return { ok: false, reason: "VITE_RELAYER_URL is not set." };
@@ -388,14 +390,20 @@ export async function fetchRescueQuote(
   }
 
   if (!response.ok) {
-    let err = "";
+    let failed: unknown = null;
     try {
-      const failed = await response.json();
-      if (failed && typeof failed === "object" && !Array.isArray(failed) && "error" in failed) {
-        err = String((failed as { error: unknown }).error);
-      }
+      failed = await response.json();
     } catch {
-      err = "";
+      failed = null;
+    }
+    const userMessage =
+      relayerUserMessage(response.status, failed, context) ?? busyServiceMessage(response.status, failed);
+    if (userMessage) {
+      return { ok: false, reason: userMessage, userMessage };
+    }
+    let err = "";
+    if (failed && typeof failed === "object" && !Array.isArray(failed) && "error" in failed) {
+      err = String((failed as { error: unknown }).error);
     }
     if (err === "insufficient_balance") {
       return {

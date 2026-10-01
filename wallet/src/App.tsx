@@ -219,7 +219,10 @@ export function App() {
     permitS: Hex;
   } | null>(null);
   const [submitState, setSubmitState] = useState<
-    { kind: "idle" } | { kind: "posting" } | { kind: "ok"; txHash: Hex | null } | { kind: "error"; message: string }
+    | { kind: "idle" }
+    | { kind: "posting" }
+    | { kind: "ok"; txHash: Hex | null }
+    | { kind: "error"; message: string; relayerMessage?: boolean }
   >({ kind: "idle" });
   const [receipt, setReceipt] = useState<RescueReceiptView | null>(null);
   const [celebration, setCelebration] = useState<CelebrationKind>(null);
@@ -323,6 +326,9 @@ export function App() {
   const quoteSource: QuoteSource | null = quote ? (useFixture ? "fixture" : "relayer") : null;
   const quoteReady = hasRequiredQuoteFields(quote);
 
+  const quoteUserMessage =
+    !useFixture && quoteQuery.data && !quoteQuery.data.ok ? quoteQuery.data.userMessage : undefined;
+
   const quoteStatus = quoteUiStatus({
     hasRelayer: Boolean(relayer),
     connectedOnNetwork: Boolean(address && onSelectedChain),
@@ -333,6 +339,7 @@ export function App() {
       !useFixture && (quoteQuery.isError || (quoteQuery.data !== undefined && !quoteQuery.data.ok)),
     ),
     usingFixture: useFixture,
+    errorMessage: quoteUserMessage,
   });
 
   const phase = rescuePhase({
@@ -495,7 +502,11 @@ export function App() {
           await Promise.all([refreshHoldings(), refetchNonceUsed()]);
           setAwaitingFreshHoldings(false);
         } else {
-          setSubmitState({ kind: "error", message: submitted.reason });
+          setSubmitState({
+            kind: "error",
+            message: submitted.reason,
+            relayerMessage: submitted.relayerMessage,
+          });
           setSigned(null);
           postedOk = false;
           console.error("[rescue] submit failed", submitted.reason);
@@ -883,7 +894,9 @@ export function App() {
         {submitState.kind === "error" && (
           <div className="banner banner-block" role="alert">
             <p className="danger">
-              {SUBMIT_RESCUE_ERROR} {submitState.message}
+              {submitState.relayerMessage
+                ? submitState.message
+                : `${SUBMIT_RESCUE_ERROR} ${submitState.message}`}
             </p>
           </div>
         )}
