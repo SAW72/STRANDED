@@ -7,10 +7,13 @@ import {GasRescueSwap} from "../src/GasRescueSwap.sol";
 import {LockedDemoSwapRouter} from "../src/LockedDemoSwapRouter.sol";
 
 /// @notice One-shot pull of the open demo router's ETH into `newRouter`.
-///         The live `MockSwapRouter` pays `payAmount` even when no tokens move.
-///         This constructor uses that bug once, on testnet, and forwards the
+///         Used once on Arb Sepolia on 2026-10-01. The retired open
+///         `MockSwapRouter` paid `payAmount` even when no tokens moved.
+///         This constructor used that bug once, on testnet, and forwarded the
 ///         entire balance. It is not a withdrawal for the locked router.
-///         Broadcast = owner key only. Do not point it at any other protocol.
+///         The source balance is now 0, so a second call reverts
+///         `NothingToMigrate`. Broadcast = owner key only. Do not point it
+///         at any other protocol.
 contract OpenDemoRouterMigrator {
     error WrongChain();
     error ZeroAddress();
@@ -48,8 +51,21 @@ contract OpenDemoRouterMigrator {
 ///         Broadcast = Spencer's owner key only (`0x3046…bA9D` on the live Arb swap).
 ///         Agents must never pass `--broadcast`.
 ///
+///         MIGRATION DONE (2026-10-01, chain 421614). Do not broadcast this
+///         script again to finish it. `LIVE_ARB_OPEN_ROUTER` stays the
+///         migration SOURCE: retired open router `0x6804…25A8` (delisted
+///         Oct 1, 2026, balance 0). Inventory is on `LockedDemoSwapRouter`
+///         `0xFE22f32eF7a8f64B6c9E1CCAe31817B54184f7fc` (0.0195 ETH).
+///         `GasRescueSwap.allowedRouters` is true for that router and false
+///         for the source. `run()` still deploys a fresh router and, with
+///         `ALLOWLIST_ON_RESCUE` default true, allowlists that new address
+///         and delists the source. That is a second router, not a replay.
+///         The ETH pull is skipped when the source balance is 0
+///         (`OpenDemoRouterMigrator` reverts `NothingToMigrate` if called).
+///
 ///         Default rate pays 0.0001 ETH for the canonical 0.2-token slice
-///         (the live mock's `payAmount` on 2026-10-01) and caps a swap at 0.001 ETH.
+///         (the open mock's `payAmount` before the 2026-10-01 migration)
+///         and caps a swap at 0.001 ETH.
 ///
 /// Required env:
 ///   PRIVATE_KEY                 owner key. Must equal `GasRescueSwap.owner()` to allowlist.
@@ -59,8 +75,11 @@ contract OpenDemoRouterMigrator {
 ///   RATE_DENOMINATOR            default 1e18
 ///   MAX_PAYOUT                  default 0.001 ether
 ///   FUND_WEI                    extra ETH from the owner, on top of a migration
-///   MIGRATE_OLD_ROUTER          default true. Pulls the open router's ETH in one tx.
-///   OLD_ROUTER_ADDRESS          default Arb `0x6804…25A8` on chain 421614
+///   MIGRATE_OLD_ROUTER          default true. Pull is a no-op when the source
+///                               balance is 0. Do not rebroadcast; see notice above.
+///   OLD_ROUTER_ADDRESS          default Arb retired open router `0x6804…25A8`
+///                               (delisted Oct 1, 2026) on chain 421614. Migration
+///                               SOURCE. Do not point this at the locked router.
 ///   TOKEN_ADDRESS               calldata-only for the zero-token legacy pull. Default Arb GRTT.
 ///   ALLOWLIST_ON_RESCUE         default true. Allow the new router and remove the old one.
 contract DeployLockedDemoSwapRouter is Script {
@@ -68,6 +87,8 @@ contract DeployLockedDemoSwapRouter is Script {
     uint256 internal constant ARB_SEPOLIA_CHAIN_ID = 421_614;
 
     address internal constant LIVE_ARB_RESCUE = 0x65e712222745A8FCCbF038A90Fa75caB0867993D;
+    /// @dev Migration SOURCE. Completed 2026-10-01. Do not retarget this at the
+    ///      locked router `0xFE22…f7fc`. Retired open router, delisted Oct 1, 2026.
     address internal constant LIVE_ARB_OPEN_ROUTER = 0x680410c7f64e06EB7e80dc7B5c149f7855e225A8;
     address internal constant LIVE_ARB_GRTT = 0x5649fF51123D534044aA7E6cBc8762698Ffed713;
 
@@ -101,6 +122,10 @@ contract DeployLockedDemoSwapRouter is Script {
             require(deployer == rescue.owner(), "PRIVATE_KEY must be the GasRescueSwap owner to allowlist");
         }
 
+        // Migration completed 2026-10-01. Source balance is 0, so the pull below
+        // does not run. Broadcasting still deploys a new LockedDemoSwapRouter and
+        // (ALLOWLIST_ON_RESCUE default true) allowlists that new address.
+        // Do not rebroadcast. Live router: 0xFE22f32eF7a8f64B6c9E1CCAe31817B54184f7fc.
         vm.startBroadcast(deployerKey);
         LockedDemoSwapRouter router =
             new LockedDemoSwapRouter{value: fundWei}(deployer, rescueAddr, rateNumerator, rateDenominator, maxPayout);

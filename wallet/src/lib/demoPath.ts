@@ -3,7 +3,7 @@ import { ARB_SEPOLIA_CHAIN_ID } from "./chains";
 import { RELAYER_DRY_PATH_HASH } from "./fixture";
 import type { RescueQuote } from "./quotes";
 
-/** Live Arb Sepolia mock-router `swapExact(address,uint256,address)`. */
+/** Live Arb Sepolia locked demo router `swapExact(address,uint256,address)`. */
 export const SWAP_EXACT_ABI = [
   {
     type: "function",
@@ -26,7 +26,7 @@ export const ARB_SEPOLIA_DEMO = {
   weth: "0x980B62Da83eFf3D4576C647993b0c1D7faf17c73",
   grtt: "0x5649fF51123D534044aA7E6cBc8762698Ffed713",
   gmock: "0x30006e29a23c713070136F56db1BDf2A8B82B318",
-  router: "0x680410c7f64e06EB7e80dc7B5c149f7855e225A8",
+  router: "0xFE22f32eF7a8f64B6c9E1CCAe31817B54184f7fc",
   dryNativeTo: "0x1111111111111111111111111111111111111111",
   amountIn: 10n ** 18n,
   amountSwap: 2n * 10n ** 17n,

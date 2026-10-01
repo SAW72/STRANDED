@@ -22,11 +22,13 @@ The long write-up is [docs/AUDIT-FINDINGS.md](docs/AUDIT-FINDINGS.md) (2026-09-0
 
 ## Live demo router (Arb Sepolia)
 
-The judged rescue is still `GasRescueSwap` `0x65e712222745A8FCCbF038A90Fa75caB0867993D`. Its allowlisted demo router `0x680410c7f64e06EB7e80dc7B5c149f7855e225A8` is the open `MockSwapRouter`. On 2026-10-01 it held **0.0195 ETH** and `payAmount()` was **0.0001 ETH**. `setPayAmount` has no access control. `swapExact` pays that amount even when `amountIn` is 0, so anyone can take the inventory. If it is emptied, every live rescue quote fails.
+On 2026-10-01 the owner migrated the Arb Sepolia demo router. The judged rescue is still `GasRescueSwap` `0x65e712222745A8FCCbF038A90Fa75caB0867993D`.
 
-`LockedDemoSwapRouter` is the replacement. Only the rescue contract may call `swapExact`. The call pulls the tokens (short deliveries revert). ETH paid back to the rescue is `amountIn * rate / denominator`, capped by `maxPayout`. Settings and `withdrawEth` are owner-only. `test_nonOwnerCannotDrain` covers a stranger calling the setters, `withdrawEth`, and `swapExact`.
+Before that migration, the allowlisted demo router was the open `MockSwapRouter` at retired open router `0x680410c7f64e06EB7e80dc7B5c149f7855e225A8` (delisted Oct 1, 2026). It held **0.0195 ETH** and `payAmount()` was **0.0001 ETH**. `setPayAmount` had no access control. `swapExact` paid that amount even when `amountIn` was 0, so anyone could take the inventory.
 
-The open deployment cannot be upgraded. The owner broadcasts `script/DeployLockedDemoSwapRouter.s.sol` (testnet only, no agent `--broadcast`). That script moves the open router's ETH into the new router and flips the allowlist. Source `MockSwapRouter` setters are `onlyOwner`, and a zero-token swap reverts, so a future mock deploy is not open the same way.
+The inventory now sits on `LockedDemoSwapRouter` `0xFE22f32eF7a8f64B6c9E1CCAe31817B54184f7fc` (0.0195 ETH). `allowedRouters` is true for that router and false for the retired open router, which holds 0 ETH. Only the rescue contract may call `swapExact`. The call pulls the tokens (short deliveries revert). ETH paid back to the rescue is `amountIn * rate / denominator`, capped by `maxPayout`. Settings and `withdrawEth` are owner-only. `test_nonOwnerCannotDrain` covers a stranger calling the setters, `withdrawEth`, and `swapExact`.
+
+The open deployment cannot be upgraded in place; it was delisted. Do not broadcast `script/DeployLockedDemoSwapRouter.s.sol` again: the migration already ran, and a second broadcast deploys another router. Source `MockSwapRouter` setters are `onlyOwner`, and a zero-token swap reverts, so a future mock deploy is not open the same way. The live Render `ROUTER_ADDRESS` on `stranded-relayer-arb` has been `0xFE22f32eF7a8f64B6c9E1CCAe31817B54184f7fc` since Oct 1, 2026, 1:27 PM ET (Relayer Backend deploy), and quotes return that router.
 
 ## Still open
 

@@ -89,7 +89,7 @@ export function createBuildQuote(deps) {
       return { payAmount: 0n, quoteSource: "locked-demo-router" };
     } catch (err) {
       if (err && err.error && err.status) throw err;
-      // Open MockSwapRouter exposes only a fixed payAmount().
+      // Routers without `quote` (including the retired open MockSwapRouter) expose only a fixed payAmount().
     }
     try {
       const payAmount = await publicClient.readContract({
