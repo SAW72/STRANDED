@@ -1,15 +1,24 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { ContractFunctionRevertedError } from "viem";
+import {
+  ContractFunctionExecutionError,
+  ContractFunctionRevertedError,
+  encodeErrorResult,
+  toFunctionSelector,
+} from "viem";
+import { formatAbiItem } from "viem/utils";
 import {
   PATH_MISMATCH_MESSAGE,
   ROUTER_NOT_ALLOWED_MESSAGE,
+  SIGNATURE_MISMATCH_MESSAGE,
   SIMULATION_FAILED_MESSAGE,
+  SWAP_FAILED_MESSAGE,
   fail,
   logSimulationFailure,
   simulationFailure,
   toPublicError,
 } from "../httpError.mjs";
+import { rescueAbi } from "../rescueAbi.mjs";
 import { req, withServer } from "./harness.mjs";
 
 const USER = "0x1111111111111111111111111111111111111111";
@@ -187,7 +196,10 @@ describe("plain rescue error messages", () => {
         }),
       );
       assert.equal(pub.body.revert, name);
-      assert.equal(pub.body.message, SIMULATION_FAILED_MESSAGE);
+      assert.equal(
+        pub.body.message,
+        name === "SwapFailed" ? SWAP_FAILED_MESSAGE : SIGNATURE_MISMATCH_MESSAGE,
+      );
       assert.equal(JSON.stringify(pub.body).includes("0xdeadbeef"), false);
       assert.equal(JSON.stringify(pub.body).includes("ContractFunctionRevertedError"), false);
     }
@@ -202,6 +214,70 @@ describe("plain rescue error messages", () => {
       assert.equal("revert" in pub.body, false, selector);
       assert.equal(pub.body.message, SIMULATION_FAILED_MESSAGE);
       assert.equal(JSON.stringify(pub.body).includes(selector), false);
+    }
+  });
+
+  it("decodes real revert bytes through the simulation ABI", () => {
+    const selectors = new Map();
+    for (const item of rescueAbi) {
+      if (item.type !== "error") continue;
+      selectors.set(toFunctionSelector(formatAbiItem(item)), item.name);
+    }
+    assert.equal(selectors.get("0x81ceff30"), "SwapFailed");
+    assert.equal(selectors.get("0x4b800e46"), "ERC2612InvalidSigner");
+
+    function thrownLikeSimulate(data) {
+      const reverted = new ContractFunctionRevertedError({
+        abi: rescueAbi,
+        data,
+        functionName: "rescueWithPermit",
+      });
+      assert.equal(reverted.errorName, undefined);
+      return new ContractFunctionExecutionError(reverted, {
+        abi: rescueAbi,
+        functionName: "rescueWithPermit",
+        args: [],
+      });
+    }
+
+    const swap = toPublicError(simulationFailure(thrownLikeSimulate("0x81ceff30")));
+    assert.equal(swap.status, 502);
+    assert.equal(swap.body.error, "simulation_failed");
+    assert.equal(swap.body.revert, "SwapFailed");
+    assert.equal(swap.body.message, SWAP_FAILED_MESSAGE);
+    assert.equal(JSON.stringify(swap.body).includes("0x81ceff30"), false);
+
+    const signer = "0x1111111111111111111111111111111111111111";
+    const owner = "0x2222222222222222222222222222222222222222";
+    const encoded = encodeErrorResult({
+      abi: rescueAbi,
+      errorName: "ERC2612InvalidSigner",
+      args: [signer, owner],
+    });
+    assert.equal(encoded.slice(0, 10), "0x4b800e46");
+    const permit = toPublicError(simulationFailure(thrownLikeSimulate(encoded)));
+    assert.equal(permit.status, 502);
+    assert.equal(permit.body.error, "simulation_failed");
+    assert.equal(permit.body.revert, "ERC2612InvalidSigner");
+    assert.equal(permit.body.message, SIGNATURE_MISMATCH_MESSAGE);
+    assert.equal(JSON.stringify(permit.body).includes(signer), false);
+    assert.equal(JSON.stringify(permit.body).includes(owner), false);
+    assert.equal(JSON.stringify(permit.body).includes("0x4b800e46"), false);
+
+    const used = toPublicError(simulationFailure(thrownLikeSimulate(selectorsEntriesData("UsedNonce"))));
+    assert.equal(used.body.revert, "UsedNonce");
+    assert.equal(used.body.message, SIMULATION_FAILED_MESSAGE);
+
+    const unknown = toPublicError(simulationFailure(thrownLikeSimulate("0xdeadbeef")));
+    assert.equal(unknown.status, 502);
+    assert.equal(unknown.body.error, "simulation_failed");
+    assert.equal("revert" in unknown.body, false);
+    assert.equal(unknown.body.message, SIMULATION_FAILED_MESSAGE);
+    assert.equal(JSON.stringify(unknown.body).includes("0xdeadbeef"), false);
+
+    function selectorsEntriesData(name) {
+      const item = rescueAbi.find((entry) => entry.type === "error" && entry.name === name);
+      return encodeErrorResult({ abi: rescueAbi, errorName: name, args: item.inputs?.length ? [] : undefined });
     }
   });
 

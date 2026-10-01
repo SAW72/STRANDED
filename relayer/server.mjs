@@ -16,6 +16,7 @@ import {
 import { createKillSwitch, parseEnvFlag } from "./killSwitch.mjs";
 import { createNonceStore } from "./nonceStore.mjs";
 import { createBuildQuote, encodeSwapData } from "./quote.mjs";
+import { rescueAbi } from "./rescueAbi.mjs";
 import { createRescueLog, orderLogSummary } from "./rescueLog.mjs";
 import { createRescueLimiter, parseRescueLimitConfig } from "./rescueLimit.mjs";
 import { DEFAULT_BASE_DELAY_MS, DEFAULT_MAX_ATTEMPTS, withBroadcastRetry } from "./retry.mjs";
@@ -102,42 +103,6 @@ const usedNoncesAbi = [
       { name: "nonce", type: "uint256" },
     ],
     outputs: [{ name: "used", type: "bool" }],
-  },
-];
-
-const rescueAbi = [
-  {
-    type: "function",
-    name: "rescueWithPermit",
-    stateMutability: "nonpayable",
-    inputs: [
-      {
-        name: "order",
-        type: "tuple",
-        components: [
-          { name: "user", type: "address" },
-          { name: "tokenIn", type: "address" },
-          { name: "amountIn", type: "uint256" },
-          { name: "feeAmount", type: "uint256" },
-          { name: "feeTo", type: "address" },
-          { name: "amountSwap", type: "uint256" },
-          { name: "minAmountOut", type: "uint256" },
-          { name: "to", type: "address" },
-          { name: "nativeTo", type: "address" },
-          { name: "router", type: "address" },
-          { name: "pathHash", type: "bytes32" },
-          { name: "chainId", type: "uint256" },
-          { name: "deadline", type: "uint256" },
-          { name: "nonce", type: "uint256" },
-        ],
-      },
-      { name: "orderSignature", type: "bytes" },
-      { name: "v", type: "uint8" },
-      { name: "r", type: "bytes32" },
-      { name: "s", type: "bytes32" },
-      { name: "swapData", type: "bytes" },
-    ],
-    outputs: [],
   },
 ];
 

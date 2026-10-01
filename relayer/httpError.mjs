@@ -3,6 +3,8 @@
  * They never include stack traces, RPC URLs, or secrets.
  */
 
+import { rescueAbi } from "./rescueAbi.mjs";
+
 const DEFAULT_STATUS = {
   invalid_json: 400,
   missing_user: 400,
@@ -49,6 +51,9 @@ export const ROUTER_NOT_ALLOWED_MESSAGE =
   "This rescue route isn't available. Please get a new quote and try again.";
 export const SIMULATION_FAILED_MESSAGE =
   "This rescue wouldn't go through right now. Please get a new quote and try again.";
+export const SWAP_FAILED_MESSAGE =
+  "There isn't enough gas available for this rescue right now. Please try again later.";
+export const SIGNATURE_MISMATCH_MESSAGE = "The signature didn't match. Please sign again.";
 
 /**
  * @param {number} status
@@ -70,52 +75,10 @@ export function fail(status, code, message, extra = {}) {
 /** Solidity custom-error identifier. Rejects sentences, addresses, and selectors. */
 const CLIENT_REVERT_NAME = /^[A-Z][A-Za-z0-9_]{0,63}$/;
 
-/**
- * Decoded custom errors the client may see. GasRescueSwap (including the
- * OpenZeppelin errors it inherits) and LockedDemoSwapRouter, plus
- * ERC2612InvalidSigner. That last name is not on those ABIs; the wallet maps
- * it, so a swap/router-only list would drop it.
- */
-const CLIENT_REVERT_ALLOWLIST = new Set([
-  "NotRelayer",
-  "OwnerIsRelayer",
-  "WrongChain",
-  "ZeroAddress",
-  "InvalidOrder",
-  "ExpiredDeadline",
-  "TokenNotAllowed",
-  "RouterNotAllowed",
-  "UsedNonce",
-  "InvalidSignature",
-  "Underfunded",
-  "FoTOrBalanceMismatch",
-  "PathMismatch",
-  "NoGaslessAuth",
-  "Slippage",
-  "SwapFailed",
-  "SwapInputNotConsumed",
-  "DustRemaining",
-  "NativeTransferFailed",
-  "OwnershipCannotBeRenounced",
-  "Permit2Immutable",
-  "InvalidPermit2",
-  "EnforcedPause",
-  "ExpectedPause",
-  "ReentrancyGuardReentrantCall",
-  "OwnableUnauthorizedAccount",
-  "OwnableInvalidOwner",
-  "ECDSAInvalidSignature",
-  "ECDSAInvalidSignatureLength",
-  "ECDSAInvalidSignatureS",
-  "NotRescue",
-  "NotEnoughTokens",
-  "ZeroAmount",
-  "ZeroPayout",
-  "InsufficientEth",
-  "EthTransferFailed",
-  "InvalidRate",
-  "ERC2612InvalidSigner",
-]);
+/** Names viem can decode from `rescueAbi`, which is what simulateContract uses. */
+const CLIENT_REVERT_ALLOWLIST = new Set(
+  rescueAbi.filter((item) => item.type === "error").map((item) => item.name),
+);
 
 /**
  * Client `revert` is a decoded custom-error name, or absent.
@@ -245,13 +208,20 @@ export function toPublicError(err) {
 }
 
 /**
- * Simulation failure for the client. `message` is always the fixed sentence.
- * `revert` is set only when the cause chain has an allowlisted decoded name.
+ * Simulation failure for the client. `revert` is set only when the cause
+ * chain has an allowlisted decoded name. Two of those names get a specific
+ * sentence; every other case keeps the generic one.
  * @param {object} [err]
  */
 export function simulationFailure(err) {
   const revert = decodedRevertName(err);
-  return fail(502, "simulation_failed", SIMULATION_FAILED_MESSAGE, revert ? { revert } : {});
+  const message =
+    revert === "SwapFailed"
+      ? SWAP_FAILED_MESSAGE
+      : revert === "ERC2612InvalidSigner"
+        ? SIGNATURE_MISMATCH_MESSAGE
+        : SIMULATION_FAILED_MESSAGE;
+  return fail(502, "simulation_failed", message, revert ? { revert } : {});
 }
 
 /** Broadcast / unexpected failures stay coded and secret-free. */
