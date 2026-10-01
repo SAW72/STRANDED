@@ -3,7 +3,10 @@ import { sampleFixtureQuote } from "./fixture";
 import { buildOrder } from "./order";
 import { fetchRescueQuote } from "./quotes";
 import {
+  RELAYER_FETCH_TIMEOUT_MS,
   RESCUE_SERVICE_BUSY,
+  RESCUE_SERVICE_TIMEOUT,
+  RESCUE_SUBMIT_TIMEOUT,
   busyServiceMessage,
   relayerUserMessage,
   type RelayerMessageContext,
@@ -168,11 +171,19 @@ describe("relayerUserMessage", () => {
     expect(relayerUserMessage(429, [])).toBeNull();
   });
 
-  it("uses the busy sentence only for a non-object HTTP 502", () => {
+  it("uses the busy sentence for a non-object 502, 503, or 504 and leaves JSON objects alone", () => {
+    expect(RELAYER_FETCH_TIMEOUT_MS).toBeGreaterThanOrEqual(20_000);
+    expect(RELAYER_FETCH_TIMEOUT_MS).toBeLessThanOrEqual(30_000);
     expect(busyServiceMessage(502, null)).toBe(RESCUE_SERVICE_BUSY);
-    expect(busyServiceMessage(502, "bad gateway")).toBe(RESCUE_SERVICE_BUSY);
-    expect(busyServiceMessage(502, [])).toBe(RESCUE_SERVICE_BUSY);
+    expect(busyServiceMessage(503, "bad gateway")).toBe(RESCUE_SERVICE_BUSY);
+    expect(busyServiceMessage(504, [])).toBe(RESCUE_SERVICE_BUSY);
     expect(busyServiceMessage(502, { ok: false, error: "simulation_failed" })).toBeNull();
+    expect(
+      busyServiceMessage(503, { ok: false, error: "relayer_paused", message: "Rescue is paused." }),
+    ).toBeNull();
+    expect(
+      busyServiceMessage(504, { ok: false, error: "gateway", message: "Try later from upstream." }),
+    ).toBeNull();
     expect(busyServiceMessage(400, null)).toBeNull();
     expect(busyServiceMessage(404, "nope")).toBeNull();
   });
@@ -317,5 +328,60 @@ describe("quote and rescue endpoints", () => {
 
     const bare = await quoteReason(400, { ok: false, error: "invalid_address" });
     expect(bare.reason).toBe("Relayer POST /v1/quotes returned HTTP 400. Signing is blocked.");
+  });
+
+  it("uses the busy sentence for a non-JSON 503 and 504, and keeps a JSON message", async () => {
+    const quote503 = await quoteReason(503, "<html>unavailable</html>", true);
+    expect(quote503.ok).toBe(false);
+    expect(quote503.reason).toBe(RESCUE_SERVICE_BUSY);
+    expect(quote503.userMessage).toBe(RESCUE_SERVICE_BUSY);
+
+    const rescue504 = await rescueReason(504, "{", true);
+    expect(rescue504.reason).toBe(RESCUE_SERVICE_BUSY);
+    expect(rescue504.relayerMessage).toBe(true);
+
+    const paused = await quoteReason(503, {
+      ok: false,
+      error: "relayer_paused",
+      message: "Rescue quotes are paused right now. Try again later.",
+    });
+    expect(paused.reason).toMatch(/paused/i);
+    expect(paused.reason).not.toBe(RESCUE_SERVICE_BUSY);
+
+    const json504 = await rescueReason(504, {
+      ok: false,
+      error: "gateway",
+      message: "Try later from upstream.",
+    });
+    expect(json504.reason).not.toBe(RESCUE_SERVICE_BUSY);
+    expect(json504.reason).toMatch(/HTTP 504/);
+  });
+
+  it("times out a hung quote and rescue and blocks the quote", async () => {
+    const hang: typeof fetch = (_url, init) =>
+      new Promise((_resolve, reject) => {
+        const signal = init?.signal;
+        expect(signal).toBeInstanceOf(AbortSignal);
+        if (!signal) {
+          reject(new Error("missing timeout signal"));
+          return;
+        }
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+      });
+
+    const quote = await fetchRescueQuote("http://relayer.test", quoteParams, hang, { timeoutMs: 40 });
+    expect(quote.ok).toBe(false);
+    if (quote.ok) throw new Error("expected quote timeout");
+    expect(quote.reason).toBe(RESCUE_SERVICE_TIMEOUT);
+    expect(quote.userMessage).toBe(RESCUE_SERVICE_TIMEOUT);
+    expect(quote.reason).not.toMatch(/Relayer|HTTP/);
+
+    const rescue = await submitRescue("http://relayer.test", rescueInput, hang, { timeoutMs: 40 });
+    expect(rescue.ok).toBe(false);
+    if (rescue.ok) throw new Error("expected rescue timeout");
+    expect(rescue.reason).toBe(RESCUE_SUBMIT_TIMEOUT);
+    expect(rescue.reason).not.toBe(RESCUE_SERVICE_TIMEOUT);
+    expect(rescue.relayerMessage).toBe(true);
+    expect(rescue.reason).not.toMatch(/Relayer|HTTP/);
   });
 });
