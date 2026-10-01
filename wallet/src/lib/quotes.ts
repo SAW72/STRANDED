@@ -1,6 +1,13 @@
 import { isAddress, isHex, type Address, type Hex } from "viem";
 import { isSupportedChainId, type SupportedChainId } from "./chains";
-import { busyServiceMessage, relayerUserMessage, type RelayerMessageContext } from "./relayerError";
+import {
+  RESCUE_SERVICE_TIMEOUT,
+  busyServiceMessage,
+  isRelayerTimeout,
+  relayerFetchSignal,
+  relayerUserMessage,
+  type RelayerMessageContext,
+} from "./relayerError";
 
 /** Canonical Relayer / fixture quote. Field names must match the design freeze. */
 export type RescueQuote = {
@@ -384,8 +391,12 @@ export async function fetchRescueQuote(
       method: "POST",
       headers: { Accept: "application/json", "Content-Type": "application/json" },
       body: JSON.stringify(quoteRequestBody(params)),
+      signal: relayerFetchSignal(context),
     });
-  } catch {
+  } catch (err) {
+    if (isRelayerTimeout(err)) {
+      return { ok: false, reason: RESCUE_SERVICE_TIMEOUT, userMessage: RESCUE_SERVICE_TIMEOUT };
+    }
     return { ok: false, reason: `Could not reach Relayer POST /v1/quotes at ${relayerBase}.` };
   }
 

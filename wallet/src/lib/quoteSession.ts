@@ -7,7 +7,7 @@ export type QuoteSubmitState =
   | { kind: "idle" }
   | { kind: "posting" }
   | { kind: "ok"; txHash: string | null }
-  | { kind: "error"; message: string };
+  | { kind: "error"; message: string; relayerMessage?: boolean };
 
 export type QuoteSessionSlice = {
   signed: null;
@@ -24,6 +24,38 @@ export function quoteSessionAfterRescueSuccess(): QuoteSessionSlice {
     submitState: { kind: "idle" },
     signError: null,
     signing: false,
+  };
+}
+
+export type RescueErrorReset = {
+  signed: null;
+  detailsConfirmed: false;
+  signError: null;
+  signing: false;
+  /** Cached quote must be removed so the spent nonce cannot be signed again. */
+  dropCachedQuote: true;
+  submitState: { kind: "error"; message: string; relayerMessage?: boolean };
+};
+
+/**
+ * After POST /v1/rescues fails, keep the error and force a fresh quote.
+ * Sign stays off until that quote arrives and the user confirms it again.
+ */
+export function quoteSessionAfterRescueError(failure: {
+  message: string;
+  relayerMessage?: boolean;
+}): RescueErrorReset {
+  return {
+    signed: null,
+    detailsConfirmed: false,
+    signError: null,
+    signing: false,
+    dropCachedQuote: true,
+    submitState: {
+      kind: "error",
+      message: failure.message,
+      ...(failure.relayerMessage ? { relayerMessage: true } : {}),
+    },
   };
 }
 

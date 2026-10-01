@@ -102,7 +102,11 @@ import {
 } from "./lib/order";
 import { canPromptSignatures, rescuePhase } from "./lib/processGate";
 import { readLiveHoldings, readLivePermitAuth, type LiveHoldings } from "./lib/holdings";
-import { QUOTES_QUERY_KEY, quoteSessionAfterRescueSuccess } from "./lib/quoteSession";
+import {
+  QUOTES_QUERY_KEY,
+  quoteSessionAfterRescueError,
+  quoteSessionAfterRescueSuccess,
+} from "./lib/quoteSession";
 import { fetchRescueQuote, hasRequiredQuoteFields, type QuoteSource, type RescueQuote } from "./lib/quotes";
 import { receiptFromSubmit, type RescueReceiptView } from "./lib/receipt";
 import { submitRescue } from "./lib/rescues";
@@ -502,12 +506,17 @@ export function App() {
           await Promise.all([refreshHoldings(), refetchNonceUsed()]);
           setAwaitingFreshHoldings(false);
         } else {
-          setSubmitState({
-            kind: "error",
+          const reset = quoteSessionAfterRescueError({
             message: submitted.reason,
             relayerMessage: submitted.relayerMessage,
           });
-          setSigned(null);
+          setSubmitState(reset.submitState);
+          setSigned(reset.signed);
+          setDetailsConfirmed(reset.detailsConfirmed);
+          setSignError(reset.signError);
+          if (reset.dropCachedQuote) {
+            queryClient.removeQueries({ queryKey: [QUOTES_QUERY_KEY] });
+          }
           postedOk = false;
           console.error("[rescue] submit failed", submitted.reason);
         }

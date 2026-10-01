@@ -1,6 +1,13 @@
 import { isAddress, isHex, type Hex } from "viem";
 import type { RescueOrder } from "./order";
-import { busyServiceMessage, relayerUserMessage, type RelayerMessageContext } from "./relayerError";
+import {
+  RESCUE_SERVICE_TIMEOUT,
+  busyServiceMessage,
+  isRelayerTimeout,
+  relayerFetchSignal,
+  relayerUserMessage,
+  type RelayerMessageContext,
+} from "./relayerError";
 
 export type RescueSubmitInput = {
   chainId: number;
@@ -142,8 +149,13 @@ export async function submitRescue(
       method: "POST",
       headers: { Accept: "application/json", "Content-Type": "application/json" },
       body: JSON.stringify(rescueRequestBody(input)),
+      signal: relayerFetchSignal(context),
     });
   } catch (err) {
+    if (isRelayerTimeout(err)) {
+      console.error("[rescue] POST /v1/rescues timed out", err);
+      return { ok: false, reason: RESCUE_SERVICE_TIMEOUT, relayerMessage: true };
+    }
     const reason = `Could not reach Relayer POST /v1/rescues at ${relayerBase}.`;
     console.error("[rescue] POST /v1/rescues network error", err);
     return { ok: false, reason };
