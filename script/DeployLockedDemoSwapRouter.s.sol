@@ -3,151 +3,188 @@ pragma solidity ^0.8.24;
 
 import {Script, console2} from "forge-std/Script.sol";
 
-import {GasRescueSwap} from "../src/GasRescueSwap.sol";
 import {LockedDemoSwapRouter} from "../src/LockedDemoSwapRouter.sol";
 
-/// @notice One-shot pull of the open demo router's ETH into `newRouter`.
-///         Used once on Arb Sepolia on 2026-10-01. The retired open
-///         `MockSwapRouter` paid `payAmount` even when no tokens moved.
-///         This constructor used that bug once, on testnet, and forwarded the
-///         entire balance. It is not a withdrawal for the locked router.
-///         The source balance is now 0, so a second call reverts
-///         `NothingToMigrate`. Broadcast = owner key only. Do not point it
-///         at any other protocol.
-contract OpenDemoRouterMigrator {
-    error WrongChain();
-    error ZeroAddress();
-    error NothingToMigrate();
-    error CallFailed();
-
-    constructor(
-        address oldRouter,
-        address newRouter,
-        address tokenIn
-    ) {
-        if (block.chainid != 421_614 && block.chainid != 84_532) revert WrongChain();
-        if (oldRouter == address(0) || newRouter == address(0) || tokenIn == address(0)) revert ZeroAddress();
-        uint256 bal = oldRouter.balance;
-        if (bal == 0) revert NothingToMigrate();
-
-        (bool setOk,) = oldRouter.call(abi.encodeWithSignature("setPayAmount(uint256)", bal));
-        if (!setOk) revert CallFailed();
-        (bool swapOk,) = oldRouter.call(
-            abi.encodeWithSignature("swapExact(address,uint256,address)", tokenIn, uint256(0), newRouter)
-        );
-        if (!swapOk) revert CallFailed();
-
-        uint256 got = address(this).balance;
-        (bool sent,) = payable(newRouter).call{value: got}("");
-        if (!sent || address(this).balance != 0) revert CallFailed();
-    }
-
-    receive() external payable {}
+/// @notice Owner surface this script calls on `GasRescueSwap`. A local mock with
+///         the same three methods is enough for tests. Live Arb Sepolia uses
+///         `0x65e712222745A8FCCbF038A90Fa75caB0867993D`.
+interface ILockedRouterRescue {
+    function owner() external view returns (address);
+    function allowedRouters(
+        address router
+    ) external view returns (bool);
+    function setRouterAllowed(
+        address router,
+        bool allowed
+    ) external;
 }
 
 /// @notice Deploy `LockedDemoSwapRouter` on Base Sepolia (84532) or Arb Sepolia (421614).
 ///         Refuses every other chain. No mainnet path.
 ///
-///         Broadcast = Spencer's owner key only (`0x3046…bA9D` on the live Arb swap).
-///         Agents must never pass `--broadcast`.
+///         Keyless. This script does not read `PRIVATE_KEY`. `forge script` sets
+///         `msg.sender` from `--account` / `--sender`, and `deploy` broadcasts as
+///         that account. Agents must never pass `--broadcast`.
 ///
-///         MIGRATION DONE (2026-10-01, chain 421614). Do not broadcast this
-///         script again to finish it. `LIVE_ARB_OPEN_ROUTER` stays the
-///         migration SOURCE: retired open router `0x6804…25A8` (delisted
-///         Oct 1, 2026, balance 0). Inventory is on `LockedDemoSwapRouter`
-///         `0xFE22f32eF7a8f64B6c9E1CCAe31817B54184f7fc` (0.0195 ETH).
-///         `GasRescueSwap.allowedRouters` is true for that router and false
-///         for the source. `run()` still deploys a fresh router and, with
-///         `ALLOWLIST_ON_RESCUE` default true, allowlists that new address
-///         and delists the source. That is a second router, not a replay.
-///         The ETH pull is skipped when the source balance is 0
-///         (`OpenDemoRouterMigrator` reverts `NothingToMigrate` if called).
+///         forge script script/DeployLockedDemoSwapRouter.s.sol:DeployLockedDemoSwapRouter \
+///           --account <keystore> \
+///           --sender 0x30466A210961c0C2C13AF0A9d35dfC6E8858bA9D \
+///           --rpc-url "$ARB_SEPOLIA_RPC_URL" \
+///           --chain-id 421614
 ///
-///         Default rate pays 0.0001 ETH for the canonical 0.2-token slice
-///         (the open mock's `payAmount` before the 2026-10-01 migration)
-///         and caps a swap at 0.001 ETH.
+///         `run()` only reads `DLDSR_*` env into `Config`. `deploy(Config)` does the work.
 ///
-/// Required env:
-///   PRIVATE_KEY                 owner key. Must equal `GasRescueSwap.owner()` to allowlist.
-///   GAS_RESCUE_SWAP_ADDRESS     live rescue the router will accept swaps from
-/// Optional:
-///   RATE_NUMERATOR              default 5e14 (0.0005 ETH per 1e18 token)
-///   RATE_DENOMINATOR            default 1e18
-///   MAX_PAYOUT                  default 0.001 ether
-///   FUND_WEI                    extra ETH from the owner, on top of a migration
-///   MIGRATE_OLD_ROUTER          default true. Pull is a no-op when the source
-///                               balance is 0. Do not rebroadcast; see notice above.
-///   OLD_ROUTER_ADDRESS          default Arb retired open router `0x6804…25A8`
-///                               (delisted Oct 1, 2026) on chain 421614. Migration
-///                               SOURCE. Do not point this at the locked router.
-///   TOKEN_ADDRESS               calldata-only for the zero-token legacy pull. Default Arb GRTT.
-///   ALLOWLIST_ON_RESCUE         default true. Allow the new router and remove the old one.
+///         MIGRATION DONE (2026-10-01, chain 421614). The one-shot pull source was
+///         removed. The migrator contract stays on chain at
+///         `0x8f838a6A29EA8E8b0C6E2baCBdaD8b0cA3c25231` (tx
+///         `0x9e1c8034cfd9697acfc5783e99926205a96a62efc15e078cea2400880203b9e6`).
+///         Runtime `0x36156008575f80fd5b00` (empty calldata jumps to STOP). It
+///         accepts plain ETH transfers and has no withdraw; anything sent is
+///         unrecoverable. DO-NOT-FUND.
+///
+///         On 421614, `deploy` always requires `forceNew` (`DLDSR_FORCE_NEW_ROUTER=true`)
+///         and an explicit `priorLocked` (`DLDSR_PRIOR_LOCKED_ROUTER`, no default).
+///         That prior must already be `allowedRouters == true`. It must not be the
+///         retired open router `0x680410c7f64e06EB7e80dc7B5c149f7855e225A8`
+///         (still open, DO-NOT-FUND). `DLDSR_ALLOWLIST_ON_RESCUE=false` is
+///         overridden on this chain: the prior is still delisted and the new
+///         router is still allowlisted. If `DLDSR_FUND_WEI` is 0 and the prior
+///         still holds ETH, `deploy` reverts. Withdraw with `withdrawEth`, then
+///         fund the new router, then point Render `ROUTER_ADDRESS` on
+///         `stranded-relayer-arb` and `render.yaml` at the new router.
+///
+///         Default rate pays 0.0001 ETH for the canonical 0.2-token slice and
+///         caps a swap at 0.001 ETH.
+///
+/// Env (all optional; `DLDSR_` so other tests' env cannot collide):
+///   DLDSR_GAS_RESCUE_SWAP_ADDRESS   defaults to the Arb swap on 421614
+///   DLDSR_RATE_NUMERATOR            default 5e14 (0.0005 ETH per 1e18 token)
+///   DLDSR_RATE_DENOMINATOR          default 1e18
+///   DLDSR_MAX_PAYOUT                default 0.001 ether
+///   DLDSR_FUND_WEI                  extra ETH from the owner. On 421614, 0 reverts
+///                                   when the prior router still holds ETH.
+///   DLDSR_ALLOWLIST_ON_RESCUE       default true. On 421614 false is overridden.
+///   DLDSR_FORCE_NEW_ROUTER          default false. Must be true on 421614.
+///   DLDSR_PRIOR_LOCKED_ROUTER       required on 421614. No default.
 contract DeployLockedDemoSwapRouter is Script {
     uint256 internal constant BASE_SEPOLIA_CHAIN_ID = 84_532;
     uint256 internal constant ARB_SEPOLIA_CHAIN_ID = 421_614;
 
-    address internal constant LIVE_ARB_RESCUE = 0x65e712222745A8FCCbF038A90Fa75caB0867993D;
-    /// @dev Migration SOURCE. Completed 2026-10-01. Do not retarget this at the
-    ///      locked router `0xFE22…f7fc`. Retired open router, delisted Oct 1, 2026.
-    address internal constant LIVE_ARB_OPEN_ROUTER = 0x680410c7f64e06EB7e80dc7B5c149f7855e225A8;
-    address internal constant LIVE_ARB_GRTT = 0x5649fF51123D534044aA7E6cBc8762698Ffed713;
+    address public constant LIVE_ARB_RESCUE = 0x65e712222745A8FCCbF038A90Fa75caB0867993D;
+    /// @dev Live locked router. Allowlisted 2026-10-01. Not an implicit delist default.
+    address public constant LIVE_ARB_LOCKED_ROUTER = 0xFE22f32eF7a8f64B6c9E1CCAe31817B54184f7fc;
+    /// @dev Retired open router, still open, delisted Oct 1, 2026. Never a delist target.
+    address public constant LIVE_ARB_OPEN_ROUTER = 0x680410c7f64e06EB7e80dc7B5c149f7855e225A8;
+    /// @dev Foundry's default script sender. `keccak256("foundry default caller")`.
+    ///      Named apart from forge-std's internal `FOUNDRY_DEFAULT_SENDER` so the
+    ///      public getter is visible to tests.
+    address public constant DEFAULT_SCRIPT_SENDER = 0x1804c8AB1F12E6bbf3894d4083f33e07309d1f38;
 
-    function run() external {
+    struct Config {
+        address rescue;
+        uint256 rateNumerator;
+        uint256 rateDenominator;
+        uint256 maxPayout;
+        uint256 fundWei;
+        bool allowlist;
+        bool forceNew;
+        address priorLocked;
+    }
+
+    function run() external returns (LockedDemoSwapRouter router) {
+        router = deploy(readConfig());
+    }
+
+    /// @notice Env parsing only. Behavior lives in `deploy`.
+    function readConfig() public view returns (Config memory cfg) {
+        cfg.rescue = vm.envOr("DLDSR_GAS_RESCUE_SWAP_ADDRESS", address(0));
+        if (cfg.rescue == address(0) && block.chainid == ARB_SEPOLIA_CHAIN_ID) cfg.rescue = LIVE_ARB_RESCUE;
+        cfg.rateNumerator = vm.envOr("DLDSR_RATE_NUMERATOR", uint256(500_000_000_000_000));
+        cfg.rateDenominator = vm.envOr("DLDSR_RATE_DENOMINATOR", uint256(1e18));
+        cfg.maxPayout = vm.envOr("DLDSR_MAX_PAYOUT", uint256(0.001 ether));
+        cfg.fundWei = vm.envOr("DLDSR_FUND_WEI", uint256(0));
+        cfg.allowlist = vm.envOr("DLDSR_ALLOWLIST_ON_RESCUE", true);
+        cfg.forceNew = vm.envOr("DLDSR_FORCE_NEW_ROUTER", false);
+        cfg.priorLocked = vm.envOr("DLDSR_PRIOR_LOCKED_ROUTER", address(0));
+    }
+
+    /// @notice Deploy, and on Arb Sepolia replace `cfg.priorLocked` with the new router.
+    function deploy(
+        Config memory cfg
+    ) public returns (LockedDemoSwapRouter router) {
         uint256 chainId = block.chainid;
         require(
             chainId == BASE_SEPOLIA_CHAIN_ID || chainId == ARB_SEPOLIA_CHAIN_ID,
             "DeployLockedDemoSwapRouter: testnet only (84532 or 421614)"
         );
+        address sender = msg.sender;
+        require(sender != DEFAULT_SCRIPT_SENDER, "DeployLockedDemoSwapRouter: refusing Foundry default sender");
+        require(cfg.rescue != address(0), "DeployLockedDemoSwapRouter: DLDSR_GAS_RESCUE_SWAP_ADDRESS required");
 
-        uint256 deployerKey = vm.envUint("PRIVATE_KEY");
-        address deployer = vm.addr(deployerKey);
-        address rescueAddr = vm.envOr("GAS_RESCUE_SWAP_ADDRESS", address(0));
-        if (rescueAddr == address(0) && chainId == ARB_SEPOLIA_CHAIN_ID) rescueAddr = LIVE_ARB_RESCUE;
-        require(rescueAddr != address(0), "GAS_RESCUE_SWAP_ADDRESS required");
+        bool arb = chainId == ARB_SEPOLIA_CHAIN_ID;
+        // 421614 always swaps the allowlist. The flag only applies on Base Sepolia.
+        bool allowlist = cfg.allowlist || arb;
 
-        uint256 rateNumerator = vm.envOr("RATE_NUMERATOR", uint256(500_000_000_000_000));
-        uint256 rateDenominator = vm.envOr("RATE_DENOMINATOR", uint256(1e18));
-        uint256 maxPayout = vm.envOr("MAX_PAYOUT", uint256(0.001 ether));
-        uint256 fundWei = vm.envOr("FUND_WEI", uint256(0));
-        bool migrate = vm.envOr("MIGRATE_OLD_ROUTER", true);
-        bool allowlist = vm.envOr("ALLOWLIST_ON_RESCUE", true);
-
-        address oldRouter = vm.envOr("OLD_ROUTER_ADDRESS", address(0));
-        if (oldRouter == address(0) && chainId == ARB_SEPOLIA_CHAIN_ID) oldRouter = LIVE_ARB_OPEN_ROUTER;
-        address tokenIn = vm.envOr("TOKEN_ADDRESS", address(0));
-        if (tokenIn == address(0) && chainId == ARB_SEPOLIA_CHAIN_ID) tokenIn = LIVE_ARB_GRTT;
-
-        GasRescueSwap rescue = GasRescueSwap(payable(rescueAddr));
+        ILockedRouterRescue rescue = ILockedRouterRescue(cfg.rescue);
         if (allowlist) {
-            require(deployer == rescue.owner(), "PRIVATE_KEY must be the GasRescueSwap owner to allowlist");
+            require(
+                sender == rescue.owner(),
+                "DeployLockedDemoSwapRouter: sender must be the GasRescueSwap owner to allowlist"
+            );
         }
 
-        // Migration completed 2026-10-01. Source balance is 0, so the pull below
-        // does not run. Broadcasting still deploys a new LockedDemoSwapRouter and
-        // (ALLOWLIST_ON_RESCUE default true) allowlists that new address.
-        // Do not rebroadcast. Live router: 0xFE22f32eF7a8f64B6c9E1CCAe31817B54184f7fc.
-        vm.startBroadcast(deployerKey);
-        LockedDemoSwapRouter router =
-            new LockedDemoSwapRouter{value: fundWei}(deployer, rescueAddr, rateNumerator, rateDenominator, maxPayout);
-
-        if (migrate && oldRouter != address(0) && oldRouter.balance > 0) {
-            require(tokenIn != address(0), "TOKEN_ADDRESS required to migrate the open router");
-            new OpenDemoRouterMigrator(oldRouter, address(router), tokenIn);
+        if (arb) {
+            require(cfg.forceNew, "DeployLockedDemoSwapRouter: DLDSR_FORCE_NEW_ROUTER=true required on 421614");
+            require(
+                cfg.priorLocked != address(0),
+                "DeployLockedDemoSwapRouter: DLDSR_PRIOR_LOCKED_ROUTER required on 421614"
+            );
+        }
+        if (allowlist && cfg.priorLocked == LIVE_ARB_OPEN_ROUTER) {
+            revert("DeployLockedDemoSwapRouter: DLDSR_PRIOR_LOCKED_ROUTER is the retired open router");
+        }
+        if (arb) {
+            require(
+                rescue.allowedRouters(cfg.priorLocked),
+                "DeployLockedDemoSwapRouter: DLDSR_PRIOR_LOCKED_ROUTER not allowlisted"
+            );
+            if (cfg.fundWei == 0 && cfg.priorLocked.balance > 0) {
+                revert(
+                    "DeployLockedDemoSwapRouter: DLDSR_FUND_WEI is 0 and DLDSR_PRIOR_LOCKED_ROUTER still holds ETH; withdrawEth from the prior router and set DLDSR_FUND_WEI first"
+                );
+            }
         }
 
+        // `msg.sender` is the keystore account under
+        // `forge script --account <keystore> --sender <owner>`.
+        vm.startBroadcast(sender);
+        router = new LockedDemoSwapRouter{value: cfg.fundWei}(
+            sender, cfg.rescue, cfg.rateNumerator, cfg.rateDenominator, cfg.maxPayout
+        );
         if (allowlist) {
             rescue.setRouterAllowed(address(router), true);
-            if (oldRouter != address(0)) rescue.setRouterAllowed(oldRouter, false);
+            if (cfg.priorLocked != address(0) && cfg.priorLocked != address(router)) {
+                rescue.setRouterAllowed(cfg.priorLocked, false);
+            }
         }
         vm.stopBroadcast();
 
+        if (arb) {
+            require(rescue.allowedRouters(address(router)), "DeployLockedDemoSwapRouter: new router not allowlisted");
+            require(
+                !rescue.allowedRouters(cfg.priorLocked),
+                "DeployLockedDemoSwapRouter: DLDSR_PRIOR_LOCKED_ROUTER still allowlisted"
+            );
+        }
+
         console2.log("chain            ", chainId);
         console2.log("LockedDemoRouter ", address(router));
-        console2.log("owner            ", deployer);
-        console2.log("rescue           ", rescueAddr);
+        console2.log("owner            ", sender);
+        console2.log("rescue           ", cfg.rescue);
         console2.log("payAmount demo   ", router.payAmount());
         console2.log("maxPayout        ", router.maxPayout());
         console2.log("inventory        ", address(router).balance);
-        if (oldRouter != address(0)) console2.log("old router       ", oldRouter);
+        console2.log("force new        ", cfg.forceNew);
+        if (cfg.priorLocked != address(0)) console2.log("prior locked     ", cfg.priorLocked);
     }
 }
