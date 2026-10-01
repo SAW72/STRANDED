@@ -28,8 +28,7 @@ contract MockRescueRouterAdmin {
     }
 }
 
-/// @notice `vm.setEnv` is process-global, so these cases share one test and cannot
-///         interleave. Each case still calls `DeployLockedDemoSwapRouter.run()`.
+/// @notice Calls `deploy(Config)` directly. No `vm.setEnv`.
 contract DeployLockedDemoSwapRouterTest is Test {
     DeployLockedDemoSwapRouter internal script;
     MockRescueRouterAdmin internal rescue;
@@ -40,49 +39,69 @@ contract DeployLockedDemoSwapRouterTest is Test {
         script = new DeployLockedDemoSwapRouter();
     }
 
-    function test_run_wrongChain_nonOwner_defaultSender_happyPath_andRerun() public {
-        _wrongChain();
-        vm.chainId(421_614);
-        _nonOwner();
-        _defaultSender();
-        _happyPath();
-        _rerun();
-        _refusesRetiredOpenRouter();
-    }
-
-    function _wrongChain() internal {
+    function test_deploy_wrongChain_reverts() public {
         vm.chainId(1);
         vm.expectRevert(bytes("DeployLockedDemoSwapRouter: testnet only (84532 or 421614)"));
-        script.run();
+        script.deploy(_arbCfg(makeAddr("prior")));
     }
 
-    function _nonOwner() internal {
-        _resetEnv();
-        address stranger = makeAddr("stranger");
+    function test_deploy_nonOwner_reverts() public {
+        address prior = makeAddr("prior");
+        rescue.setRouterAllowed(prior, true);
         vm.expectRevert(bytes("DeployLockedDemoSwapRouter: sender must be the GasRescueSwap owner to allowlist"));
-        vm.prank(stranger);
-        script.run();
+        vm.prank(makeAddr("stranger"));
+        script.deploy(_arbCfg(prior));
     }
 
-    function _defaultSender() internal {
-        _resetEnv();
+    function test_deploy_defaultSender_reverts() public {
+        address prior = makeAddr("prior");
+        rescue.setRouterAllowed(prior, true);
         address defaultSender = script.DEFAULT_SCRIPT_SENDER();
         assertEq(defaultSender, DEFAULT_SENDER);
         assertEq(defaultSender, 0x1804c8AB1F12E6bbf3894d4083f33e07309d1f38);
         vm.expectRevert(bytes("DeployLockedDemoSwapRouter: refusing Foundry default sender"));
         vm.prank(defaultSender);
-        script.run();
+        script.deploy(_arbCfg(prior));
     }
 
-    function _happyPath() internal {
-        _resetEnv();
+    function test_deploy_arb_requiresForce() public {
+        address prior = makeAddr("prior");
+        rescue.setRouterAllowed(prior, true);
+        DeployLockedDemoSwapRouter.Config memory cfg = _arbCfg(prior);
+        cfg.forceNew = false;
+        vm.expectRevert(bytes("DeployLockedDemoSwapRouter: FORCE_NEW_ROUTER=true required on 421614"));
+        script.deploy(cfg);
+        assertTrue(rescue.allowedRouters(prior), "failed guard does not delist");
+    }
+
+    function test_deploy_arb_requiresExplicitPrior() public {
+        DeployLockedDemoSwapRouter.Config memory cfg = _arbCfg(address(0));
+        vm.expectRevert(bytes("DeployLockedDemoSwapRouter: PRIOR_LOCKED_ROUTER required on 421614"));
+        script.deploy(cfg);
+    }
+
+    function test_deploy_refusesRetiredOpenRouter() public {
+        address openRouter = script.LIVE_ARB_OPEN_ROUTER();
+        rescue.setRouterAllowed(openRouter, true);
+        vm.expectRevert(bytes("DeployLockedDemoSwapRouter: refusing to delist the retired open router"));
+        script.deploy(_arbCfg(openRouter));
+        assertTrue(rescue.allowedRouters(openRouter), "open router stays allowlisted");
+    }
+
+    function test_deploy_priorNotAllowlisted_reverts() public {
+        address prior = makeAddr("notListed");
+        vm.expectRevert(bytes("DeployLockedDemoSwapRouter: prior locked router is not allowlisted"));
+        script.deploy(_arbCfg(prior));
+        assertFalse(rescue.allowedRouters(prior));
+    }
+
+    function test_deploy_forcedRun_delistsPriorAndAllowlistsNew() public {
         address prior = makeAddr("priorLocked");
         address openRouter = script.LIVE_ARB_OPEN_ROUTER();
         rescue.setRouterAllowed(prior, true);
         rescue.setRouterAllowed(openRouter, true);
-        vm.setEnv("PRIOR_LOCKED_ROUTER", vm.toString(prior));
 
-        LockedDemoSwapRouter deployed = script.run();
+        LockedDemoSwapRouter deployed = script.deploy(_arbCfg(prior));
 
         assertTrue(rescue.allowedRouters(address(deployed)), "new router allowlisted");
         assertFalse(rescue.allowedRouters(prior), "prior locked router delisted");
@@ -92,44 +111,75 @@ contract DeployLockedDemoSwapRouterTest is Test {
         assertEq(deployed.payAmount(), 0.0001 ether);
     }
 
-    function _rerun() internal {
-        _resetEnv();
-        address locked = script.LIVE_ARB_LOCKED_ROUTER();
-        address openRouter = script.LIVE_ARB_OPEN_ROUTER();
-        rescue.setRouterAllowed(locked, true);
-        rescue.setRouterAllowed(openRouter, true);
+    function test_deploy_secondForcedRun_usesFirstRouterAsPrior() public {
+        address prior = makeAddr("priorLocked");
+        rescue.setRouterAllowed(prior, true);
 
-        vm.expectRevert(
-            bytes("DeployLockedDemoSwapRouter: locked router already allowlisted; set FORCE_NEW_ROUTER=true")
-        );
-        script.run();
-        assertTrue(rescue.allowedRouters(locked), "guard does not delist");
-        assertTrue(rescue.allowedRouters(openRouter), "guard does not touch the open router");
+        LockedDemoSwapRouter first = script.deploy(_arbCfg(prior));
+        assertTrue(rescue.allowedRouters(address(first)));
+        assertFalse(rescue.allowedRouters(prior));
 
-        vm.setEnv("FORCE_NEW_ROUTER", "true");
-        LockedDemoSwapRouter deployed = script.run();
-
-        assertTrue(rescue.allowedRouters(address(deployed)), "forced run allowlists the new router");
-        assertFalse(rescue.allowedRouters(locked), "forced run delists the prior locked router");
-        assertTrue(rescue.allowedRouters(openRouter), "forced run does not delist 0x6804");
-        assertTrue(address(deployed) != locked);
+        LockedDemoSwapRouter second = script.deploy(_arbCfg(address(first)));
+        assertTrue(rescue.allowedRouters(address(second)), "second router allowlisted");
+        assertFalse(rescue.allowedRouters(address(first)), "first new router delisted");
+        assertTrue(address(second) != address(first));
     }
 
-    function _refusesRetiredOpenRouter() internal {
-        _resetEnv();
-        vm.setEnv("PRIOR_LOCKED_ROUTER", vm.toString(script.LIVE_ARB_OPEN_ROUTER()));
-        vm.expectRevert(bytes("DeployLockedDemoSwapRouter: refusing to delist the retired open router"));
-        script.run();
+    function test_deploy_baseSepolia_allowlistsWithoutForceOrPrior() public {
+        vm.chainId(84_532);
+        DeployLockedDemoSwapRouter.Config memory cfg = _baseCfg();
+        cfg.allowlist = true;
+        cfg.forceNew = false;
+        cfg.priorLocked = address(0);
+
+        LockedDemoSwapRouter deployed = script.deploy(cfg);
+
+        assertTrue(rescue.allowedRouters(address(deployed)));
+        assertEq(deployed.rescue(), address(rescue));
+        assertEq(block.chainid, 84_532);
     }
 
-    function _resetEnv() internal {
-        vm.setEnv("GAS_RESCUE_SWAP_ADDRESS", vm.toString(address(rescue)));
-        vm.setEnv("FORCE_NEW_ROUTER", "false");
-        vm.setEnv("ALLOWLIST_ON_RESCUE", "true");
-        vm.setEnv("FUND_WEI", "0");
-        vm.setEnv("PRIOR_LOCKED_ROUTER", vm.toString(address(0)));
-        vm.setEnv("RATE_NUMERATOR", "500000000000000");
-        vm.setEnv("RATE_DENOMINATOR", "1000000000000000000");
-        vm.setEnv("MAX_PAYOUT", "1000000000000000");
+    function test_deploy_allowlistFalse_skipsAllowlistOnBase() public {
+        vm.chainId(84_532);
+        DeployLockedDemoSwapRouter.Config memory cfg = _baseCfg();
+        cfg.allowlist = false;
+
+        LockedDemoSwapRouter deployed = script.deploy(cfg);
+
+        assertFalse(rescue.allowedRouters(address(deployed)), "flag skips the allowlist");
+        assertEq(deployed.owner(), address(this));
+    }
+
+    function test_deploy_fundWei_sendsInventory() public {
+        vm.chainId(84_532);
+        vm.deal(address(this), 1 ether);
+        DeployLockedDemoSwapRouter.Config memory cfg = _baseCfg();
+        cfg.allowlist = false;
+        cfg.fundWei = 0.02 ether;
+
+        LockedDemoSwapRouter deployed = script.deploy(cfg);
+
+        assertEq(address(deployed).balance, 0.02 ether);
+        assertEq(address(this).balance, 1 ether - 0.02 ether);
+    }
+
+    function _arbCfg(
+        address prior
+    ) internal view returns (DeployLockedDemoSwapRouter.Config memory cfg) {
+        cfg = _baseCfg();
+        cfg.allowlist = true;
+        cfg.forceNew = true;
+        cfg.priorLocked = prior;
+    }
+
+    function _baseCfg() internal view returns (DeployLockedDemoSwapRouter.Config memory cfg) {
+        cfg.rescue = address(rescue);
+        cfg.rateNumerator = 500_000_000_000_000;
+        cfg.rateDenominator = 1e18;
+        cfg.maxPayout = 0.001 ether;
+        cfg.fundWei = 0;
+        cfg.allowlist = false;
+        cfg.forceNew = false;
+        cfg.priorLocked = address(0);
     }
 }
