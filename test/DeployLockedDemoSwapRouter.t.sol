@@ -69,28 +69,28 @@ contract DeployLockedDemoSwapRouterTest is Test {
         rescue.setRouterAllowed(prior, true);
         DeployLockedDemoSwapRouter.Config memory cfg = _arbCfg(prior);
         cfg.forceNew = false;
-        vm.expectRevert(bytes("DeployLockedDemoSwapRouter: FORCE_NEW_ROUTER=true required on 421614"));
+        vm.expectRevert(bytes("DeployLockedDemoSwapRouter: DLDSR_FORCE_NEW_ROUTER=true required on 421614"));
         script.deploy(cfg);
         assertTrue(rescue.allowedRouters(prior), "failed guard does not delist");
     }
 
     function test_deploy_arb_requiresExplicitPrior() public {
         DeployLockedDemoSwapRouter.Config memory cfg = _arbCfg(address(0));
-        vm.expectRevert(bytes("DeployLockedDemoSwapRouter: PRIOR_LOCKED_ROUTER required on 421614"));
+        vm.expectRevert(bytes("DeployLockedDemoSwapRouter: DLDSR_PRIOR_LOCKED_ROUTER required on 421614"));
         script.deploy(cfg);
     }
 
     function test_deploy_refusesRetiredOpenRouter() public {
         address openRouter = script.LIVE_ARB_OPEN_ROUTER();
         rescue.setRouterAllowed(openRouter, true);
-        vm.expectRevert(bytes("DeployLockedDemoSwapRouter: refusing to delist the retired open router"));
+        vm.expectRevert(bytes("DeployLockedDemoSwapRouter: DLDSR_PRIOR_LOCKED_ROUTER is the retired open router"));
         script.deploy(_arbCfg(openRouter));
         assertTrue(rescue.allowedRouters(openRouter), "open router stays allowlisted");
     }
 
     function test_deploy_priorNotAllowlisted_reverts() public {
         address prior = makeAddr("notListed");
-        vm.expectRevert(bytes("DeployLockedDemoSwapRouter: prior locked router is not allowlisted"));
+        vm.expectRevert(bytes("DeployLockedDemoSwapRouter: DLDSR_PRIOR_LOCKED_ROUTER not allowlisted"));
         script.deploy(_arbCfg(prior));
         assertFalse(rescue.allowedRouters(prior));
     }
@@ -123,6 +123,75 @@ contract DeployLockedDemoSwapRouterTest is Test {
         assertTrue(rescue.allowedRouters(address(second)), "second router allowlisted");
         assertFalse(rescue.allowedRouters(address(first)), "first new router delisted");
         assertTrue(address(second) != address(first));
+    }
+
+    function test_deploy_arb_allowlistFalse_isOverridden() public {
+        address prior = makeAddr("priorLocked");
+        rescue.setRouterAllowed(prior, true);
+        DeployLockedDemoSwapRouter.Config memory cfg = _arbCfg(prior);
+        cfg.allowlist = false;
+
+        LockedDemoSwapRouter deployed = script.deploy(cfg);
+
+        assertTrue(rescue.allowedRouters(address(deployed)), "421614 overrides DLDSR_ALLOWLIST_ON_RESCUE=false");
+        assertFalse(rescue.allowedRouters(prior), "prior is still delisted");
+    }
+
+    function test_deploy_arb_zeroFundRevertsWhenPriorHoldsEth() public {
+        address prior = makeAddr("priorLocked");
+        rescue.setRouterAllowed(prior, true);
+        vm.deal(prior, 0.0195 ether);
+        DeployLockedDemoSwapRouter.Config memory cfg = _arbCfg(prior);
+        cfg.fundWei = 0;
+
+        vm.expectRevert(
+            bytes(
+                "DeployLockedDemoSwapRouter: DLDSR_FUND_WEI is 0 and DLDSR_PRIOR_LOCKED_ROUTER still holds ETH; withdrawEth from the prior router and set DLDSR_FUND_WEI first"
+            )
+        );
+        script.deploy(cfg);
+
+        assertTrue(rescue.allowedRouters(prior), "guard does not delist");
+        assertEq(prior.balance, 0.0195 ether, "guard does not move the prior inventory");
+    }
+
+    function test_deploy_arb_forceWithFundWei_allowsPriorThatHoldsEth() public {
+        address prior = makeAddr("priorLocked");
+        rescue.setRouterAllowed(prior, true);
+        vm.deal(prior, 0.0195 ether);
+        vm.deal(address(this), 1 ether);
+        DeployLockedDemoSwapRouter.Config memory cfg = _arbCfg(prior);
+        cfg.fundWei = 0.02 ether;
+
+        LockedDemoSwapRouter deployed = script.deploy(cfg);
+
+        assertEq(address(deployed).balance, 0.02 ether, "new router funded");
+        assertEq(prior.balance, 0.0195 ether, "prior inventory stays until withdrawEth");
+        assertTrue(rescue.allowedRouters(address(deployed)));
+        assertFalse(rescue.allowedRouters(prior));
+    }
+
+    function test_readConfig_defaults() public {
+        DeployLockedDemoSwapRouter.Config memory arb = script.readConfig();
+        assertEq(arb.rescue, script.LIVE_ARB_RESCUE(), "421614 defaults the rescue");
+        assertEq(arb.rateNumerator, 500_000_000_000_000);
+        assertEq(arb.rateDenominator, 1e18);
+        assertEq(arb.maxPayout, 0.001 ether);
+        assertEq(arb.fundWei, 0);
+        assertTrue(arb.allowlist, "DLDSR_ALLOWLIST_ON_RESCUE defaults true");
+        assertFalse(arb.forceNew, "DLDSR_FORCE_NEW_ROUTER defaults false");
+        assertEq(arb.priorLocked, address(0), "DLDSR_PRIOR_LOCKED_ROUTER has no default");
+
+        vm.chainId(84_532);
+        DeployLockedDemoSwapRouter.Config memory base = script.readConfig();
+        assertEq(base.rescue, address(0), "Base Sepolia has no rescue default");
+        assertEq(base.rateNumerator, arb.rateNumerator);
+        assertEq(base.rateDenominator, arb.rateDenominator);
+        assertEq(base.maxPayout, arb.maxPayout);
+        assertEq(base.fundWei, 0);
+        assertTrue(base.allowlist);
+        assertFalse(base.forceNew);
+        assertEq(base.priorLocked, address(0));
     }
 
     function test_deploy_baseSepolia_allowlistsWithoutForceOrPrior() public {
