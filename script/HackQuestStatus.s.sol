@@ -54,7 +54,9 @@ contract HackQuestStatus is Script {
     address internal constant LIVE_BASE_SWAP = 0x21A1ADf810e64B5bd1d530D31abA6856b8DEf688;
     address internal constant LIVE_RELAYER = 0x8240124dc78a27c80354Ca813Df12aa2888A9AF6;
     address internal constant DRY_NATIVE_TO = 0x1111111111111111111111111111111111111111;
-    /// @dev GRTT holder used for the default funded preflight (read 2026-10-01).
+    /// @dev Spencer's demo/QA EOA. Was allowlisted as a relayer in the past.
+    ///      `relayers` on the live rescue returned false on 2026-10-01.
+    ///      Default funded preflight user (read 2026-10-01).
     address internal constant DEMO_GRTT_HOLDER = 0x5BFd261b1eF7e61Bfea1ebfC87bDD8F4244BBA37;
     uint256 internal constant DEMO_AMOUNT_IN = 1 ether;
     /// @dev Spencer / Chain Ops target before a live `rescueWithPermit` submit.

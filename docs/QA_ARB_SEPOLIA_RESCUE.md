@@ -290,11 +290,30 @@ forge script script/MigrateH1GatedDemoToken.s.sol:MigrateH1GatedDemoToken \
   --chain-id 421614 -vv
 ```
 
-Spencer broadcasts from his machine only, with `--account` / `--sender` equal to the owner. Do not broadcast from CI or Cursor.
+Spencer broadcasts from his machine only, with `--account` / `--sender` equal to the owner, and with `--slow` so each transaction lands before the next one is sent. Do not broadcast from CI or Cursor.
+
+```bash
+forge script script/MigrateH1GatedDemoToken.s.sol:MigrateH1GatedDemoToken \
+  --rpc-url "$ARB_SEPOLIA_RPC_URL" --chain-id 421614 \
+  --account <owner-keystore> \
+  --sender 0x30466A210961c0C2C13AF0A9d35dfC6E8858bA9D \
+  --broadcast --slow
+```
+
+If that run stops after the CREATE, or after the CREATE and `setEip2612Token`, resume with the address the run printed. Do not deploy a second token.
+
+```bash
+EXISTING_TOKEN=<printed address> \
+forge script script/MigrateH1GatedDemoToken.s.sol:MigrateH1GatedDemoToken \
+  --rpc-url "$ARB_SEPOLIA_RPC_URL" --chain-id 421614 \
+  --account <owner-keystore> \
+  --sender 0x30466A210961c0C2C13AF0A9d35dfC6E8858bA9D \
+  --broadcast --slow
+```
 
 Until he signs, section 4a still expects `tokenAllowed=true` and `ready=true` for the open GRTT holder (`DEMO_TOKEN` unset). After he signs, set one line `DEMO_TOKEN=<deployed>` before the next `HackQuestStatus` run. The in-script Lens then reports `ready=true` for `0x5BFd…BA37` on the new token. Do not paste a nonce-predicted address, and do not retarget `GasRescueLens.LIVE_ARB_GRTT`. The relayer flip is `DEMO_TOKEN` or `TOKEN_ADDRESS`. `VITE_TOKEN_ADDRESS_ARB_SEPOLIA` is a Render env change on the static site `stranded` plus a rebuild. This runbook does not change `render.yaml`. Owner mints after the constructor follow [docs/SDEMO_MINT_LOG.md](SDEMO_MINT_LOG.md): 2 SDEMO per named judge or QA wallet, on request only, with outstanding SDEMO capped at 20 including the constructor mint. Do not change `setRate` or `setMaxPayout` on the router during judging.
 
-A judge using their own wallet needs the owner to mint them the new token. Only `0x5BFd…BA37` is pre-funded with 2e18. The remaining drain bound is total new-token supply divided by `amountIn` per rescue, times the payout. Constructor supply 2e18 can fund one rescue at `amountIn = amountSwap = 2e18` (0.001 ETH cap) or two demo-slice rescues at `amountIn` 1e18 / `amountSwap` 0.2e18 (0.0001 ETH each, 0.0002 ETH total). Further owner mints raise that bound. The fixture demo (empty Relayer URL) still runs.
+A judge using their own wallet needs the owner to mint them the new token. Only `0x5BFd…BA37` is pre-funded with 2e18. `0x5BFd261b1eF7e61Bfea1ebfC87bDD8F4244BBA37` is Spencer's demo/QA EOA. It was allowlisted as a relayer in the past. On 2026-10-01 `relayers(address)` on `GasRescueSwap` `0x65e7…993D` returned false for it. The live relayer hot key is `0x8240…9AF6`. ETH out is at most SDEMO `totalSupply()` times 0.0005 ETH, so 2 SDEMO = 0.001 ETH and 20 SDEMO = 0.01 ETH, which is 51% of the router's 0.0195 ETH inventory. Outstanding supply means `totalSupply()`. SDEMO held by the router is never swept and re-minted. Further owner mints stay inside the operating limit of 20, including the constructor mint. The fixture demo (empty Relayer URL) still runs.
 
 `withdrawEth` and `setMaxPayout` exist on the live router. They are a stopgap (pull the 0.0195 ETH, or set the cap to 0). They are not this migration. A public one-per-address faucet would leave the drain open.
 

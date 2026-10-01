@@ -217,6 +217,79 @@ contract ArbSepoliaH1Test is Test {
         migration.run();
     }
 
+    function test_live_scriptFreshRun() public onlyFork {
+        MigrateH1GatedDemoToken migration = new MigrateH1GatedDemoToken();
+        uint256 nonce = vm.getNonce(LIVE_OWNER);
+        address deployed = migration.migrate(
+            MigrateH1GatedDemoToken.Config({existingToken: address(0), sender: LIVE_OWNER})
+        );
+        assertEq(vm.getNonce(LIVE_OWNER), nonce + 4, "fresh run is CREATE plus three setters");
+        GatedDemoToken token = GatedDemoToken(deployed);
+        assertEq(token.totalSupply(), 2 ether);
+        assertEq(token.pendingOwner(), address(0));
+        assertEq(token.balanceOf(DEMO_HOLDER), 2 ether);
+        assertTrue(swap.eip2612Tokens(deployed) && swap.allowedTokens(deployed));
+        assertFalse(swap.allowedTokens(LIVE_GRTT) || swap.eip2612Tokens(LIVE_GRTT));
+        assertFalse(swap.allowedTokens(LIVE_GMOCK) || swap.eip2612Tokens(LIVE_GMOCK));
+    }
+
+    function test_live_scriptResumeAfterCreate() public onlyFork {
+        GatedDemoToken token = new GatedDemoToken(LIVE_OWNER, DEMO_HOLDER, 2 ether);
+        assertFalse(swap.eip2612Tokens(address(token)));
+        MigrateH1GatedDemoToken migration = new MigrateH1GatedDemoToken();
+        uint256 nonce = vm.getNonce(LIVE_OWNER);
+        address deployed = migration.migrate(
+            MigrateH1GatedDemoToken.Config({existingToken: address(token), sender: LIVE_OWNER})
+        );
+        assertEq(deployed, address(token), "resume does not deploy a second token");
+        assertEq(vm.getNonce(LIVE_OWNER), nonce + 3, "resume after CREATE sends the three setters");
+        assertEq(token.totalSupply(), 2 ether);
+        assertTrue(swap.eip2612Tokens(address(token)));
+        assertFalse(swap.allowedTokens(LIVE_GRTT));
+        assertFalse(swap.allowedTokens(LIVE_GMOCK));
+    }
+
+    function test_live_scriptResumeAfterCreateAndAllowlist() public onlyFork {
+        GatedDemoToken token = new GatedDemoToken(LIVE_OWNER, DEMO_HOLDER, 2 ether);
+        vm.prank(LIVE_OWNER);
+        swap.setEip2612Token(address(token), true);
+        MigrateH1GatedDemoToken migration = new MigrateH1GatedDemoToken();
+        uint256 nonce = vm.getNonce(LIVE_OWNER);
+        address deployed = migration.migrate(
+            MigrateH1GatedDemoToken.Config({existingToken: address(token), sender: LIVE_OWNER})
+        );
+        assertEq(deployed, address(token));
+        assertEq(vm.getNonce(LIVE_OWNER), nonce + 2, "allowlist already true, so only the two delists");
+        assertTrue(swap.eip2612Tokens(address(token)));
+        assertFalse(swap.allowedTokens(LIVE_GRTT) || swap.allowedTokens(LIVE_GMOCK));
+    }
+
+    function test_live_scriptFullRerunIsNoop() public onlyFork {
+        MigrateH1GatedDemoToken migration = new MigrateH1GatedDemoToken();
+        address first = migration.migrate(
+            MigrateH1GatedDemoToken.Config({existingToken: address(0), sender: LIVE_OWNER})
+        );
+        uint256 nonce = vm.getNonce(LIVE_OWNER);
+        uint256 supply = GatedDemoToken(first).totalSupply();
+        address second = migration.migrate(
+            MigrateH1GatedDemoToken.Config({existingToken: first, sender: LIVE_OWNER})
+        );
+        assertEq(second, first, "full re-run keeps the same token");
+        assertEq(vm.getNonce(LIVE_OWNER), nonce, "full re-run sends no transaction");
+        assertEq(GatedDemoToken(first).totalSupply(), supply);
+        assertFalse(swap.allowedTokens(LIVE_GRTT) || swap.allowedTokens(LIVE_GMOCK));
+    }
+
+    function test_live_scriptExistingTokenWrongOwnerReverts() public onlyFork {
+        address other = makeAddr("wrong-owner");
+        GatedDemoToken token = new GatedDemoToken(other, DEMO_HOLDER, 2 ether);
+        MigrateH1GatedDemoToken migration = new MigrateH1GatedDemoToken();
+        vm.expectRevert(bytes("MigrateH1: EXISTING_TOKEN owner"));
+        migration.migrate(
+            MigrateH1GatedDemoToken.Config({existingToken: address(token), sender: LIVE_OWNER})
+        );
+    }
+
     function _rescue(
         address token,
         address user,
