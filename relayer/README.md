@@ -6,7 +6,12 @@ Runtime secrets stay in the environment. Do not put `RELAYER_PRIVATE_KEY` in a f
 
 ## Rescue limits
 
-Each successful rescue pays gas from the router inventory (up to 0.001 testnet ETH). These limits (1 per wallet, 3 per IP, 4 hours) slow repeat use. The demo token is SDEMO "Stranded Demo Token" (`0xE3cb1AC5EDc70D3a85250a8c00cBe3A45AFc616C`). It has a fixed supply of 20 and no mint, so the whole supply can draw at most 0.01 testnet ETH. Set `DEMO_TOKEN` to that address; it wins over `TOKEN_ADDRESS`. GRTT and gMOCK were delisted Oct 1, 2026.
+Each successful rescue pays gas from the router inventory (up to 0.001 testnet ETH). These limits (1 per wallet, 3 per IP, 4 hours) slow repeat use. The demo token is SDEMO "Stranded Demo Token" (`0xE3cb1AC5EDc70D3a85250a8c00cBe3A45AFc616C`). It has a fixed supply of 20 and no mint, so the whole supply can draw at most 0.01 testnet ETH. Set both to that address. `DEMO_TOKEN` wins over `TOKEN_ADDRESS`. GRTT and gMOCK were delisted Oct 1, 2026.
+
+```
+TOKEN_ADDRESS=0xE3cb1AC5EDc70D3a85250a8c00cBe3A45AFc616C
+DEMO_TOKEN=0xE3cb1AC5EDc70D3a85250a8c00cBe3A45AFc616C
+```
 
 Defaults apply when the variables are **unset**, including on the live Render service:
 

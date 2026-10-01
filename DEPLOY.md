@@ -38,6 +38,11 @@ https://strandedtoken.trade,http://localhost:5173,http://127.0.0.1:5173
 
 Do not add `https://gas-rescue.onrender.com`. That host is not on the allowlist, and rescue requests from it are blocked. CORS is read at boot, so restart the Relayer after any change.
 
+Demo token on **stranded-relayer-arb** (see `relayer/.env.example`):
+
+- `TOKEN_ADDRESS` — `0xE3cb1AC5EDc70D3a85250a8c00cBe3A45AFc616C`
+- `DEMO_TOKEN` — `0xE3cb1AC5EDc70D3a85250a8c00cBe3A45AFc616C` (`DEMO_TOKEN` wins). GRTT and gMOCK were delisted Oct 1, 2026.
+
 Optional control-plane vars on **stranded-relayer-arb** (see `relayer/.env.example`):
 
 - `KILL_SWITCH` — `1`/`true` refuses new quotes and rescues. `/health` stays HTTP 200 with `paused: true` so Render does not recycle the service.

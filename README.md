@@ -95,7 +95,8 @@ The Relayer hot key is **not** stored in `.env`, the workspace, or any generated
 | `RELAYER_PRIVATE_KEY` | **GitHub Actions secret only.** Relayer signer. Injected at runtime; never written to disk. |
 | `WETH_ADDRESS` | Required. Set per testnet; no mainnet fallback. |
 | `ROUTER_ADDRESS` | Optional post-deploy router allowlist. Root `.env.example` leaves it empty (chain-agnostic). Arb relayer template is the locked router. |
-| `TOKEN_ADDRESS` | Optional EIP-2612 allowlist. |
+| `TOKEN_ADDRESS` | Arb Sepolia demo token SDEMO `0xE3cb1AC5EDc70D3a85250a8c00cBe3A45AFc616C`. |
+| `DEMO_TOKEN` | Relayer override of `TOKEN_ADDRESS`. Same SDEMO address. GRTT and gMOCK were delisted Oct 1, 2026. |
 | `PERMIT2_ADDRESS` | Constructor-immutable. `address(0)` (unwired) or canonical Uniswap Permit2. |
 | `PERMIT2_ENABLED` | Not set at deploy; `permit2Enabled` always starts `false`. |
 | `BASE_SEPOLIA_RPC_URL` | Default `https://sepolia.base.org` |
