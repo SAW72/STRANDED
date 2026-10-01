@@ -67,13 +67,136 @@ export function fail(status, code, message, extra = {}) {
   return err;
 }
 
-function safeRevert(value) {
-  if (typeof value !== "string" || !value) return undefined;
-  const oneLine = value.replace(/\s+/g, " ").trim().slice(0, 180);
-  if (!oneLine) return undefined;
-  if (/https?:\/\//i.test(oneLine)) return undefined;
-  if (/private[_-]?key|mnemonic|secret/i.test(oneLine)) return undefined;
-  return oneLine;
+/** Solidity custom-error identifier. Rejects sentences, addresses, and selectors. */
+const CLIENT_REVERT_NAME = /^[A-Z][A-Za-z0-9_]{0,63}$/;
+
+/**
+ * Decoded custom errors the client may see. GasRescueSwap (including the
+ * OpenZeppelin errors it inherits) and LockedDemoSwapRouter, plus
+ * ERC2612InvalidSigner. That last name is not on those ABIs; the wallet maps
+ * it, so a swap/router-only list would drop it.
+ */
+const CLIENT_REVERT_ALLOWLIST = new Set([
+  "NotRelayer",
+  "OwnerIsRelayer",
+  "WrongChain",
+  "ZeroAddress",
+  "InvalidOrder",
+  "ExpiredDeadline",
+  "TokenNotAllowed",
+  "RouterNotAllowed",
+  "UsedNonce",
+  "InvalidSignature",
+  "Underfunded",
+  "FoTOrBalanceMismatch",
+  "PathMismatch",
+  "NoGaslessAuth",
+  "Slippage",
+  "SwapFailed",
+  "SwapInputNotConsumed",
+  "DustRemaining",
+  "NativeTransferFailed",
+  "OwnershipCannotBeRenounced",
+  "Permit2Immutable",
+  "InvalidPermit2",
+  "EnforcedPause",
+  "ExpectedPause",
+  "ReentrancyGuardReentrantCall",
+  "OwnableUnauthorizedAccount",
+  "OwnableInvalidOwner",
+  "ECDSAInvalidSignature",
+  "ECDSAInvalidSignatureLength",
+  "ECDSAInvalidSignatureS",
+  "NotRescue",
+  "NotEnoughTokens",
+  "ZeroAmount",
+  "ZeroPayout",
+  "InsufficientEth",
+  "EthTransferFailed",
+  "InvalidRate",
+  "ERC2612InvalidSigner",
+]);
+
+/**
+ * Client `revert` is a decoded custom-error name, or absent.
+ * @param {unknown} value
+ */
+export function clientRevertName(value) {
+  if (typeof value !== "string") return undefined;
+  const name = value.trim();
+  if (!CLIENT_REVERT_NAME.test(name)) return undefined;
+  if (!CLIENT_REVERT_ALLOWLIST.has(name)) return undefined;
+  return name;
+}
+
+function eachError(err, visit) {
+  if (!err || typeof err !== "object") return;
+  let walked = false;
+  if (typeof err.walk === "function") {
+    try {
+      err.walk((inner) => {
+        walked = true;
+        visit(inner);
+        return false;
+      });
+    } catch {
+      walked = false;
+    }
+  }
+  if (!walked) {
+    visit(err);
+    if (err.cause && typeof err.cause === "object") visit(err.cause);
+  }
+}
+
+/** First allowlisted decoded name on the error or its cause chain. */
+export function decodedRevertName(err) {
+  /** @type {string[]} */
+  const names = [];
+  eachError(err, (inner) => {
+    if (!inner || typeof inner !== "object") return;
+    if (typeof inner.errorName === "string") names.push(inner.errorName);
+    if (inner.data && typeof inner.data.errorName === "string") names.push(inner.data.errorName);
+  });
+  for (const name of names) {
+    const allowed = clientRevertName(name);
+    if (allowed) return allowed;
+  }
+  return undefined;
+}
+
+function redactLogDetail(value) {
+  return String(value)
+    .replace(/https?:\/\/\S+/gi, "[url]")
+    .replace(/\b(?:private[_-]?key|mnemonic)\b\S*/gi, "[secret]")
+    .replace(/\bsecret\w*/gi, "[secret]")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 240);
+}
+
+/** Full simulation detail for server logs. URLs and secret-like strings are stripped. */
+export function simulationLogDetail(err) {
+  const parts = [];
+  const push = (value) => {
+    if (value == null || value === "") return;
+    if (typeof value === "string" || typeof value === "number") parts.push(String(value));
+  };
+  eachError(err, (inner) => {
+    if (!inner || typeof inner !== "object") return;
+    push(inner.shortMessage);
+    push(inner.details);
+    push(inner.message);
+    push(inner.name);
+    push(inner.errorName);
+    if (inner.data && typeof inner.data === "object") push(inner.data.errorName);
+  });
+  return redactLogDetail(parts.join(" "));
+}
+
+/** @param {object} [err] @param {(...args: unknown[]) => void} [log] */
+export function logSimulationFailure(err, log = console.error) {
+  log("relayer_error simulation_failed", simulationLogDetail(err));
 }
 
 /**
@@ -104,7 +227,7 @@ export function toPublicError(err) {
   const body = { ok: false, error: code };
   const message = err && typeof err.publicMessage === "string" ? err.publicMessage : "";
   if (message && message !== code) body.message = message;
-  const revert = safeRevert(err && err.revert);
+  const revert = clientRevertName(err && err.revert);
   if (revert) body.revert = revert;
 
   /** @type {Record<string, string>} */
@@ -123,16 +246,12 @@ export function toPublicError(err) {
 
 /**
  * Simulation failure for the client. `message` is always the fixed sentence.
- * `revert` stays the previous detail (contract error name, otherwise the
- * viem short message or error name) so callers can keep their existing field.
+ * `revert` is set only when the cause chain has an allowlisted decoded name.
  * @param {object} [err]
  */
 export function simulationFailure(err) {
-  const name = err && (err.shortMessage || err.name || "");
-  const revert = err && (err.data?.errorName || err.errorName || "");
-  return fail(502, "simulation_failed", SIMULATION_FAILED_MESSAGE, {
-    revert: String(revert || name || "unknown"),
-  });
+  const revert = decodedRevertName(err);
+  return fail(502, "simulation_failed", SIMULATION_FAILED_MESSAGE, revert ? { revert } : {});
 }
 
 /** Broadcast / unexpected failures stay coded and secret-free. */

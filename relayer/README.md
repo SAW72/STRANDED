@@ -91,6 +91,8 @@ Bad input is HTTP 400 with `{ "ok": false, "error": "<code>", "message": "..." }
 | Signed route is not the one this service uses | `router_not_allowed` | This rescue route isn't available. Please get a new quote and try again. |
 | The rescue check failed before broadcast | `simulation_failed` | This rescue wouldn't go through right now. Please get a new quote and try again. |
 
+`simulation_failed` may also include `revert`. That field is only a decoded contract error name from the swap or router ABI (plus `ERC2612InvalidSigner`). If there is no such name, `revert` is omitted. The server log still records the underlying detail, with URLs and secret-like strings removed.
+
 `quote_unavailable` and `upstream_unavailable` stay HTTP 502. The kill switch stays HTTP 503. An unexpected crash is HTTP 500 `request_failed` with no other fields.
 
 ## Broadcast retry

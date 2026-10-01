@@ -10,6 +10,7 @@ import {
   ROUTER_NOT_ALLOWED_MESSAGE,
   asBroadcastFailure,
   fail,
+  logSimulationFailure,
   simulationFailure,
 } from "./httpError.mjs";
 import { createKillSwitch, parseEnvFlag } from "./killSwitch.mjs";
@@ -251,10 +252,7 @@ async function submitRescue(body) {
         args,
       });
     } catch (err) {
-      const name = err && (err.shortMessage || err.name || "");
-      const revert = err && (err.data?.errorName || err.errorName || "");
-      const detail = String(name).replace(/https?:\/\/\S+/gi, "[url]").slice(0, 180);
-      console.error("relayer_error simulation_failed", detail, String(revert).slice(0, 80));
+      logSimulationFailure(err);
       throw simulationFailure(err);
     }
     const txHash = await withBroadcastRetry(

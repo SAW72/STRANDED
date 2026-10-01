@@ -6,6 +6,7 @@ import {
   ROUTER_NOT_ALLOWED_MESSAGE,
   SIMULATION_FAILED_MESSAGE,
   fail,
+  logSimulationFailure,
   simulationFailure,
   toPublicError,
 } from "../httpError.mjs";
@@ -94,6 +95,7 @@ describe("plain rescue error messages", () => {
     assert.equal(pub.body.message.includes("0x1111111111111111111111111111111111111111"), false);
     assert.equal(pub.body.message.toLowerCase().includes("stack"), false);
     assert.equal(JSON.stringify(pub.body.message).includes(RAW_VIEM), false);
+    assert.equal("revert" in pub.body, false);
 
     const withUrl = simulationFailure({
       name: "ContractFunctionRevertedError",
@@ -118,7 +120,109 @@ describe("plain rescue error messages", () => {
         assert.equal(res.body.message, SIMULATION_FAILED_MESSAGE);
         assert.equal(String(res.body.message).includes("ContractFunctionRevertedError"), false);
         assert.equal(String(res.body.message).includes("0x1111111111111111111111111111111111111111"), false);
+        assert.equal("revert" in res.body, false);
+        assert.equal(res.text.includes("0x1111111111111111111111111111111111111111"), false);
+        assert.equal(res.text.includes("ContractFunctionRevertedError"), false);
       },
     );
+  });
+
+  it("returns only an allowlisted decoded revert name", () => {
+    const decoded = toPublicError(
+      simulationFailure({
+        name: "ContractFunctionExecutionError",
+        shortMessage: 'execution reverted: UsedNonce https://rpc.example/SECRETKEY',
+        errorName: "UsedNonce",
+      }),
+    );
+    assert.equal(decoded.status, 502);
+    assert.equal(decoded.body.error, "simulation_failed");
+    assert.equal(decoded.body.message, SIMULATION_FAILED_MESSAGE);
+    assert.equal(decoded.body.revert, "UsedNonce");
+    assert.equal(JSON.stringify(decoded.body).includes("https://"), false);
+    assert.equal(JSON.stringify(decoded.body).includes("SECRETKEY"), false);
+    assert.equal(JSON.stringify(decoded.body).includes("ContractFunctionExecutionError"), false);
+
+    const wrapped = {
+      name: "ContractFunctionExecutionError",
+      shortMessage: 'The contract function "rescueWithPermit" reverted.',
+      walk(fn) {
+        fn(this);
+        fn({ errorName: "ExpiredDeadline", shortMessage: "ExpiredDeadline()" });
+        return undefined;
+      },
+    };
+    assert.equal(toPublicError(simulationFailure(wrapped)).body.revert, "ExpiredDeadline");
+
+    for (const rawName of [
+      "UsedNonce 0x1111111111111111111111111111111111111111",
+      "SwapFailed!",
+      "swapfailed",
+      "ContractFunctionExecutionError",
+      "0x81ceff30",
+    ]) {
+      const rejected = toPublicError(
+        simulationFailure({
+          errorName: rawName,
+          shortMessage: rawName,
+        }),
+      );
+      assert.equal(rejected.body.revert, undefined, rawName);
+      assert.equal("revert" in rejected.body, false, rawName);
+      assert.equal(rejected.body.message, SIMULATION_FAILED_MESSAGE);
+    }
+
+    const direct = toPublicError(fail(502, "simulation_failed", SIMULATION_FAILED_MESSAGE, { revert: "SwapFailed!" }));
+    assert.equal("revert" in direct.body, false);
+  });
+
+  it("passes each wallet-mapped decoded name and drops selector-only text", () => {
+    const walletNames = ["SwapFailed", "ERC2612InvalidSigner"];
+    for (const name of walletNames) {
+      const pub = toPublicError(
+        simulationFailure({
+          name: "ContractFunctionRevertedError",
+          errorName: name,
+          shortMessage: `The contract function "rescueWithPermit" reverted with the following signature: 0xdeadbeef ${name}`,
+        }),
+      );
+      assert.equal(pub.body.revert, name);
+      assert.equal(pub.body.message, SIMULATION_FAILED_MESSAGE);
+      assert.equal(JSON.stringify(pub.body).includes("0xdeadbeef"), false);
+      assert.equal(JSON.stringify(pub.body).includes("ContractFunctionRevertedError"), false);
+    }
+
+    for (const selector of ["0x81ceff30", "0x4b800e46"]) {
+      const pub = toPublicError(
+        simulationFailure({
+          name: "ContractFunctionExecutionError",
+          shortMessage: `The contract function "rescueWithPermit" reverted with the following signature: ${selector}`,
+        }),
+      );
+      assert.equal("revert" in pub.body, false, selector);
+      assert.equal(pub.body.message, SIMULATION_FAILED_MESSAGE);
+      assert.equal(JSON.stringify(pub.body).includes(selector), false);
+    }
+  });
+
+  it("logs the simulation detail with URLs and secrets stripped", () => {
+    const lines = [];
+    logSimulationFailure(
+      {
+        name: "ContractFunctionExecutionError",
+        shortMessage:
+          'The contract function "rescueWithPermit" reverted. https://rpc.example/v1/SECRETKEY private_key=abc123',
+        message: "execution reverted\n    at writeContract",
+      },
+      (...args) => lines.push(args.map(String).join(" ")),
+    );
+    assert.equal(lines.length, 1);
+    assert.match(lines[0], /relayer_error simulation_failed/);
+    assert.match(lines[0], /rescueWithPermit/);
+    assert.match(lines[0], /\[url\]/);
+    assert.equal(lines[0].includes("https://"), false);
+    assert.equal(lines[0].includes("SECRETKEY"), false);
+    assert.equal(lines[0].includes("abc123"), false);
+    assert.equal(lines[0].includes("private_key"), false);
   });
 });
