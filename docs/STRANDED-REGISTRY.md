@@ -64,11 +64,11 @@ On a valid claim the contract pays bounty (if any) and refunds the leftover **fr
 
 ## Receive (M-3)
 
-`receive()` credits `posterBond[msg.sender]` and emits `BondDeposited`. Naked ETH is not left unaccounted. The credit is unlocked (`lockedBond` unchanged) and can be withdrawn. `receive` is not `nonReentrant` so a refund recipient that forwards value back cannot brick `claimFind` / `withdrawBond`.
+`receive()` credits `posterBond[msg.sender]` and emits `BondDeposited`. Naked ETH is not left unaccounted. The credit is unlocked (`lockedBond` unchanged) and can be withdrawn. `receive` is not `nonReentrant` so a refund recipient that forwards value back cannot brick `claimFind` / `withdrawBond`. A value-bearing `receive` reverts while the registry is paused. A zero-value call stays a no-op.
 
 ## Expired reclaim (M-4)
 
-`reclaimExpired(findKey)` — **poster only**, any pause state:
+`reclaimExpired(findKey)` — **poster only**, and only while the registry is not paused:
 
 1. Find exists, caller is `find.poster`, not yet claimed, `find.chainId == block.chainid`, `block.timestamp > deadline`.
 2. Clears `findBond`, marks `claimed`, releases the lock, refunds the full find bond to the poster.

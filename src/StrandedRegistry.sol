@@ -17,7 +17,11 @@ import {IGasRescueSwapProof} from "./interfaces/IGasRescueSwapProof.sol";
 ///         are proof-gated: only the GasRescueSwap relayer that completed a matching
 ///         rescue (holder + token + amountIn) can claim, and only that find's
 ///         bond is released. Withdrawals cannot spend bonds locked to open finds.
-///         No custody of user funds. No token. Testnet only.
+///         No custody of user tokens. Native bonds are the only ETH held here.
+///         No token. Testnet only.
+///         Kill switch: the `Ownable2Step` owner (renounce disabled) pauses
+///         register, claim, deposit, withdraw, reclaim, and value-bearing
+///         `receive`. Fee and min-bond setters stay callable while paused.
 ///         Non-production scaffold — do not deploy to mainnet.
 /// @dev This is the "search market" layer. v1 rescues tokens the owner can't reach;
 ///      this lets the owner *advertise* the stranded balance and pay a bounty to
@@ -116,10 +120,13 @@ contract StrandedRegistry is IStrandedRegistry, Ownable2Step, Pausable, Reentran
 
     /// @notice Credit unexpected native to `msg.sender`'s unused poster bond.
     ///         No ETH is accepted without an accounting credit (M-3).
+    ///         A value-bearing call reverts while paused. A zero-value call stays
+    ///         a no-op so it cannot change accounting.
     /// @dev Not `nonReentrant`: a credit-only hook must not brick refunds if a
     ///      recipient forwards value back here during `claimFind` / `withdrawBond`.
     receive() external payable {
         if (msg.value == 0) return;
+        _requireNotPaused();
         posterBond[msg.sender] += msg.value;
         emit BondDeposited(msg.sender, msg.value);
     }
@@ -129,14 +136,16 @@ contract StrandedRegistry is IStrandedRegistry, Ownable2Step, Pausable, Reentran
     }
 
     /// @notice Deposit unused bond. Withdrawable until locked by `registerFind`.
-    function depositBond() external payable nonReentrant {
+    ///         Reverts while paused.
+    function depositBond() external payable nonReentrant whenNotPaused {
         if (msg.value < minBond) revert BondTooLow();
         posterBond[msg.sender] += msg.value;
         emit BondDeposited(msg.sender, msg.value);
     }
 
     /// @notice Withdraw unused (unlocked) bond. Active `findBond` locks are excluded (H-1).
-    function withdrawBond(uint256 amount) external nonReentrant {
+    ///         Reverts while paused. The owner kill switch freezes this outflow.
+    function withdrawBond(uint256 amount) external nonReentrant whenNotPaused {
         uint256 available = availableBond(msg.sender);
         if (amount > available) {
             if (amount > posterBond[msg.sender]) revert InsufficientBond();
@@ -236,6 +245,9 @@ contract StrandedRegistry is IStrandedRegistry, Ownable2Step, Pausable, Reentran
         uint256 refund = bond - bountyPaid;
 
         if (bountyPaid > 0) {
+            // msg.sender is the only rescuer. Reject the zero address so a
+            // mis-wired proof contract cannot burn the bounty.
+            if (rescuer == address(0)) revert ZeroAddress();
             (bool ok,) = payable(rescuer).call{value: bountyPaid}("");
             if (!ok) revert TransferFailed();
         }
@@ -250,7 +262,8 @@ contract StrandedRegistry is IStrandedRegistry, Ownable2Step, Pausable, Reentran
 
     /// @notice Poster reclaims an unclaimed find's bond after `deadline` (M-4).
     ///         Marks the find claimed so a late receipt cannot still pay out.
-    function reclaimExpired(bytes32 findKey) external nonReentrant {
+    ///         Reverts while paused. The owner kill switch freezes this outflow.
+    function reclaimExpired(bytes32 findKey) external nonReentrant whenNotPaused {
         Find storage f = _finds[findKey];
         if (f.registeredAt == 0) revert FindNotFound();
         if (msg.sender != f.poster) revert NotPoster();

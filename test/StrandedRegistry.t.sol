@@ -437,13 +437,21 @@ contract StrandedRegistryTest is Test {
         registry.reclaimExpired(key);
     }
 
-    function test_M4_reclaimExpired_worksWhilePaused() public {
+    function test_M4_reclaimExpired_revertsWhilePaused() public {
         bytes32 key = _register(FIND_AMOUNT, 0);
         vm.prank(owner);
         registry.pause();
         vm.warp(block.timestamp + 2 days);
 
         uint256 posterBefore = poster.balance;
+        vm.prank(poster);
+        vm.expectRevert(Pausable.EnforcedPause.selector);
+        registry.reclaimExpired(key);
+        assertEq(poster.balance, posterBefore);
+        assertEq(registry.findBond(key), BOND);
+
+        vm.prank(owner);
+        registry.unpause();
         vm.prank(poster);
         registry.reclaimExpired(key);
         assertEq(poster.balance, posterBefore + BOND);
