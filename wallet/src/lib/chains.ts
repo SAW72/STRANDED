@@ -35,3 +35,16 @@ export function nativeSymbol(chainId: number | undefined): string {
 export function viemChain(chainId: SupportedChainId): TestnetChain {
   return chainId === ARB_SEPOLIA_CHAIN_ID ? arbitrumSepolia : baseSepolia;
 }
+
+const TX_HASH = /^0x[0-9a-fA-F]{64}$/;
+
+/**
+ * Transaction link on the block explorer already attached to a supported testnet.
+ * Unsupported chain ids and malformed hashes return null — this does not add a chain.
+ */
+export function transactionUrl(chainId: number | undefined, txHash: string): string | null {
+  if (!isSupportedChainId(chainId) || !TX_HASH.test(txHash)) return null;
+  const explorer = viemChain(chainId).blockExplorers?.default.url;
+  if (!explorer) return null;
+  return `${explorer.replace(/\/$/, "")}/tx/${txHash}`;
+}

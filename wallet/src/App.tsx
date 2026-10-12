@@ -23,6 +23,7 @@ import {
   CONNECT_HINT,
   CONNECT_LABEL,
   CONNECTING_LABEL,
+  POINTS_NAV_LABEL,
   DEADLINE_HELPER,
   DEADLINE_LABEL,
   FEE_HELPER,
@@ -113,6 +114,7 @@ import {
 import { fetchRescueQuote, hasRequiredQuoteFields, type QuoteSource, type RescueQuote } from "./lib/quotes";
 import { receiptFromSubmit, type RescueReceiptView } from "./lib/receipt";
 import { submitRescue } from "./lib/rescues";
+import { isPointsRoute, Points } from "./Points";
 import { RescueReceipt } from "./RescueReceipt";
 import { demoBannerText, tokenDisclosure } from "./lib/tokenDisclosure";
 import {
@@ -146,7 +148,7 @@ function dashOr(value: ReactNode, ready: boolean): ReactNode {
   return ready ? value : "—";
 }
 
-export function App() {
+function RescueApp() {
   const [selectedChainId, setSelectedChainId] = useState<SupportedChainId>(ARB_SEPOLIA_CHAIN_ID);
   const relayer = relayerUrl(selectedChainId);
   const useFixture = !relayer;
@@ -576,6 +578,9 @@ export function App() {
 
   return (
     <main className="app">
+      <p className="points-nav">
+        <a href="/points">{POINTS_NAV_LABEL}</a>
+      </p>
       <p className="demo-banner" role="note">
         {demoBannerText(demoSymbol)}
       </p>
@@ -952,4 +957,11 @@ export function App() {
       )}
     </main>
   );
+}
+
+export function App() {
+  if (isPointsRoute(window.location.pathname)) {
+    return <Points />;
+  }
+  return <RescueApp />;
 }

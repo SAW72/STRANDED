@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { ARB_SEPOLIA_CHAIN_ID, BASE_SEPOLIA_CHAIN_ID, relayerUrl } from "./config";
+import configSource from "./config.ts?raw";
+import copySource from "./copy.ts?raw";
+import pointsClientSource from "./lib/points.ts?raw";
+import pointsPageSource from "./Points.tsx?raw";
+import { ARB_SEPOLIA_CHAIN_ID, BASE_SEPOLIA_CHAIN_ID, pointsApiUrl, relayerUrl } from "./config";
+import { createPointsClient } from "./lib/points";
 
 describe("relayerUrl", () => {
   it("never points Arb at the Base Relayer origin", () => {
@@ -9,6 +14,17 @@ describe("relayerUrl", () => {
       expect(arb).not.toBe(base);
       expect(arb).not.toMatch(/2\.29\.20\.224/);
     }
+  });
+});
+
+describe("points API config", () => {
+  it("uses the example client by default and does not bake a points URL", () => {
+    expect(pointsApiUrl()).toBe("");
+    expect(createPointsClient().source).toBe("example");
+    expect(createPointsClient("").source).toBe("example");
+    const sources = [configSource, pointsPageSource, copySource, pointsClientSource].join("\n");
+    expect(sources).not.toMatch(/https?:\/\//i);
+    expect(sources).not.toMatch(/VITE_POINTS_API_URL\s*=\s*["']https?:/i);
   });
 });
 

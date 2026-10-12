@@ -12,6 +12,8 @@ interface ImportMetaEnv {
   readonly VITE_TOKEN_ADDRESS_ARB_SEPOLIA?: string;
   readonly VITE_BASE_SEPOLIA_RPC_URL?: string;
   readonly VITE_ARB_SEPOLIA_RPC_URL?: string;
+  /** Public points API origin. Unset → labelled example data, no network. */
+  readonly VITE_POINTS_API_URL?: string;
 }
 
 interface ImportMeta {

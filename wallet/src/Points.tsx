@@ -1,0 +1,229 @@
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import {
+  POINTS_ACTION_BUG_REPORT,
+  POINTS_ACTION_OTHER,
+  POINTS_ACTION_REGISTRY_CLAIM,
+  POINTS_ACTION_REGISTRY_FIND,
+  POINTS_ACTION_RELAYER_JOB,
+  POINTS_ACTION_RESCUE,
+  POINTS_ACTION_SESSION,
+  POINTS_ADDRESS_LABEL,
+  POINTS_ADDRESS_PLACEHOLDER,
+  POINTS_ADDRESS_RESULT_LABEL,
+  POINTS_BACK_LABEL,
+  POINTS_CATEGORIES_LABEL,
+  POINTS_DISCLAIMER,
+  POINTS_EMPTY,
+  POINTS_ENTRIES_LABEL,
+  POINTS_EXAMPLE_BADGE,
+  POINTS_EXAMPLE_NOTE,
+  POINTS_INTRO,
+  POINTS_INVALID_ADDRESS,
+  POINTS_LOAD_ERROR,
+  POINTS_LOADING,
+  POINTS_LOOKUP_LABEL,
+  POINTS_NO_TX,
+  POINTS_RANK_LABEL,
+  POINTS_TITLE,
+  POINTS_TOTAL_LABEL,
+  POINTS_TX_LABEL,
+  POINTS_UNRANKED,
+} from "./copy";
+import { chainLabel, isSupportedChainId, transactionUrl } from "./lib/chains";
+import { shortenBytes32 } from "./lib/format";
+import {
+  createPointsClient,
+  normaliseWalletAddress,
+  type PointsClient,
+  type WalletPoints,
+} from "./lib/points";
+
+const ACTION_LABELS: Record<string, string> = {
+  rescue: POINTS_ACTION_RESCUE,
+  relayer_job: POINTS_ACTION_RELAYER_JOB,
+  registry_find: POINTS_ACTION_REGISTRY_FIND,
+  registry_claim: POINTS_ACTION_REGISTRY_CLAIM,
+  session: POINTS_ACTION_SESSION,
+  bug_report: POINTS_ACTION_BUG_REPORT,
+};
+
+export function isPointsRoute(pathname: string): boolean {
+  const normalized = pathname.replace(/\/+$/, "") || "/";
+  return normalized === "/points";
+}
+
+function actionLabel(action: string): string {
+  return ACTION_LABELS[action] ?? POINTS_ACTION_OTHER;
+}
+
+type Lookup =
+  | { kind: "idle" }
+  | { kind: "loading" }
+  | { kind: "invalid" }
+  | { kind: "empty"; wallet: string }
+  | { kind: "error" }
+  | { kind: "loaded"; result: WalletPoints };
+
+function isEmptyResult(result: WalletPoints): boolean {
+  return result.total === 0 && result.categories.length === 0 && result.entries.length === 0;
+}
+
+export function Points({ client }: { client?: PointsClient }) {
+  const api = client ?? createPointsClient();
+  const [input, setInput] = useState("");
+  const [lookup, setLookup] = useState<Lookup>({ kind: "idle" });
+  const requestId = useRef(0);
+
+  useEffect(() => {
+    document.title = "Stranded · " + POINTS_TITLE;
+  }, []);
+
+  async function onSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const wallet = normaliseWalletAddress(input);
+    if (!wallet) {
+      requestId.current += 1;
+      setLookup({ kind: "invalid" });
+      return;
+    }
+    const id = requestId.current + 1;
+    requestId.current = id;
+    setLookup({ kind: "loading" });
+    try {
+      const result = await api.getWallet(wallet);
+      if (requestId.current !== id) return;
+      setLookup(isEmptyResult(result) ? { kind: "empty", wallet: result.wallet } : { kind: "loaded", result });
+    } catch {
+      if (requestId.current !== id) return;
+      setLookup({ kind: "error" });
+    }
+  }
+
+  return (
+    <main className="app">
+      <p className="points-nav">
+        <a href="/">{POINTS_BACK_LABEL}</a>
+      </p>
+      <h1>{POINTS_TITLE}</h1>
+      <p className="lede">{POINTS_INTRO}</p>
+      <p className="points-disclaimer" role="note" data-testid="points-disclaimer">
+        {POINTS_DISCLAIMER}
+      </p>
+      {api.source === "example" ? (
+        <div className="banner banner-sample" role="status" data-testid="points-example">
+          <strong>{POINTS_EXAMPLE_BADGE}</strong>
+          <p>{POINTS_EXAMPLE_NOTE}</p>
+        </div>
+      ) : null}
+      <form onSubmit={onSubmit} noValidate>
+        <label className="field">
+          {POINTS_ADDRESS_LABEL}
+          <input
+            data-testid="points-address"
+            value={input}
+            placeholder={POINTS_ADDRESS_PLACEHOLDER}
+            autoComplete="off"
+            autoCapitalize="off"
+            autoCorrect="off"
+            spellCheck={false}
+            aria-invalid={lookup.kind === "invalid"}
+            onChange={(event) => setInput(event.target.value)}
+          />
+        </label>
+        <button className="btn btn-primary" type="submit" disabled={lookup.kind === "loading"}>
+          {POINTS_LOOKUP_LABEL}
+        </button>
+      </form>
+      {lookup.kind === "invalid" ? (
+        <p className="danger" role="alert" data-testid="points-invalid">
+          {POINTS_INVALID_ADDRESS}
+        </p>
+      ) : null}
+      {lookup.kind === "loading" ? (
+        <p role="status" data-testid="points-loading">
+          {POINTS_LOADING}
+        </p>
+      ) : null}
+      {lookup.kind === "error" ? (
+        <p className="danger" role="alert" data-testid="points-error">
+          {POINTS_LOAD_ERROR}
+        </p>
+      ) : null}
+      {lookup.kind === "empty" ? (
+        <p role="status" data-testid="points-empty">
+          {POINTS_EMPTY}
+        </p>
+      ) : null}
+      {lookup.kind === "loaded" ? <Loaded result={lookup.result} /> : null}
+    </main>
+  );
+}
+
+function Loaded({ result }: { result: WalletPoints }) {
+  return (
+    <section data-testid="points-loaded" aria-live="polite">
+      <dl className="kv">
+        <dt>{POINTS_TOTAL_LABEL}</dt>
+        <dd data-testid="points-total">{String(result.total)}</dd>
+        <dt>{POINTS_RANK_LABEL}</dt>
+        <dd data-testid="points-rank">{result.rank == null ? POINTS_UNRANKED : String(result.rank)}</dd>
+        <dt>{POINTS_ADDRESS_RESULT_LABEL}</dt>
+        <dd className="mono" data-testid="points-wallet">
+          {result.wallet}
+        </dd>
+      </dl>
+      <h2>{POINTS_CATEGORIES_LABEL}</h2>
+      <ul className="points-list">
+        {result.categories.map((category, index) => (
+          <li className="points-entry" data-testid="points-category" key={category.action + "-" + String(index)}>
+            <span>{actionLabel(category.action)}</span>
+            <span>{String(category.points)}</span>
+          </li>
+        ))}
+      </ul>
+      <h2>{POINTS_ENTRIES_LABEL}</h2>
+      <ul className="points-list">
+        {result.entries.map((entry, index) => {
+          const href =
+            entry.txHash && entry.chainId != null ? transactionUrl(entry.chainId, entry.txHash) : null;
+          return (
+            <li className="points-entry" data-testid="points-entry" key={String(index)}>
+              <span>{actionLabel(entry.action)}</span>
+              <span>{String(entry.points)}</span>
+              <EntryTx href={href} txHash={entry.txHash} chainId={entry.chainId} />
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
+
+function EntryTx({
+  href,
+  txHash,
+  chainId,
+}: {
+  href: string | null;
+  txHash: string | null;
+  chainId: number | null;
+}) {
+  let body: ReactNode;
+  if (href && txHash) {
+    body = (
+      <a data-testid="points-tx" href={href} target="_blank" rel="noreferrer">
+        {POINTS_TX_LABEL} {shortenBytes32(txHash)}
+      </a>
+    );
+  } else if (txHash) {
+    body = <span className="mono">{shortenBytes32(txHash)}</span>;
+  } else {
+    body = <span>{POINTS_NO_TX}</span>;
+  }
+  return (
+    <span>
+      {body}
+      {chainId != null && isSupportedChainId(chainId) ? <span className="muted"> {chainLabel(chainId)}</span> : null}
+    </span>
+  );
+}

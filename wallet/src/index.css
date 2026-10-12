@@ -357,3 +357,37 @@ h1 {
 .wallet-picker-item .muted {
   margin-left: auto;
 }
+
+.points-disclaimer {
+  margin: 0 0 1rem;
+  padding: 0.75rem 0.85rem;
+  border: 2px solid var(--line);
+  border-radius: 12px;
+  background: var(--bg-panel);
+  line-height: 1.45;
+}
+
+.points-nav {
+  margin: 0 0 1rem;
+}
+
+.points-nav a,
+.points-entry a {
+  color: var(--text);
+  font-weight: 700;
+}
+
+.points-list {
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.points-entry {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
