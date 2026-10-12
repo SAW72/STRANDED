@@ -120,7 +120,7 @@ export const POINTS_NAV_LABEL = "Points";
 export const POINTS_BACK_LABEL = "Back";
 export const POINTS_INTRO = "Enter a wallet address to see points by category, the total, and rank.";
 export const POINTS_DISCLAIMER =
-  "Points are off-chain, unpaid, and not a token. They have no cash value, and nothing is promised.";
+  "Points are off-chain, unpaid, and not a token. They have no cash value, are not redeemable, and nothing is promised.";
 export const POINTS_ADDRESS_LABEL = "Wallet address";
 export const POINTS_ADDRESS_PLACEHOLDER = "0x…";
 export const POINTS_LOOKUP_LABEL = "Look up";

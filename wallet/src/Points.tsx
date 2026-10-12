@@ -151,50 +151,76 @@ export function Points({ client }: { client?: PointsClient }) {
       ) : null}
       {lookup.kind === "empty" ? (
         <p role="status" data-testid="points-empty">
+          {api.source === "example" ? <ExampleLabel /> : null}
           {POINTS_EMPTY}
         </p>
       ) : null}
-      {lookup.kind === "loaded" ? <Loaded result={lookup.result} /> : null}
+      {lookup.kind === "loaded" ? (
+        <Loaded result={lookup.result} example={api.source === "example"} />
+      ) : null}
     </main>
   );
 }
 
-function Loaded({ result }: { result: WalletPoints }) {
+function ExampleLabel() {
+  return (
+    <strong className="points-example-mark" data-testid="points-result-example">
+      {POINTS_EXAMPLE_BADGE}
+    </strong>
+  );
+}
+
+function Loaded({ result, example }: { result: WalletPoints; example: boolean }) {
   return (
     <section data-testid="points-loaded" aria-live="polite">
-      <dl className="kv">
-        <dt>{POINTS_TOTAL_LABEL}</dt>
-        <dd data-testid="points-total">{String(result.total)}</dd>
-        <dt>{POINTS_RANK_LABEL}</dt>
-        <dd data-testid="points-rank">{result.rank == null ? POINTS_UNRANKED : String(result.rank)}</dd>
-        <dt>{POINTS_ADDRESS_RESULT_LABEL}</dt>
-        <dd className="mono" data-testid="points-wallet">
-          {result.wallet}
-        </dd>
-      </dl>
-      <h2>{POINTS_CATEGORIES_LABEL}</h2>
-      <ul className="points-list">
-        {result.categories.map((category, index) => (
-          <li className="points-entry" data-testid="points-category" key={category.action + "-" + String(index)}>
-            <span>{actionLabel(category.action)}</span>
-            <span>{String(category.points)}</span>
-          </li>
-        ))}
-      </ul>
-      <h2>{POINTS_ENTRIES_LABEL}</h2>
-      <ul className="points-list">
-        {result.entries.map((entry, index) => {
-          const href =
-            entry.txHash && entry.chainId != null ? transactionUrl(entry.chainId, entry.txHash) : null;
-          return (
-            <li className="points-entry" data-testid="points-entry" key={String(index)}>
-              <span>{actionLabel(entry.action)}</span>
-              <span>{String(entry.points)}</span>
-              <EntryTx href={href} txHash={entry.txHash} chainId={entry.chainId} />
+      <div data-testid="points-result">
+        {example ? <ExampleLabel /> : null}
+        <dl className="kv">
+          <dt>{POINTS_TOTAL_LABEL}</dt>
+          <dd data-testid="points-total">{String(result.total)}</dd>
+          <dt>{POINTS_RANK_LABEL}</dt>
+          <dd data-testid="points-rank">{result.rank == null ? POINTS_UNRANKED : String(result.rank)}</dd>
+          <dt>{POINTS_ADDRESS_RESULT_LABEL}</dt>
+          <dd className="mono" data-testid="points-wallet">
+            {result.wallet}
+          </dd>
+        </dl>
+      </div>
+      <div data-testid="points-result">
+        <h2>
+          {example ? <ExampleLabel /> : null}
+          {POINTS_CATEGORIES_LABEL}
+        </h2>
+        <ul className="points-list">
+          {result.categories.map((category, index) => (
+            <li className="points-entry" data-testid="points-category" key={category.action + "-" + String(index)}>
+              {example ? <ExampleLabel /> : null}
+              <span>{actionLabel(category.action)}</span>
+              <span>{String(category.points)}</span>
             </li>
-          );
-        })}
-      </ul>
+          ))}
+        </ul>
+      </div>
+      <div data-testid="points-result">
+        <h2>
+          {example ? <ExampleLabel /> : null}
+          {POINTS_ENTRIES_LABEL}
+        </h2>
+        <ul className="points-list">
+          {result.entries.map((entry, index) => {
+            const href =
+              entry.txHash && entry.chainId != null ? transactionUrl(entry.chainId, entry.txHash) : null;
+            return (
+              <li className="points-entry" data-testid="points-entry" key={String(index)}>
+                {example ? <ExampleLabel /> : null}
+                <span>{actionLabel(entry.action)}</span>
+                <span>{String(entry.points)}</span>
+                <EntryTx href={href} txHash={entry.txHash} chainId={entry.chainId} />
+              </li>
+            );
+          })}
+        </ul>
+      </div>
     </section>
   );
 }

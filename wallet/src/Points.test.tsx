@@ -166,6 +166,34 @@ describe("Points page", () => {
     await view.unmount();
   });
 
+  it("shows Example data on each example result, including after the page banner", async () => {
+    const getWallet = vi.fn(async (wallet: string) => {
+      if (wallet === EMPTY_ADDRESS) {
+        return { wallet, total: 0, rank: null, categories: [], entries: [] };
+      }
+      return loadedWallet;
+    });
+    const view = await render(<Points client={client({ source: "example", getWallet })} />);
+    await lookup(view.container, EXAMPLE_POINTS_ADDRESS);
+
+    const loaded = view.container.querySelector("[data-testid='points-loaded']");
+    expect(loaded).not.toBeNull();
+    const loadedResults = [...(loaded?.querySelectorAll("[data-testid='points-result']") ?? [])];
+    expect(loadedResults.length).toBeGreaterThan(0);
+    for (const result of loadedResults) {
+      expect(result.querySelector("[data-testid='points-result-example']")?.textContent).toBe("Example data");
+    }
+    for (const row of loaded?.querySelectorAll("[data-testid='points-category'], [data-testid='points-entry']") ?? []) {
+      expect(row.querySelector("[data-testid='points-result-example']")?.textContent).toBe("Example data");
+    }
+
+    await lookup(view.container, EMPTY_ADDRESS);
+    const empty = view.container.querySelector("[data-testid='points-empty']");
+    expect(empty?.querySelector("[data-testid='points-result-example']")?.textContent).toBe("Example data");
+    expect(view.container.querySelector("[data-testid='points-loaded']")).toBeNull();
+    await view.unmount();
+  });
+
   it("uses the example client from the page default without a baked URL", async () => {
     expect(createPointsClient().source).toBe("example");
     const view = await render(<Points />);

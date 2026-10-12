@@ -391,3 +391,16 @@ h1 {
   flex-direction: column;
   gap: 0.15rem;
 }
+
+.points-example-mark {
+  display: inline-block;
+  margin: 0 0.4rem 0.35rem 0;
+  padding: 0.12rem 0.5rem;
+  border: 2px solid #c4a15a;
+  border-radius: 999px;
+  background: #fff4cc;
+  color: var(--text);
+  font-size: 0.78rem;
+  font-weight: 800;
+  line-height: 1.3;
+}

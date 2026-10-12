@@ -104,6 +104,10 @@ describe("points copy", () => {
     expect(disclaimer).toContain("no cash value");
     expect(disclaimer).toContain("nothing is promised");
   });
+
+  it("says points are not redeemable", () => {
+    expect(copy.POINTS_DISCLAIMER.toLowerCase()).toContain("not redeemable");
+  });
 });
 
 describe("wallet picker copy", () => {
