@@ -2,16 +2,25 @@
 -- Points are off-chain scores and are unpaid.
 -- Postgres can replace this file later. Do not put a connection string in this repo.
 --
+-- Append-only is enforced only through the app (no update or delete API) and
+-- these triggers. Dropping the triggers leaves the rows writable.
+--
 -- wallet is a lowercase 0x address.
--- action is one id from the fixed rubric set. Point amounts are chosen by the caller.
--- tx_hash is the on-chain transaction hash, or a deterministic synthetic key
--- from syntheticTxKey() when the action is off-chain.
+-- action is one id from the fixed rubric set.
+-- points is a positive integer up to 500 (MAX_POINTS_PER_ROW in rubric.mjs).
+-- tx_hash is NOT NULL: the on-chain transaction hash, or a deterministic
+-- synthetic key from syntheticTxKey() when the action is off-chain.
+-- syntheticTxKey lowercases its inputs before hashing.
 -- UNIQUE (wallet, action, tx_hash) rejects a second insert of the same event.
--- Triggers reject UPDATE and DELETE.
--- BEFORE INSERT aborts when the id or (wallet, action, tx_hash) is already
--- stored. REPLACE deletes the old row only after that trigger, and it runs
+-- UPDATE and DELETE triggers raise 'append-only'.
+-- BEFORE INSERT raises 'duplicate' when the id or (wallet, action, tx_hash)
+-- is already stored. That fires before ON CONFLICT, so a raw
+-- INSERT ... ON CONFLICT DO NOTHING raises 'duplicate' instead of skipping
+-- the row. REPLACE deletes the old row only after that trigger, and it runs
 -- the delete trigger only when recursive_triggers is on. Aborting first keeps
 -- the old row when recursive_triggers is off.
+-- CREATE TABLE IF NOT EXISTS does not add this points cap to a table that
+-- already exists. The store rejects an over-cap row either way.
 
 CREATE TABLE IF NOT EXISTS points_ledger (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -37,7 +46,7 @@ CREATE TABLE IF NOT EXISTS points_ledger (
       'bug_report'
     )
   ),
-  CHECK (typeof(points) = 'integer' AND points > 0),
+  CHECK (typeof(points) = 'integer' AND points > 0 AND points <= 500),
   CHECK (
     (
       length(tx_hash) = 66
@@ -56,7 +65,8 @@ CREATE TABLE IF NOT EXISTS points_ledger (
   UNIQUE (wallet, action, tx_hash)
 ) STRICT;
 
-CREATE TRIGGER IF NOT EXISTS points_ledger_no_insert
+DROP TRIGGER IF EXISTS points_ledger_no_insert;
+CREATE TRIGGER points_ledger_no_insert
 BEFORE INSERT ON points_ledger
 WHEN EXISTS (
   SELECT 1 FROM points_ledger
@@ -64,17 +74,19 @@ WHEN EXISTS (
      OR (wallet = NEW.wallet AND action = NEW.action AND tx_hash = NEW.tx_hash)
 )
 BEGIN
-  SELECT RAISE(ABORT, 'points_ledger is append-only');
+  SELECT RAISE(ABORT, 'duplicate');
 END;
 
-CREATE TRIGGER IF NOT EXISTS points_ledger_no_update
+DROP TRIGGER IF EXISTS points_ledger_no_update;
+CREATE TRIGGER points_ledger_no_update
 BEFORE UPDATE ON points_ledger
 BEGIN
-  SELECT RAISE(ABORT, 'points_ledger is append-only');
+  SELECT RAISE(ABORT, 'append-only');
 END;
 
-CREATE TRIGGER IF NOT EXISTS points_ledger_no_delete
+DROP TRIGGER IF EXISTS points_ledger_no_delete;
+CREATE TRIGGER points_ledger_no_delete
 BEFORE DELETE ON points_ledger
 BEGIN
-  SELECT RAISE(ABORT, 'points_ledger is append-only');
+  SELECT RAISE(ABORT, 'append-only');
 END;

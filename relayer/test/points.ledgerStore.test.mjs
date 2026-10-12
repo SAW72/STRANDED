@@ -1,11 +1,14 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { readFileSync, rmSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
+import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
-import { POINTS_ACTIONS, createLedgerStore, syntheticTxKey } from "../points/ledgerStore.mjs";
+import { POINTS_ACTIONS, createLedgerStore, isDuplicateError, syntheticTxKey } from "../points/ledgerStore.mjs";
+import { MAX_POINTS_PER_ROW } from "../points/rubric.mjs";
 
 const USER = "0x1111111111111111111111111111111111111111";
 const OTHER = "0x2222222222222222222222222222222222222222";
@@ -196,7 +199,18 @@ describe("points ledger", () => {
                  ON CONFLICT (wallet, action, tx_hash) DO UPDATE SET points = excluded.points`,
               )
               .run(USER, TX),
-          /append-only/,
+          /duplicate/,
+        );
+        assert.throws(
+          () =>
+            db
+              .prepare(
+                `INSERT INTO points_ledger (wallet, action, points, tx_hash, metadata, created_at)
+                 VALUES (?, 'rescue_completed', 5, ?, NULL, '2024-01-01T00:00:00.000Z')
+                 ON CONFLICT (wallet, action, tx_hash) DO NOTHING`,
+              )
+              .run(USER, TX),
+          /duplicate/,
         );
         assert.throws(
           () =>
@@ -206,7 +220,7 @@ describe("points ledger", () => {
                  VALUES (?, 'rescue_completed', 5, ?, NULL, '2024-01-01T00:00:00.000Z')`,
               )
               .run(USER, TX),
-          /append-only/,
+          /duplicate/,
         );
         assert.throws(
           () =>
@@ -290,7 +304,7 @@ describe("points ledger", () => {
           ],
         ];
         for (const [sql, params] of statements) {
-          assert.throws(() => db.prepare(sql).run(...params), /append-only/);
+          assert.throws(() => db.prepare(sql).run(...params), /duplicate/);
           assert.deepEqual(readRow(), original);
         }
       } finally {
@@ -305,5 +319,187 @@ describe("points ledger", () => {
       assert.match(sql, new RegExp(`'${action}'`));
     }
     assert.equal(POINTS_ACTIONS.length, 6);
+    assert.match(sql, new RegExp(`points <= ${MAX_POINTS_PER_ROW}`));
+  });
+
+  it("rejects a null tx_hash and an over-cap points value", async () => {
+    await withStore((store) => {
+      store.append({
+        wallet: USER,
+        action: "bug_report",
+        points: MAX_POINTS_PER_ROW,
+        txHash: syntheticTxKey("bug_report", ["at-cap"]),
+      });
+      assert.throws(
+        () =>
+          store.append({
+            wallet: USER,
+            action: "bug_report",
+            points: MAX_POINTS_PER_ROW + 1,
+            txHash: syntheticTxKey("bug_report", ["over-cap"]),
+          }),
+        rejection("invalid_points"),
+      );
+      assert.throws(
+        () =>
+          store.append({
+            wallet: USER,
+            action: "bug_report",
+            points: String(MAX_POINTS_PER_ROW + 1),
+            txHash: syntheticTxKey("bug_report", ["over-cap-text"]),
+          }),
+        rejection("invalid_points"),
+      );
+
+      const filePath = store.filePath;
+      store.close();
+      const db = new Database(filePath);
+      try {
+        assert.throws(
+          () =>
+            db
+              .prepare(
+                `INSERT INTO points_ledger (wallet, action, points, tx_hash, metadata, created_at)
+                 VALUES (?, 'rescue_completed', 1, NULL, NULL, '2024-01-01T00:00:00.000Z')`,
+              )
+              .run(USER),
+          /NOT NULL constraint failed: points_ledger\.tx_hash/,
+        );
+        assert.throws(
+          () =>
+            db
+              .prepare(
+                `INSERT INTO points_ledger (wallet, action, points, tx_hash, metadata, created_at)
+                 VALUES (?, 'bug_report', ?, ?, NULL, '2024-01-01T00:00:00.000Z')`,
+              )
+              .run(USER, MAX_POINTS_PER_ROW + 1, syntheticTxKey("bug_report", ["sql-over-cap"])),
+          /CHECK constraint failed/,
+        );
+        const top = db.prepare("SELECT points FROM points_ledger WHERE action = 'bug_report'").get();
+        assert.equal(top.points, MAX_POINTS_PER_ROW);
+      } finally {
+        db.close();
+      }
+    });
+  });
+
+  it("sets created_at from the server clock and ignores a caller timestamp", async () => {
+    await withStore((store) => {
+      const row = store.append({
+        wallet: USER,
+        action: "rescue_completed",
+        points: 100,
+        txHash: TX,
+        createdAt: "1999-01-01T00:00:00.000Z",
+      });
+      assert.equal(row.createdAt, "2023-11-14T22:13:20.000Z");
+      const again = store.append({
+        wallet: USER,
+        action: "relayer_job",
+        points: 50,
+        txHash: TX,
+        createdAt: "not-a-date",
+      });
+      assert.equal(again.createdAt, "2023-11-14T22:13:20.000Z");
+    });
+  });
+
+  it("matches isDuplicateError only to the duplicate trigger message", async () => {
+    await withStore((store) => {
+      store.append({ wallet: USER, action: "rescue_completed", points: 100, txHash: TX });
+      const filePath = store.filePath;
+      store.close();
+      const db = new Database(filePath);
+      try {
+        let duplicateErr;
+        try {
+          db.prepare(
+            `INSERT INTO points_ledger (wallet, action, points, tx_hash, metadata, created_at)
+             VALUES (?, 'rescue_completed', 100, ?, NULL, '2024-01-01T00:00:00.000Z')`,
+          ).run(USER, TX);
+        } catch (err) {
+          duplicateErr = err;
+        }
+        assert.equal(duplicateErr.message, "duplicate");
+        assert.equal(isDuplicateError(duplicateErr), true);
+
+        let updateErr;
+        try {
+          db.prepare("UPDATE points_ledger SET points = 1").run();
+        } catch (err) {
+          updateErr = err;
+        }
+        assert.equal(updateErr.message, "append-only");
+        assert.equal(isDuplicateError(updateErr), false);
+
+        let deleteErr;
+        try {
+          db.prepare("DELETE FROM points_ledger").run();
+        } catch (err) {
+          deleteErr = err;
+        }
+        assert.equal(deleteErr.message, "append-only");
+        assert.equal(isDuplicateError(deleteErr), false);
+
+        let nothingErr;
+        try {
+          db.prepare(
+            `INSERT INTO points_ledger (wallet, action, points, tx_hash, metadata, created_at)
+             VALUES (?, 'rescue_completed', 100, ?, NULL, '2024-01-01T00:00:00.000Z')
+             ON CONFLICT (wallet, action, tx_hash) DO NOTHING`,
+          ).run(USER, TX);
+        } catch (err) {
+          nothingErr = err;
+        }
+        assert.equal(nothingErr.message, "duplicate");
+        assert.equal(isDuplicateError(nothingErr), true);
+
+        assert.equal(isDuplicateError({ code: "SQLITE_CONSTRAINT_TRIGGER", message: "append-only" }), false);
+        assert.equal(isDuplicateError({ code: "SQLITE_CONSTRAINT_UNIQUE", message: "UNIQUE constraint failed" }), false);
+        assert.equal(isDuplicateError({ message: "points_ledger is append-only" }), false);
+      } finally {
+        db.close();
+      }
+    });
+  });
+
+  it("resolves the default ledger path from the module or DATA_DIR, not the cwd", async () => {
+    const previous = process.env.DATA_DIR;
+    const dir = await mkdtemp(join(tmpdir(), "points-data-dir-"));
+    process.env.DATA_DIR = dir;
+    let fromEnv;
+    try {
+      fromEnv = createLedgerStore({ now: () => 1_700_000_000_000 });
+      assert.equal(fromEnv.filePath, join(dir, "points-ledger.sqlite"));
+    } finally {
+      fromEnv?.close();
+      if (previous === undefined) delete process.env.DATA_DIR;
+      else process.env.DATA_DIR = previous;
+    }
+
+    const cwd = await mkdtemp(join(tmpdir(), "points-cwd-"));
+    const env = { ...process.env };
+    delete env.DATA_DIR;
+    const child = spawnSync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "-e",
+        `
+          const { createLedgerStore } = await import(${JSON.stringify(new URL("../points/ledgerStore.mjs", import.meta.url).href)});
+          const store = createLedgerStore({ now: () => 1 });
+          console.log(store.filePath);
+          store.close();
+        `,
+      ],
+      { cwd, env, encoding: "utf8" },
+    );
+    assert.equal(child.status, 0, child.stderr);
+    const filePath = child.stdout.trim();
+    const expected = join(dirname(fileURLToPath(new URL("../points/ledgerStore.mjs", import.meta.url))), "..", "data", "points-ledger.sqlite");
+    assert.equal(filePath, expected);
+    assert.equal(filePath.startsWith(cwd), false);
+    rmSync(filePath, { force: true });
+    for (const suffix of ["-wal", "-shm", "-journal"]) rmSync(filePath + suffix, { force: true });
   });
 });

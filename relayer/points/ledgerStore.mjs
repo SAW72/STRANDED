@@ -1,7 +1,9 @@
 import { createHash } from "node:crypto";
 import { chmodSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
+import { MAX_POINTS_PER_ROW } from "./rubric.mjs";
 
 /**
  * Append-only points ledger.
@@ -9,12 +11,24 @@ import Database from "better-sqlite3";
  * Points are off-chain scores and are unpaid. This module is not mounted on
  * relayer routes and does not talk to a chain.
  *
- * The database is a SQLite file at DATA_DIR/points-ledger.sqlite
- * (better-sqlite3). There is no update or delete API. Table triggers reject
- * UPDATE and DELETE. BEFORE INSERT rejects a repeated id or
- * (wallet, action, tx_hash), including REPLACE while recursive triggers are off.
+ * The database is a SQLite file at DATA_DIR/points-ledger.sqlite when DATA_DIR
+ * is set, otherwise next to this module at relayer/data/points-ledger.sqlite.
+ * The default does not follow the process cwd. better-sqlite3 opens the file.
  *
- * Rubric ids match docs/POINTS-PROGRAM.md. Amounts are not decided here.
+ * Append-only is enforced only through this module and the triggers in
+ * schema.sql. There is no update or delete API. UPDATE and DELETE triggers
+ * raise `append-only`. A connection that drops the triggers can still change
+ * rows; this file does not add another enforcement layer.
+ *
+ * BEFORE INSERT raises `duplicate` when the id or (wallet, action, tx_hash)
+ * is already stored, including REPLACE while recursive triggers are off.
+ * A raw INSERT ... ON CONFLICT DO NOTHING raises `duplicate` as well: the
+ * trigger aborts before SQLite can apply DO NOTHING.
+ *
+ * syntheticTxKey lowercases its inputs (trimmed) before hashing.
+ *
+ * Rubric ids match docs/POINTS-PROGRAM.md. Amounts come from rubric.mjs.
+ * Each row is capped at MAX_POINTS_PER_ROW here and by a CHECK in schema.sql.
  */
 export const POINTS_ACTIONS = Object.freeze([
   "rescue_completed",
@@ -35,6 +49,7 @@ const FORBIDDEN_KEY = /private[_-]?key|secret|mnemonic|seed|signature|permit|pas
 const FORBIDDEN_NAMES = new Set(["__proto__", "prototype", "constructor"]);
 
 const LEDGER_FILE = "points-ledger.sqlite";
+const MODULE_DATA_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "data");
 
 function fail(code) {
   const err = new Error(code);
@@ -74,18 +89,18 @@ function normalizeAction(action) {
 
 function normalizePoints(points) {
   if (typeof points === "bigint") {
-    if (points <= 0n || points > BigInt(Number.MAX_SAFE_INTEGER)) throw fail("invalid_points");
+    if (points <= 0n || points > BigInt(MAX_POINTS_PER_ROW)) throw fail("invalid_points");
     return Number(points);
   }
   if (typeof points === "number") {
-    if (!Number.isSafeInteger(points) || points <= 0) throw fail("invalid_points");
+    if (!Number.isSafeInteger(points) || points <= 0 || points > MAX_POINTS_PER_ROW) throw fail("invalid_points");
     return points;
   }
   if (typeof points === "string") {
     const text = points.trim();
     if (!/^[1-9][0-9]*$/.test(text)) throw fail("invalid_points");
     const n = Number(text);
-    if (!Number.isSafeInteger(n) || n <= 0) throw fail("invalid_points");
+    if (!Number.isSafeInteger(n) || n <= 0 || n > MAX_POINTS_PER_ROW) throw fail("invalid_points");
     return n;
   }
   throw fail("invalid_points");
@@ -94,8 +109,8 @@ function normalizePoints(points) {
 /**
  * Deterministic tx_hash for an off-chain row.
  * `parts` must distinguish the event (a week id, a report id, and so on).
- * The same action and parts always yield the same key. Parts are trimmed
- * and lowercased before hashing.
+ * The same action and parts always yield the same key. syntheticTxKey
+ * lowercases its inputs: each part is trimmed and lowercased before hashing.
  * @param {string} action
  * @param {string | string[]} parts
  */
@@ -143,12 +158,14 @@ function normalizeCreatedAt(value, now) {
   return date.toISOString();
 }
 
-function isDuplicateError(err) {
-  const code = String(err?.code || "");
-  // The BEFORE INSERT trigger aborts a repeated id or (wallet, action, tx_hash)
-  // with SQLITE_CONSTRAINT_TRIGGER before the UNIQUE index is reported.
-  if (code.includes("UNIQUE") || code.includes("PRIMARYKEY") || code.includes("TRIGGER")) return true;
-  return String(err?.message || "").includes("UNIQUE constraint failed");
+/**
+ * True only for the BEFORE INSERT trigger's `duplicate` message.
+ * UPDATE and DELETE use the same SQLite trigger code with `append-only`,
+ * so the code alone is not a duplicate.
+ * @param {unknown} err
+ */
+export function isDuplicateError(err) {
+  return String(err && typeof err === "object" && "message" in err ? err.message : "") === "duplicate";
 }
 
 function parseMetadata(text) {
@@ -202,12 +219,12 @@ function tighten(filePath) {
 
 /**
  * @param {object} [opts]
- * @param {string} [opts.dataDir] Directory for the SQLite file. Defaults to DATA_DIR or ./data.
+ * @param {string} [opts.dataDir] Directory for the SQLite file. Defaults to DATA_DIR, then the module's relayer/data directory.
  * @param {string} [opts.dbPath] Full path. Wins over dataDir.
  * @param {() => number} [opts.now]
  */
 export function createLedgerStore(opts = {}) {
-  const dataDir = opts.dataDir || process.env.DATA_DIR || "./data";
+  const dataDir = opts.dataDir || process.env.DATA_DIR || MODULE_DATA_DIR;
   const filePath = opts.dbPath || join(dataDir, LEDGER_FILE);
   const now = opts.now || Date.now;
   mkdirSync(dirname(filePath), { recursive: true, mode: 0o700 });
@@ -268,7 +285,8 @@ export function createLedgerStore(opts = {}) {
       points: normalizePoints(entry.points),
       tx_hash: normalizeTxHash(entry.txHash),
       metadata: normalizeMetadata(entry.metadata),
-      created_at: normalizeCreatedAt(entry.createdAt, now),
+      // Caller-supplied createdAt is ignored. The server clock is the only source.
+      created_at: normalizeCreatedAt(undefined, now),
     };
     try {
       const info = insert.run(row);
