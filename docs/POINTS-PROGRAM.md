@@ -21,15 +21,15 @@ Record genuine testnet activity as an off-chain score. Points measure usage. The
 | Relayer job executed | 50 | Registered operator identity required |
 | Registry find posted (StrandedRegistry) | 30 | Find must be a real stranded balance |
 | Registry find claimed | 50 | Claim must succeed on-chain |
-| Active wallet session | 10 per week | One session per wallet per week |
+| Active wallet session | 10 per week | One session per wallet per ISO week. The week is the server clock. |
 | Bug report / security finding | 100–500 by severity | Must include a tx hash or reproducible steps |
 
 Severity bands in code: low 100, medium 200, high 300, critical 500. Critical is also the maximum stored on one ledger row.
 
 ## Anti-gaming
 
-- One rescue scores the flat 100 once. Splitting it across wallets does not multiply points.
-- One wallet session per wallet per ISO week.
+- One rescue scores the flat 100 once. A second wallet cannot claim the same rescue transaction.
+- One wallet session per wallet per ISO week. The week is the server clock; a caller-supplied time is ignored.
 - No referral bonuses.
 - No points for holding or transferring a balance.
 - Bug reports require a transaction hash or reproducible steps.
@@ -39,7 +39,8 @@ Severity bands in code: low 100, medium 200, high 300, critical 500. Critical is
 ## Ledger
 
 - Append-only SQLite table keyed by wallet address. A later replacement could be Postgres. No connection string lives in this repo.
-- Unique constraint on (wallet, action, tx_hash) prevents double-counting the same event for the same wallet.
+- On-chain rows are unique on (action, tx_hash), so a second wallet cannot record the same transaction for that action. Off-chain rows stay unique on (wallet, action, tx_hash).
+- A dev database created before the on-chain unique index is not migrated. Delete `points-ledger.sqlite` and open the store again.
 - Append-only is enforced only through the app and the database triggers. `UPDATE` and `DELETE` raise `append-only`. A repeated insert raises `duplicate`.
 - A raw `ON CONFLICT DO NOTHING` raises `duplicate`, because the BEFORE INSERT trigger aborts before SQLite can skip the row.
 - `syntheticTxKey` lowercases its inputs before hashing off-chain keys.

@@ -39,7 +39,11 @@ describe("points rubric", () => {
       {
         action: "wallet_session",
         points: 10,
-        run: () => scoreWalletSession({ wallet: USER, at: "2026-10-12T15:00:00.000Z" }),
+        run: () =>
+          scoreWalletSession(
+            { wallet: USER, at: "2999-01-01T00:00:00.000Z" },
+            () => Date.parse("2026-10-12T15:00:00.000Z"),
+          ),
       },
     ];
     assert.equal(rows.length, Object.keys(FIXED_POINTS).length);
@@ -127,24 +131,42 @@ describe("points rubric", () => {
     assert.notEqual(isoWeekKey("2026-10-18T23:00:00.000Z"), isoWeekKey("2026-10-19T00:00:00.000Z"));
     assert.throws(() => isoWeekKey("not-a-date"), rejection("invalid_week"));
 
-    const monday = scoreWalletSession({ wallet: USER.toUpperCase(), at: "2026-10-12T15:00:00.000Z" });
-    const sunday = scoreWalletSession({ wallet: USER, at: "2026-10-18T23:00:00.000Z" });
-    const nextWeek = scoreWalletSession({ wallet: USER, at: "2026-10-19T00:00:00.000Z" });
-    const otherWallet = scoreWalletSession({ wallet: OTHER, at: "2026-10-12T15:00:00.000Z" });
-    assert.equal(monday.points, 10);
-    assert.equal(monday.wallet, USER);
-    assert.equal(monday.txHash, sunday.txHash);
-    assert.notEqual(monday.txHash, nextWeek.txHash);
-    assert.notEqual(monday.txHash, otherWallet.txHash);
-    assert.equal(monday.txHash, syntheticTxKey("wallet_session", [monday.week, USER.toUpperCase()]));
+    const serverNow = () => Date.parse("2026-10-12T15:00:00.000Z");
+    const serverWeek = isoWeekKey(serverNow());
+    const from2999 = scoreWalletSession({ wallet: USER.toUpperCase(), at: "2999-01-01T00:00:00.000Z" }, serverNow);
+    const from1970 = scoreWalletSession({ wallet: USER, at: "1970-01-01T00:00:00.000Z" }, serverNow);
+    const nextWeek = scoreWalletSession({ wallet: USER, at: "1970-01-01T00:00:00.000Z" }, () => Date.parse("2026-10-19T00:00:00.000Z"));
+    const otherWallet = scoreWalletSession({ wallet: OTHER, at: "2999-06-01T00:00:00.000Z" }, serverNow);
+    assert.equal(from2999.points, 10);
+    assert.equal(from2999.wallet, USER);
+    assert.equal(from2999.week, serverWeek);
+    assert.equal(from1970.week, serverWeek);
+    assert.notEqual(from2999.week, isoWeekKey("2999-01-01T00:00:00.000Z"));
+    assert.notEqual(from1970.week, isoWeekKey("1970-01-01T00:00:00.000Z"));
+    assert.equal(from2999.txHash, from1970.txHash);
+    assert.notEqual(from2999.txHash, nextWeek.txHash);
+    assert.notEqual(from2999.txHash, otherWallet.txHash);
+    assert.equal(from2999.txHash, syntheticTxKey("wallet_session", [serverWeek, USER.toUpperCase()]));
 
+    const live2999 = scoreWalletSession({ wallet: USER, at: "2999-12-31T00:00:00.000Z" });
+    const live1970 = scoreWalletSession({ wallet: USER, at: "1970-01-01T00:00:00.000Z" });
+    assert.equal(live2999.week, isoWeekKey(Date.now()));
+    assert.equal(live1970.week, live2999.week);
+    assert.equal(live2999.txHash, live1970.txHash);
+
+    let clock = Date.parse("2026-10-12T15:00:00.000Z");
     const dir = await mkdtemp(join(tmpdir(), "points-week-"));
-    const store = createLedgerStore({ dataDir: dir, now: () => 1_700_000_000_000 });
+    const store = createLedgerStore({ dataDir: dir, now: () => clock });
     try {
-      store.append(monday);
-      assert.throws(() => store.append(sunday), rejection("duplicate"));
-      store.append(nextWeek);
-      store.append(otherWallet);
+      const row = store.appendScored("wallet_session", { wallet: USER, at: "2999-01-01T00:00:00.000Z" });
+      assert.equal(row.txHash, from2999.txHash);
+      assert.throws(
+        () => store.appendScored("wallet_session", { wallet: USER, at: "1970-01-01T00:00:00.000Z" }),
+        rejection("duplicate"),
+      );
+      store.appendScored("wallet_session", { wallet: OTHER, at: "2999-06-01T00:00:00.000Z" });
+      clock = Date.parse("2026-10-19T00:00:00.000Z");
+      store.appendScored("wallet_session", { wallet: USER, at: "1970-01-01T00:00:00.000Z" });
       assert.equal(store.totals(USER).total, 20);
       assert.equal(store.byWallet(USER).length, 2);
       assert.equal(store.totals(OTHER).total, 10);

@@ -13,8 +13,9 @@ import { syntheticTxKey } from "./ledgerStore.mjs";
  * decision. It is not a per-dollar score.
  *
  * Anti-gaming:
- * - One wallet session per wallet per ISO week. The session tx key includes
- *   the week, so a second session in that week is a duplicate row.
+ * - One wallet session per wallet per ISO week. The week is the server
+ *   clock. A caller-supplied `at` is ignored. The session tx key includes
+ *   that week, so a second session in that week is a duplicate row.
  * - No referral action and no referral points.
  * - Splitting a rescue across wallets does not multiply points. One rescue
  *   transaction produces one award of the flat placeholder.
@@ -146,14 +147,18 @@ export function scoreRegistryFindClaimed(input = {}) {
 
 /**
  * Ten points, once per wallet per ISO week.
+ * The week is taken from `now` (the server clock: a function or a timestamp)
+ * and defaults to Date.now. Caller field `at` is ignored.
  * The tx key is syntheticTxKey("wallet_session", [week, wallet]), and
  * syntheticTxKey lowercases its inputs, so address case does not open a
  * second session.
  * @param {object} [input]
+ * @param {(() => number | string | Date) | number | string | Date} [now]
  */
-export function scoreWalletSession(input = {}) {
+export function scoreWalletSession(input = {}, now = Date.now) {
   const wallet = normalizeWallet(input.wallet);
-  const week = isoWeekKey(input.at);
+  const instant = typeof now === "function" ? now() : now;
+  const week = isoWeekKey(instant);
   return {
     action: "wallet_session",
     points: FIXED_POINTS.wallet_session,
@@ -200,9 +205,11 @@ export function scoreReferral() {
 /**
  * Score one rubric event.
  * Referral actions throw `referrals_disabled`.
+ * `now` is the server clock used for a wallet session. Caller field `at` is ignored.
  * @param {object} input
+ * @param {(() => number | string | Date) | number | string | Date} [now]
  */
-export function score(input) {
+export function score(input, now = Date.now) {
   if (!input || typeof input !== "object" || Array.isArray(input)) throw fail("invalid_entry");
   const action = String(input.action ?? "").trim();
   if (REFERRAL_ACTIONS.has(action)) return scoreReferral();
@@ -216,7 +223,7 @@ export function score(input) {
     case "registry_find_claimed":
       return scoreRegistryFindClaimed(input);
     case "wallet_session":
-      return scoreWalletSession(input);
+      return scoreWalletSession(input, now);
     case "bug_report":
       return scoreBugReport(input);
     default:

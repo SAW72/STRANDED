@@ -3,7 +3,7 @@ import { chmodSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
-import { MAX_POINTS_PER_ROW } from "./rubric.mjs";
+import { MAX_POINTS_PER_ROW, score } from "./rubric.mjs";
 
 /**
  * Append-only points ledger.
@@ -27,8 +27,18 @@ import { MAX_POINTS_PER_ROW } from "./rubric.mjs";
  *
  * syntheticTxKey lowercases its inputs (trimmed) before hashing.
  *
+ * The public write path is appendScored(). It computes points with score()
+ * and rejects a caller-supplied total that disagrees. Raw insertion stays
+ * inside this module.
+ *
  * Rubric ids match docs/POINTS-PROGRAM.md. Amounts come from rubric.mjs.
+ * Rescue points are the flat 100 placeholder pending Spencer's decision.
  * Each row is capped at MAX_POINTS_PER_ROW here and by a CHECK in schema.sql.
+ *
+ * On-chain rows are unique on (action, tx_hash), so a second wallet cannot
+ * claim the same transaction for that action. A dev database created before
+ * that index is not migrated: delete points-ledger.sqlite and open the store
+ * again. This file does not rebuild an existing table.
  */
 export const POINTS_ACTIONS = Object.freeze([
   "rescue_completed",
@@ -272,8 +282,9 @@ export function createLedgerStore(opts = {}) {
   }
 
   /**
-   * Insert one ledger row. A repeated (wallet, action, txHash) throws
-   * `duplicate` and does not add the points again.
+   * Insert one already-scored row. Not part of the public store.
+   * A repeated id, (wallet, action, txHash), or on-chain (action, txHash)
+   * throws `duplicate` and does not add the points again.
    * @param {object} entry
    */
   function append(entry) {
@@ -296,6 +307,30 @@ export function createLedgerStore(opts = {}) {
       if (String(err?.code || "").includes("CONSTRAINT")) throw fail("invalid_ledger_row");
       throw err;
     }
+  }
+
+  /**
+   * Public write. `score()` chooses the points. A caller `points` value that
+   * is not that rubric total is rejected. `createdAt` and, for a session,
+   * `at` are ignored; both clocks are `now`.
+   * @param {string} action
+   * @param {object} ctx
+   */
+  function appendScored(action, ctx) {
+    assertOpen();
+    if (!ctx || typeof ctx !== "object" || Array.isArray(ctx)) throw fail("invalid_entry");
+    const scored = score({ ...ctx, action }, now);
+    if (ctx.points !== undefined) {
+      const supplied = normalizePoints(ctx.points);
+      if (supplied !== scored.points) throw fail("rubric_mismatch");
+    }
+    return append({
+      wallet: ctx.wallet ?? scored.wallet,
+      action: scored.action,
+      points: scored.points,
+      txHash: scored.txHash,
+      metadata: ctx.metadata,
+    });
   }
 
   function byWallet(wallet) {
@@ -338,5 +373,5 @@ export function createLedgerStore(opts = {}) {
     db.close();
   }
 
-  return Object.freeze({ append, byWallet, totals, close, filePath });
+  return Object.freeze({ appendScored, byWallet, totals, close, filePath });
 }

@@ -11,10 +11,16 @@
 -- tx_hash is NOT NULL: the on-chain transaction hash, or a deterministic
 -- synthetic key from syntheticTxKey() when the action is off-chain.
 -- syntheticTxKey lowercases its inputs before hashing.
--- UNIQUE (wallet, action, tx_hash) rejects a second insert of the same event.
+-- UNIQUE (wallet, action, tx_hash) rejects a second insert of the same event
+-- for one wallet. On-chain hashes (0x...) are also unique on (action, tx_hash),
+-- so a second wallet cannot claim that transaction for the same action.
+-- A dev database created before points_ledger_onchain_action_tx is not
+-- migrated. If creating that index fails, delete points-ledger.sqlite and
+-- open the store again. This file does not rebuild an existing table, so an
+-- older points CHECK stays until that reset.
 -- UPDATE and DELETE triggers raise 'append-only'.
--- BEFORE INSERT raises 'duplicate' when the id or (wallet, action, tx_hash)
--- is already stored. That fires before ON CONFLICT, so a raw
+-- BEFORE INSERT raises 'duplicate' when the id, (wallet, action, tx_hash),
+-- or an on-chain (action, tx_hash) is already stored. That fires before ON CONFLICT, so a raw
 -- INSERT ... ON CONFLICT DO NOTHING raises 'duplicate' instead of skipping
 -- the row. REPLACE deletes the old row only after that trigger, and it runs
 -- the delete trigger only when recursive_triggers is on. Aborting first keeps
@@ -72,6 +78,11 @@ WHEN EXISTS (
   SELECT 1 FROM points_ledger
   WHERE id = NEW.id
      OR (wallet = NEW.wallet AND action = NEW.action AND tx_hash = NEW.tx_hash)
+     OR (
+       substr(NEW.tx_hash, 1, 2) = '0x'
+       AND action = NEW.action
+       AND tx_hash = NEW.tx_hash
+     )
 )
 BEGIN
   SELECT RAISE(ABORT, 'duplicate');
@@ -90,3 +101,8 @@ BEFORE DELETE ON points_ledger
 BEGIN
   SELECT RAISE(ABORT, 'append-only');
 END;
+
+-- On-chain only. Synthetic off: keys stay per wallet via the table UNIQUE.
+CREATE UNIQUE INDEX IF NOT EXISTS points_ledger_onchain_action_tx
+ON points_ledger(action, tx_hash)
+WHERE substr(tx_hash, 1, 2) = '0x';
