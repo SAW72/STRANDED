@@ -316,7 +316,10 @@ describe("points ledger", () => {
     }
     assert.equal(POINTS_ACTIONS.length, 6);
     assert.match(sql, new RegExp(`points <= ${MAX_POINTS_PER_ROW}`));
-    assert.match(sql, /CREATE UNIQUE INDEX IF NOT EXISTS points_ledger_onchain_action_tx/);
+    assert.match(sql, /CREATE UNIQUE INDEX points_ledger_onchain_action_tx/);
+    assert.match(sql, /WHERE substr\(tx_hash,1,2\)='0x'/);
+    assert.match(sql, /CREATE UNIQUE INDEX points_ledger_bug_action_tx/);
+    assert.match(sql, /WHERE action='bug_report'/);
   });
 
   it("rejects a null tx_hash and an over-cap points value", async () => {
@@ -546,6 +549,87 @@ describe("points ledger", () => {
       } finally {
         db.close();
       }
+    });
+  });
+
+  it("looks up each duplicate EXISTS with an index", async () => {
+    await withStore((store) => {
+      const filePath = store.filePath;
+      store.close();
+      const db = new Database(filePath);
+      try {
+        const queries = [
+          ["SELECT 1 FROM points_ledger WHERE id=?", [1]],
+          [
+            "SELECT 1 FROM points_ledger WHERE wallet=? AND action=? AND tx_hash=?",
+            [USER, "rescue_completed", TX],
+          ],
+          [
+            "SELECT 1 FROM points_ledger WHERE action=? AND tx_hash=? AND substr(tx_hash,1,2)='0x'",
+            ["rescue_completed", TX],
+          ],
+          [
+            "SELECT 1 FROM points_ledger WHERE action=? AND tx_hash=? AND action='bug_report'",
+            ["bug_report", `off:${"ab".repeat(32)}`],
+          ],
+        ];
+        for (const [query, params] of queries) {
+          const steps = db.prepare(`EXPLAIN QUERY PLAN ${query}`).all(...params);
+          assert.ok(steps.length > 0, query);
+          for (const step of steps) {
+            assert.notEqual(step.detail, "SCAN points_ledger", query);
+            assert.match(step.detail, /SEARCH points_ledger USING /, query);
+          }
+        }
+      } finally {
+        db.close();
+      }
+    });
+  });
+
+  it("rejects a second wallet using the same bug report key", async () => {
+    await withStore((store) => {
+      store.appendScored("bug_report", {
+        wallet: USER,
+        severity: "low",
+        reportId: "R-1",
+        reproSteps: "open the page",
+      });
+      assert.throws(
+        () =>
+          store.appendScored("bug_report", {
+            wallet: OTHER,
+            severity: "high",
+            reportId: "R-1",
+            reproSteps: "different words",
+          }),
+        rejection("duplicate"),
+      );
+
+      const steps = "click rescue twice";
+      store.appendScored("bug_report", {
+        wallet: USER,
+        severity: "medium",
+        reproSteps: steps,
+      });
+      assert.throws(
+        () =>
+          store.appendScored("bug_report", {
+            wallet: OTHER,
+            severity: "low",
+            reproSteps: steps,
+          }),
+        rejection("duplicate"),
+      );
+
+      store.appendScored("bug_report", {
+        wallet: OTHER,
+        severity: "low",
+        reportId: "R-2",
+        reproSteps: steps,
+      });
+      assert.equal(store.byWallet(OTHER).length, 1);
+      assert.equal(store.byWallet(USER).filter((row) => row.action === "bug_report").length, 2);
     });
   });
 });

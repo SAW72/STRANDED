@@ -39,7 +39,7 @@ Severity bands in code: low 100, medium 200, high 300, critical 500. Critical is
 ## Ledger
 
 - Append-only SQLite table keyed by wallet address. A later replacement could be Postgres. No connection string lives in this repo.
-- On-chain rows are unique on (action, tx_hash), so a second wallet cannot record the same transaction for that action. Off-chain rows stay unique on (wallet, action, tx_hash).
+- On-chain rows are unique on (action, tx_hash), so a second wallet cannot record the same transaction for that action. A bug-report key is unique on (action, tx_hash) for every wallet, whether the key is a report id or the steps. Other off-chain rows stay unique on (wallet, action, tx_hash).
 - A dev database created before the on-chain unique index is not migrated. Delete `points-ledger.sqlite` and open the store again.
 - Append-only is enforced only through the app and the database triggers. `UPDATE` and `DELETE` raise `append-only`. A repeated insert raises `duplicate`.
 - A raw `ON CONFLICT DO NOTHING` raises `duplicate`, because the BEFORE INSERT trigger aborts before SQLite can skip the row.
