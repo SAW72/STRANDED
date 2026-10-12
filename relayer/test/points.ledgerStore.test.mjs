@@ -1,11 +1,14 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { readFileSync, rmSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
+import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
-import { POINTS_ACTIONS, createLedgerStore, syntheticTxKey } from "../points/ledgerStore.mjs";
+import { POINTS_ACTIONS, createLedgerStore, isDuplicateError, syntheticTxKey } from "../points/ledgerStore.mjs";
+import { MAX_POINTS_PER_ROW } from "../points/rubric.mjs";
 
 const USER = "0x1111111111111111111111111111111111111111";
 const OTHER = "0x2222222222222222222222222222222222222222";
@@ -32,10 +35,8 @@ async function withStore(fn) {
 describe("points ledger", () => {
   it("normalizes mixed-case wallets and transaction hashes", async () => {
     await withStore((store) => {
-      const row = store.append({
+      const row = store.appendScored("rescue_completed", {
         wallet: MIXED,
-        action: "rescue_completed",
-        points: 100,
         txHash: TX_MIXED,
         metadata: { note: "already settled" },
       });
@@ -55,12 +56,11 @@ describe("points ledger", () => {
 
   it("rejects a duplicate insert and does not double-count", async () => {
     await withStore((store) => {
-      store.append({ wallet: USER, action: "rescue_completed", points: 100, txHash: TX });
-      store.append({ wallet: USER, action: "relayer_job", points: 50, txHash: TX });
-      store.append({ wallet: OTHER, action: "rescue_completed", points: 100, txHash: TX });
+      store.appendScored("rescue_completed", { wallet: USER, txHash: TX });
+      store.appendScored("relayer_job", { wallet: USER, txHash: TX, operatorId: "op-1" });
 
       assert.throws(
-        () => store.append({ wallet: USER.toUpperCase(), action: "rescue_completed", points: 100, txHash: TX_MIXED }),
+        () => store.appendScored("rescue_completed", { wallet: USER.toUpperCase(), txHash: TX_MIXED, points: 100 }),
         rejection("duplicate"),
       );
 
@@ -75,8 +75,8 @@ describe("points ledger", () => {
         relayer_job: 50,
         rescue_completed: 100,
       });
-      assert.equal(store.totals().total, 250);
-      assert.equal(store.totals().wallets.length, 2);
+      assert.equal(store.totals().total, 150);
+      assert.equal(store.totals().wallets.length, 1);
     });
   });
 
@@ -88,9 +88,11 @@ describe("points ledger", () => {
       assert.notEqual(first, syntheticTxKey("wallet_session", ["2026-W42", USER]));
       assert.match(first, /^off:[0-9a-f]{64}$/);
 
-      store.append({ wallet: USER, action: "wallet_session", points: 10, txHash: first });
+      const row = store.appendScored("wallet_session", { wallet: USER, at: "2999-01-01T00:00:00.000Z" });
+      assert.match(row.txHash, /^off:[0-9a-f]{64}$/);
+      assert.notEqual(row.txHash, first);
       assert.throws(
-        () => store.append({ wallet: USER, action: "wallet_session", points: 10, txHash: again }),
+        () => store.appendScored("wallet_session", { wallet: USER, at: "1970-01-01T00:00:00.000Z" }),
         rejection("duplicate"),
       );
       assert.equal(store.totals(USER).total, 10);
@@ -103,7 +105,7 @@ describe("points ledger", () => {
       const badAddresses = ["", "0x1234", "not-a-wallet", `0x${"z".repeat(40)}`, `0x${"a".repeat(39)}`, null];
       for (const wallet of badAddresses) {
         assert.throws(
-          () => store.append({ wallet, action: "rescue_completed", points: 1, txHash: TX }),
+          () => store.appendScored("rescue_completed", { wallet, txHash: TX }),
           rejection("invalid_address"),
         );
       }
@@ -113,32 +115,33 @@ describe("points ledger", () => {
       const badPoints = [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, "0", "-3", "", null, 0n];
       for (const points of badPoints) {
         assert.throws(
-          () => store.append({ wallet: USER, action: "rescue_completed", points, txHash: TX }),
+          () => store.appendScored("rescue_completed", { wallet: USER, points, txHash: TX }),
           rejection("invalid_points"),
         );
       }
 
       assert.throws(
-        () => store.append({ wallet: USER, action: "not_an_action", points: 1, txHash: TX }),
+        () => store.appendScored("not_an_action", { wallet: USER, txHash: TX }),
         rejection("invalid_action"),
       );
       assert.throws(
-        () => store.append({ wallet: USER, action: "rescue_completed", points: 1, txHash: "0xabc" }),
+        () => store.appendScored("rescue_completed", { wallet: USER, txHash: "0xabc" }),
         rejection("invalid_tx_hash"),
       );
       assert.throws(
-        () => store.append({ wallet: USER, action: "rescue_completed", points: 1, txHash: "" }),
+        () => store.appendScored("rescue_completed", { wallet: USER, txHash: "" }),
         rejection("invalid_tx_hash"),
       );
 
       const secretField = "not-stored";
       assert.throws(
         () =>
-          store.append({
+          store.appendScored("bug_report", {
             wallet: USER,
-            action: "bug_report",
+            severity: "low",
+            reportId: "report-1",
+            reproSteps: "steps",
             points: 100,
-            txHash: syntheticTxKey("bug_report", ["report-1"]),
             metadata: { private_key: secretField },
           }),
         (err) => rejection("invalid_metadata")(err) && !err.message.includes(secretField),
@@ -148,19 +151,20 @@ describe("points ledger", () => {
       assert.equal(store.totals(USER).total, 0);
       assert.equal(store.totals().total, 0);
 
-      store.append({ wallet: USER, action: "registry_find_posted", points: "30", txHash: TX });
-      store.append({ wallet: USER, action: "registry_find_claimed", points: 50n, txHash: TX });
+      store.appendScored("registry_find_posted", { wallet: USER, points: "30", txHash: TX });
+      store.appendScored("registry_find_claimed", { wallet: USER, points: 50n, txHash: TX });
       assert.equal(store.totals(USER).total, 80);
     });
   });
 
   it("has no update or delete path, and triggers block raw UPDATE and DELETE", async () => {
     await withStore((store) => {
-      assert.deepEqual(Object.keys(store).sort(), ["append", "byWallet", "close", "filePath", "totals"]);
+      assert.deepEqual(Object.keys(store).sort(), ["appendScored", "byWallet", "close", "filePath", "totals"]);
+      assert.equal(Object.hasOwn(store, "append"), false);
       assert.equal(Object.hasOwn(store, "update"), false);
       assert.equal(Object.hasOwn(store, "delete"), false);
 
-      store.append({ wallet: USER, action: "rescue_completed", points: 100, txHash: TX });
+      store.appendScored("rescue_completed", { wallet: USER, txHash: TX });
       const filePath = store.filePath;
       store.close();
 
@@ -196,7 +200,18 @@ describe("points ledger", () => {
                  ON CONFLICT (wallet, action, tx_hash) DO UPDATE SET points = excluded.points`,
               )
               .run(USER, TX),
-          /append-only/,
+          /duplicate/,
+        );
+        assert.throws(
+          () =>
+            db
+              .prepare(
+                `INSERT INTO points_ledger (wallet, action, points, tx_hash, metadata, created_at)
+                 VALUES (?, 'rescue_completed', 5, ?, NULL, '2024-01-01T00:00:00.000Z')
+                 ON CONFLICT (wallet, action, tx_hash) DO NOTHING`,
+              )
+              .run(USER, TX),
+          /duplicate/,
         );
         assert.throws(
           () =>
@@ -206,7 +221,7 @@ describe("points ledger", () => {
                  VALUES (?, 'rescue_completed', 5, ?, NULL, '2024-01-01T00:00:00.000Z')`,
               )
               .run(USER, TX),
-          /append-only/,
+          /duplicate/,
         );
         assert.throws(
           () =>
@@ -250,12 +265,7 @@ describe("points ledger", () => {
 
   it("rejects REPLACE when recursive triggers are off", async () => {
     await withStore((store) => {
-      const inserted = store.append({
-        wallet: USER,
-        action: "rescue_completed",
-        points: 100,
-        txHash: TX,
-      });
+      const inserted = store.appendScored("rescue_completed", { wallet: USER, txHash: TX });
       const filePath = store.filePath;
       store.close();
 
@@ -290,7 +300,7 @@ describe("points ledger", () => {
           ],
         ];
         for (const [sql, params] of statements) {
-          assert.throws(() => db.prepare(sql).run(...params), /append-only/);
+          assert.throws(() => db.prepare(sql).run(...params), /duplicate/);
           assert.deepEqual(readRow(), original);
         }
       } finally {
@@ -305,5 +315,321 @@ describe("points ledger", () => {
       assert.match(sql, new RegExp(`'${action}'`));
     }
     assert.equal(POINTS_ACTIONS.length, 6);
+    assert.match(sql, new RegExp(`points <= ${MAX_POINTS_PER_ROW}`));
+    assert.match(sql, /CREATE UNIQUE INDEX points_ledger_onchain_action_tx/);
+    assert.match(sql, /WHERE substr\(tx_hash,1,2\)='0x'/);
+    assert.match(sql, /CREATE UNIQUE INDEX points_ledger_bug_action_tx/);
+    assert.match(sql, /WHERE action='bug_report'/);
+  });
+
+  it("rejects a null tx_hash and an over-cap points value", async () => {
+    await withStore((store) => {
+      store.appendScored("bug_report", {
+        wallet: USER,
+        severity: "critical",
+        txHash: TX2,
+        points: MAX_POINTS_PER_ROW,
+      });
+      assert.throws(
+        () =>
+          store.appendScored("bug_report", {
+            wallet: USER,
+            severity: "critical",
+            txHash: `0x${"ef".repeat(32)}`,
+            points: MAX_POINTS_PER_ROW + 1,
+          }),
+        rejection("invalid_points"),
+      );
+      assert.throws(
+        () =>
+          store.appendScored("bug_report", {
+            wallet: USER,
+            severity: "critical",
+            txHash: `0x${"12".repeat(32)}`,
+            points: String(MAX_POINTS_PER_ROW + 1),
+          }),
+        rejection("invalid_points"),
+      );
+
+      const filePath = store.filePath;
+      store.close();
+      const db = new Database(filePath);
+      try {
+        assert.throws(
+          () =>
+            db
+              .prepare(
+                `INSERT INTO points_ledger (wallet, action, points, tx_hash, metadata, created_at)
+                 VALUES (?, 'rescue_completed', 1, NULL, NULL, '2024-01-01T00:00:00.000Z')`,
+              )
+              .run(USER),
+          /NOT NULL constraint failed: points_ledger\.tx_hash/,
+        );
+        assert.throws(
+          () =>
+            db
+              .prepare(
+                `INSERT INTO points_ledger (wallet, action, points, tx_hash, metadata, created_at)
+                 VALUES (?, 'bug_report', ?, ?, NULL, '2024-01-01T00:00:00.000Z')`,
+              )
+              .run(USER, MAX_POINTS_PER_ROW + 1, syntheticTxKey("bug_report", ["sql-over-cap"])),
+          /CHECK constraint failed/,
+        );
+        const top = db.prepare("SELECT points FROM points_ledger WHERE action = 'bug_report'").get();
+        assert.equal(top.points, MAX_POINTS_PER_ROW);
+      } finally {
+        db.close();
+      }
+    });
+  });
+
+  it("sets created_at from the server clock and ignores a caller timestamp", async () => {
+    await withStore((store) => {
+      const row = store.appendScored("rescue_completed", {
+        wallet: USER,
+        txHash: TX,
+        createdAt: "1999-01-01T00:00:00.000Z",
+      });
+      assert.equal(row.createdAt, "2023-11-14T22:13:20.000Z");
+      const again = store.appendScored("relayer_job", {
+        wallet: USER,
+        txHash: TX,
+        operatorId: "op-1",
+        createdAt: "not-a-date",
+      });
+      assert.equal(again.createdAt, "2023-11-14T22:13:20.000Z");
+    });
+  });
+
+  it("matches isDuplicateError only to the duplicate trigger message", async () => {
+    await withStore((store) => {
+      store.appendScored("rescue_completed", { wallet: USER, txHash: TX });
+      const filePath = store.filePath;
+      store.close();
+      const db = new Database(filePath);
+      try {
+        let duplicateErr;
+        try {
+          db.prepare(
+            `INSERT INTO points_ledger (wallet, action, points, tx_hash, metadata, created_at)
+             VALUES (?, 'rescue_completed', 100, ?, NULL, '2024-01-01T00:00:00.000Z')`,
+          ).run(USER, TX);
+        } catch (err) {
+          duplicateErr = err;
+        }
+        assert.equal(duplicateErr.message, "duplicate");
+        assert.equal(isDuplicateError(duplicateErr), true);
+
+        let updateErr;
+        try {
+          db.prepare("UPDATE points_ledger SET points = 1").run();
+        } catch (err) {
+          updateErr = err;
+        }
+        assert.equal(updateErr.message, "append-only");
+        assert.equal(isDuplicateError(updateErr), false);
+
+        let deleteErr;
+        try {
+          db.prepare("DELETE FROM points_ledger").run();
+        } catch (err) {
+          deleteErr = err;
+        }
+        assert.equal(deleteErr.message, "append-only");
+        assert.equal(isDuplicateError(deleteErr), false);
+
+        let nothingErr;
+        try {
+          db.prepare(
+            `INSERT INTO points_ledger (wallet, action, points, tx_hash, metadata, created_at)
+             VALUES (?, 'rescue_completed', 100, ?, NULL, '2024-01-01T00:00:00.000Z')
+             ON CONFLICT (wallet, action, tx_hash) DO NOTHING`,
+          ).run(USER, TX);
+        } catch (err) {
+          nothingErr = err;
+        }
+        assert.equal(nothingErr.message, "duplicate");
+        assert.equal(isDuplicateError(nothingErr), true);
+
+        assert.equal(isDuplicateError({ code: "SQLITE_CONSTRAINT_TRIGGER", message: "append-only" }), false);
+        assert.equal(isDuplicateError({ code: "SQLITE_CONSTRAINT_UNIQUE", message: "UNIQUE constraint failed" }), false);
+        assert.equal(isDuplicateError({ message: "points_ledger is append-only" }), false);
+      } finally {
+        db.close();
+      }
+    });
+  });
+
+  it("resolves the default ledger path from the module or DATA_DIR, not the cwd", async () => {
+    const previous = process.env.DATA_DIR;
+    const dir = await mkdtemp(join(tmpdir(), "points-data-dir-"));
+    process.env.DATA_DIR = dir;
+    let fromEnv;
+    try {
+      fromEnv = createLedgerStore({ now: () => 1_700_000_000_000 });
+      assert.equal(fromEnv.filePath, join(dir, "points-ledger.sqlite"));
+    } finally {
+      fromEnv?.close();
+      if (previous === undefined) delete process.env.DATA_DIR;
+      else process.env.DATA_DIR = previous;
+    }
+
+    const cwd = await mkdtemp(join(tmpdir(), "points-cwd-"));
+    const env = { ...process.env };
+    delete env.DATA_DIR;
+    const child = spawnSync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "-e",
+        `
+          const { createLedgerStore } = await import(${JSON.stringify(new URL("../points/ledgerStore.mjs", import.meta.url).href)});
+          const store = createLedgerStore({ now: () => 1 });
+          console.log(store.filePath);
+          store.close();
+        `,
+      ],
+      { cwd, env, encoding: "utf8" },
+    );
+    assert.equal(child.status, 0, child.stderr);
+    const filePath = child.stdout.trim();
+    const expected = join(dirname(fileURLToPath(new URL("../points/ledgerStore.mjs", import.meta.url))), "..", "data", "points-ledger.sqlite");
+    assert.equal(filePath, expected);
+    assert.equal(filePath.startsWith(cwd), false);
+    rmSync(filePath, { force: true });
+    for (const suffix of ["-wal", "-shm", "-journal"]) rmSync(filePath + suffix, { force: true });
+  });
+
+  it("rejects rescue points that bypass the flat placeholder", async () => {
+    await withStore((store) => {
+      assert.throws(
+        () => store.appendScored("rescue_completed", { wallet: USER, txHash: TX, points: 499 }),
+        rejection("rubric_mismatch"),
+      );
+      const row = store.appendScored("rescue_completed", { wallet: USER, txHash: TX, points: 100 });
+      assert.equal(row.points, 100);
+      assert.equal(store.byWallet(USER).length, 1);
+    });
+  });
+
+  it("rejects a second wallet claiming the same on-chain transaction", async () => {
+    await withStore((store) => {
+      store.appendScored("rescue_completed", { wallet: USER, txHash: TX });
+      assert.throws(
+        () => store.appendScored("rescue_completed", { wallet: OTHER, txHash: TX_MIXED, points: 100 }),
+        rejection("duplicate"),
+      );
+      assert.equal(store.byWallet(OTHER).length, 0);
+      assert.equal(store.totals().total, 100);
+      store.appendScored("relayer_job", { wallet: OTHER, txHash: TX, operatorId: "op-2" });
+      assert.equal(store.totals(OTHER).total, 50);
+
+      const filePath = store.filePath;
+      store.close();
+      const db = new Database(filePath);
+      try {
+        const indexSql = db
+          .prepare("SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'points_ledger_onchain_action_tx'")
+          .get().sql;
+        assert.match(indexSql, /UNIQUE/i);
+        assert.match(indexSql, /action/i);
+        assert.match(indexSql, /tx_hash/i);
+        assert.throws(
+          () =>
+            db
+              .prepare(
+                `INSERT INTO points_ledger (wallet, action, points, tx_hash, metadata, created_at)
+                 VALUES (?, 'rescue_completed', 100, ?, NULL, '2024-01-01T00:00:00.000Z')`,
+              )
+              .run(OTHER, TX),
+          /duplicate/,
+        );
+        const rescues = db.prepare("SELECT wallet FROM points_ledger WHERE action = 'rescue_completed'").all();
+        assert.deepEqual(rescues, [{ wallet: USER }]);
+      } finally {
+        db.close();
+      }
+    });
+  });
+
+  it("looks up each duplicate EXISTS with an index", async () => {
+    await withStore((store) => {
+      const filePath = store.filePath;
+      store.close();
+      const db = new Database(filePath);
+      try {
+        const queries = [
+          ["SELECT 1 FROM points_ledger WHERE id=?", [1]],
+          [
+            "SELECT 1 FROM points_ledger WHERE wallet=? AND action=? AND tx_hash=?",
+            [USER, "rescue_completed", TX],
+          ],
+          [
+            "SELECT 1 FROM points_ledger WHERE action=? AND tx_hash=? AND substr(tx_hash,1,2)='0x'",
+            ["rescue_completed", TX],
+          ],
+          [
+            "SELECT 1 FROM points_ledger WHERE action=? AND tx_hash=? AND action='bug_report'",
+            ["bug_report", `off:${"ab".repeat(32)}`],
+          ],
+        ];
+        for (const [query, params] of queries) {
+          const steps = db.prepare(`EXPLAIN QUERY PLAN ${query}`).all(...params);
+          assert.ok(steps.length > 0, query);
+          for (const step of steps) {
+            assert.notEqual(step.detail, "SCAN points_ledger", query);
+            assert.match(step.detail, /SEARCH points_ledger USING /, query);
+          }
+        }
+      } finally {
+        db.close();
+      }
+    });
+  });
+
+  it("rejects a second wallet using the same bug report key", async () => {
+    await withStore((store) => {
+      store.appendScored("bug_report", {
+        wallet: USER,
+        severity: "low",
+        reportId: "R-1",
+        reproSteps: "open the page",
+      });
+      assert.throws(
+        () =>
+          store.appendScored("bug_report", {
+            wallet: OTHER,
+            severity: "high",
+            reportId: "R-1",
+            reproSteps: "different words",
+          }),
+        rejection("duplicate"),
+      );
+
+      const steps = "click rescue twice";
+      store.appendScored("bug_report", {
+        wallet: USER,
+        severity: "medium",
+        reproSteps: steps,
+      });
+      assert.throws(
+        () =>
+          store.appendScored("bug_report", {
+            wallet: OTHER,
+            severity: "low",
+            reproSteps: steps,
+          }),
+        rejection("duplicate"),
+      );
+
+      store.appendScored("bug_report", {
+        wallet: OTHER,
+        severity: "low",
+        reportId: "R-2",
+        reproSteps: steps,
+      });
+      assert.equal(store.byWallet(OTHER).length, 1);
+      assert.equal(store.byWallet(USER).filter((row) => row.action === "bug_report").length, 2);
+    });
   });
 });

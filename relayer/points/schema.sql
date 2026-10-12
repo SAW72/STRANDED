@@ -2,16 +2,35 @@
 -- Points are off-chain scores and are unpaid.
 -- Postgres can replace this file later. Do not put a connection string in this repo.
 --
+-- Append-only is enforced only through the app (no update or delete API) and
+-- these triggers. Dropping the triggers leaves the rows writable.
+--
 -- wallet is a lowercase 0x address.
--- action is one id from the fixed rubric set. Point amounts are chosen by the caller.
--- tx_hash is the on-chain transaction hash, or a deterministic synthetic key
--- from syntheticTxKey() when the action is off-chain.
--- UNIQUE (wallet, action, tx_hash) rejects a second insert of the same event.
--- Triggers reject UPDATE and DELETE.
--- BEFORE INSERT aborts when the id or (wallet, action, tx_hash) is already
--- stored. REPLACE deletes the old row only after that trigger, and it runs
+-- action is one id from the fixed rubric set.
+-- points is a positive integer up to 500 (MAX_POINTS_PER_ROW in rubric.mjs).
+-- tx_hash is NOT NULL: the on-chain transaction hash, or a deterministic
+-- synthetic key from syntheticTxKey() when the action is off-chain.
+-- syntheticTxKey lowercases its inputs before hashing.
+-- UNIQUE (wallet, action, tx_hash) rejects a second insert of the same event
+-- for one wallet. On-chain hashes (0x...) are also unique on (action, tx_hash),
+-- so a second wallet cannot claim that transaction for the same action.
+-- Bug-report keys are unique on (action, tx_hash) for every wallet. The key is
+-- the report id, or the steps when there is no report id.
+-- A dev database created before points_ledger_onchain_action_tx is not
+-- migrated. If creating that index fails, delete points-ledger.sqlite and
+-- open the store again. This file does not rebuild an existing table, so an
+-- older points CHECK stays until that reset.
+-- UPDATE and DELETE triggers raise 'append-only'.
+-- BEFORE INSERT raises 'duplicate' when the id, (wallet, action, tx_hash),
+-- an on-chain (action, tx_hash), or a bug-report key is already stored.
+-- Each of those checks is its own EXISTS so SQLite can use an index.
+-- That fires before ON CONFLICT, so a raw
+-- INSERT ... ON CONFLICT DO NOTHING raises 'duplicate' instead of skipping
+-- the row. REPLACE deletes the old row only after that trigger, and it runs
 -- the delete trigger only when recursive_triggers is on. Aborting first keeps
 -- the old row when recursive_triggers is off.
+-- CREATE TABLE IF NOT EXISTS does not add this points cap to a table that
+-- already exists. The store rejects an over-cap row either way.
 
 CREATE TABLE IF NOT EXISTS points_ledger (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -37,7 +56,7 @@ CREATE TABLE IF NOT EXISTS points_ledger (
       'bug_report'
     )
   ),
-  CHECK (typeof(points) = 'integer' AND points > 0),
+  CHECK (typeof(points) = 'integer' AND points > 0 AND points <= 500),
   CHECK (
     (
       length(tx_hash) = 66
@@ -56,25 +75,39 @@ CREATE TABLE IF NOT EXISTS points_ledger (
   UNIQUE (wallet, action, tx_hash)
 ) STRICT;
 
-CREATE TRIGGER IF NOT EXISTS points_ledger_no_insert
+DROP TRIGGER IF EXISTS points_ledger_no_insert;
+CREATE TRIGGER points_ledger_no_insert
 BEFORE INSERT ON points_ledger
-WHEN EXISTS (
-  SELECT 1 FROM points_ledger
-  WHERE id = NEW.id
-     OR (wallet = NEW.wallet AND action = NEW.action AND tx_hash = NEW.tx_hash)
-)
+WHEN EXISTS(SELECT 1 FROM points_ledger WHERE id=NEW.id)
+  OR EXISTS(SELECT 1 FROM points_ledger WHERE wallet=NEW.wallet AND action=NEW.action AND tx_hash=NEW.tx_hash)
+  OR (substr(NEW.tx_hash,1,2)='0x' AND EXISTS(SELECT 1 FROM points_ledger WHERE action=NEW.action AND tx_hash=NEW.tx_hash AND substr(tx_hash,1,2)='0x'))
+  OR (NEW.action='bug_report' AND EXISTS(SELECT 1 FROM points_ledger WHERE action=NEW.action AND tx_hash=NEW.tx_hash AND action='bug_report'))
 BEGIN
-  SELECT RAISE(ABORT, 'points_ledger is append-only');
+  SELECT RAISE(ABORT, 'duplicate');
 END;
 
-CREATE TRIGGER IF NOT EXISTS points_ledger_no_update
+DROP TRIGGER IF EXISTS points_ledger_no_update;
+CREATE TRIGGER points_ledger_no_update
 BEFORE UPDATE ON points_ledger
 BEGIN
-  SELECT RAISE(ABORT, 'points_ledger is append-only');
+  SELECT RAISE(ABORT, 'append-only');
 END;
 
-CREATE TRIGGER IF NOT EXISTS points_ledger_no_delete
+DROP TRIGGER IF EXISTS points_ledger_no_delete;
+CREATE TRIGGER points_ledger_no_delete
 BEFORE DELETE ON points_ledger
 BEGIN
-  SELECT RAISE(ABORT, 'points_ledger is append-only');
+  SELECT RAISE(ABORT, 'append-only');
 END;
+
+-- Predicate matches the on-chain EXISTS exactly so the planner can use this index.
+DROP INDEX IF EXISTS points_ledger_onchain_action_tx;
+CREATE UNIQUE INDEX points_ledger_onchain_action_tx
+ON points_ledger(action, tx_hash)
+WHERE substr(tx_hash,1,2)='0x';
+
+-- Bug keys only. Predicate matches the bug-report EXISTS exactly.
+DROP INDEX IF EXISTS points_ledger_bug_action_tx;
+CREATE UNIQUE INDEX points_ledger_bug_action_tx
+ON points_ledger(action, tx_hash)
+WHERE action='bug_report';
