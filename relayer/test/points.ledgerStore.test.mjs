@@ -171,7 +171,11 @@ describe("points ledger", () => {
           .prepare("SELECT name FROM sqlite_master WHERE type = 'trigger' AND tbl_name = 'points_ledger' ORDER BY name")
           .all()
           .map((row) => row.name);
-        assert.deepEqual(triggers, ["points_ledger_no_delete", "points_ledger_no_update"]);
+        assert.deepEqual(triggers, [
+          "points_ledger_no_delete",
+          "points_ledger_no_insert",
+          "points_ledger_no_update",
+        ]);
 
         const tableSql = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'points_ledger'").get().sql;
         assert.match(tableSql, /UNIQUE\s*\(\s*wallet\s*,\s*action\s*,\s*tx_hash\s*\)/i);
@@ -240,6 +244,57 @@ describe("points ledger", () => {
         assert.equal(again.totals(USER).total, 150);
       } finally {
         again.close();
+      }
+    });
+  });
+
+  it("rejects REPLACE when recursive triggers are off", async () => {
+    await withStore((store) => {
+      const inserted = store.append({
+        wallet: USER,
+        action: "rescue_completed",
+        points: 100,
+        txHash: TX,
+      });
+      const filePath = store.filePath;
+      store.close();
+
+      const db = new Database(filePath);
+      try {
+        assert.equal(db.pragma("recursive_triggers", { simple: true }), 0);
+        const readRow = () => db.prepare("SELECT id, wallet, action, points, tx_hash, metadata, created_at FROM points_ledger").get();
+        const original = readRow();
+        assert.equal(original.id, inserted.id);
+        assert.equal(original.points, 100);
+
+        const statements = [
+          [
+            `REPLACE INTO points_ledger (wallet, action, points, tx_hash, metadata, created_at)
+             VALUES (?, 'rescue_completed', 5, ?, NULL, '2024-02-01T00:00:00.000Z')`,
+            [USER, TX],
+          ],
+          [
+            `INSERT OR REPLACE INTO points_ledger (wallet, action, points, tx_hash, metadata, created_at)
+             VALUES (?, 'rescue_completed', 5, ?, NULL, '2024-02-01T00:00:00.000Z')`,
+            [USER, TX],
+          ],
+          [
+            `REPLACE INTO points_ledger (id, wallet, action, points, tx_hash, metadata, created_at)
+             VALUES (?, ?, 'relayer_job', 7, ?, NULL, '2024-03-01T00:00:00.000Z')`,
+            [inserted.id, USER, TX2],
+          ],
+          [
+            `INSERT OR REPLACE INTO points_ledger (id, wallet, action, points, tx_hash, metadata, created_at)
+             VALUES (?, ?, 'relayer_job', 9, ?, NULL, '2024-03-01T00:00:00.000Z')`,
+            [inserted.id, USER, TX2],
+          ],
+        ];
+        for (const [sql, params] of statements) {
+          assert.throws(() => db.prepare(sql).run(...params), /append-only/);
+          assert.deepEqual(readRow(), original);
+        }
+      } finally {
+        db.close();
       }
     });
   });

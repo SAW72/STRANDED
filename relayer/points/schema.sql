@@ -8,9 +8,10 @@
 -- from syntheticTxKey() when the action is off-chain.
 -- UNIQUE (wallet, action, tx_hash) rejects a second insert of the same event.
 -- Triggers reject UPDATE and DELETE.
---
--- The opener must run PRAGMA recursive_triggers = ON. Otherwise INSERT OR REPLACE
--- can remove a row without running the delete trigger.
+-- BEFORE INSERT aborts when the id or (wallet, action, tx_hash) is already
+-- stored. REPLACE deletes the old row only after that trigger, and it runs
+-- the delete trigger only when recursive_triggers is on. Aborting first keeps
+-- the old row when recursive_triggers is off.
 
 CREATE TABLE IF NOT EXISTS points_ledger (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -54,6 +55,17 @@ CREATE TABLE IF NOT EXISTS points_ledger (
   CHECK (length(created_at) >= 20),
   UNIQUE (wallet, action, tx_hash)
 ) STRICT;
+
+CREATE TRIGGER IF NOT EXISTS points_ledger_no_insert
+BEFORE INSERT ON points_ledger
+WHEN EXISTS (
+  SELECT 1 FROM points_ledger
+  WHERE id = NEW.id
+     OR (wallet = NEW.wallet AND action = NEW.action AND tx_hash = NEW.tx_hash)
+)
+BEGIN
+  SELECT RAISE(ABORT, 'points_ledger is append-only');
+END;
 
 CREATE TRIGGER IF NOT EXISTS points_ledger_no_update
 BEFORE UPDATE ON points_ledger

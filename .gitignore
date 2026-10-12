@@ -24,3 +24,4 @@ node_modules/
 wallet/dist/
 relayer/node_modules/
 relayer/data/
+*.sqlite*

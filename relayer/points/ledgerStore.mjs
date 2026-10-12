@@ -11,8 +11,8 @@ import Database from "better-sqlite3";
  *
  * The database is a SQLite file at DATA_DIR/points-ledger.sqlite
  * (better-sqlite3). There is no update or delete API. Table triggers reject
- * UPDATE and DELETE. The connection turns recursive triggers on so
- * INSERT OR REPLACE cannot skip the delete trigger.
+ * UPDATE and DELETE. BEFORE INSERT rejects a repeated id or
+ * (wallet, action, tx_hash), including REPLACE while recursive triggers are off.
  *
  * Rubric ids match docs/POINTS-PROGRAM.md. Amounts are not decided here.
  */
@@ -145,7 +145,9 @@ function normalizeCreatedAt(value, now) {
 
 function isDuplicateError(err) {
   const code = String(err?.code || "");
-  if (code.includes("UNIQUE") || code.includes("PRIMARYKEY")) return true;
+  // The BEFORE INSERT trigger aborts a repeated id or (wallet, action, tx_hash)
+  // with SQLITE_CONSTRAINT_TRIGGER before the UNIQUE index is reported.
+  if (code.includes("UNIQUE") || code.includes("PRIMARYKEY") || code.includes("TRIGGER")) return true;
   return String(err?.message || "").includes("UNIQUE constraint failed");
 }
 
