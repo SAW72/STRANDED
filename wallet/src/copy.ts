@@ -113,3 +113,36 @@ export const COPIED_LABEL = "Copied";
 export const CHAIN_SWITCH_HINT = "Rescue on this testnet. Switch your wallet to match.";
 export const WRONG_NETWORK = "Wrong network";
 export const SWITCH_TO_PREFIX = "Switch to";
+
+/** Points page. Off-chain scores only — no cash amounts and no promised payout. */
+export const POINTS_TITLE = "Points";
+export const POINTS_NAV_LABEL = "Points";
+export const POINTS_BACK_LABEL = "Back";
+export const POINTS_INTRO = "Enter a wallet address to see points by category, the total, and rank.";
+export const POINTS_DISCLAIMER =
+  "Points are off-chain, unpaid, and not a token. They have no cash value, are not redeemable, and nothing is promised.";
+export const POINTS_ADDRESS_LABEL = "Wallet address";
+export const POINTS_ADDRESS_PLACEHOLDER = "0x…";
+export const POINTS_LOOKUP_LABEL = "Look up";
+export const POINTS_INVALID_ADDRESS = "Enter a valid wallet address.";
+export const POINTS_EMPTY = "No points are recorded for this address.";
+export const POINTS_LOAD_ERROR = "Couldn’t load points. Try again.";
+export const POINTS_LOADING = "Loading points…";
+export const POINTS_EXAMPLE_BADGE = "Example data";
+export const POINTS_EXAMPLE_NOTE =
+  "Example data, not a live ledger. These figures are not recorded activity. An empty result means this example has no row for that address.";
+export const POINTS_TOTAL_LABEL = "Total";
+export const POINTS_RANK_LABEL = "Rank";
+export const POINTS_UNRANKED = "Unranked";
+export const POINTS_ADDRESS_RESULT_LABEL = "Address";
+export const POINTS_CATEGORIES_LABEL = "By category";
+export const POINTS_ENTRIES_LABEL = "Entries";
+export const POINTS_TX_LABEL = "Transaction";
+export const POINTS_NO_TX = "No transaction";
+export const POINTS_ACTION_RESCUE = "Rescue";
+export const POINTS_ACTION_RELAYER_JOB = "Relayer job";
+export const POINTS_ACTION_REGISTRY_FIND = "Registry find";
+export const POINTS_ACTION_REGISTRY_CLAIM = "Registry claim";
+export const POINTS_ACTION_SESSION = "Session";
+export const POINTS_ACTION_BUG_REPORT = "Bug report";
+export const POINTS_ACTION_OTHER = "Other";

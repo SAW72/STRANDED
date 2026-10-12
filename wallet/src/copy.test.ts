@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import * as copy from "./copy";
 import {
   AMOUNT_HELPER,
   AMOUNT_LABEL,
@@ -76,6 +77,36 @@ describe("review-screen copy", () => {
     expect(surface).not.toMatch(/\bfeeAmount\b/);
     expect(surface).not.toMatch(/\bnativeTo\b/);
     expect(surface).not.toMatch(/safeRecipient/i);
+  });
+});
+
+describe("points copy", () => {
+  const pointsCopy = Object.entries(copy)
+    .filter(([key, value]) => key.startsWith("POINTS_") && typeof value === "string")
+    .map(([, value]) => value);
+
+  it("fails if points copy contains $, reward, or token value", () => {
+    expect(pointsCopy.length).toBeGreaterThan(0);
+    for (const line of pointsCopy) {
+      expect(line).not.toMatch(/\$/);
+      expect(line.toLowerCase()).not.toContain("reward");
+      expect(line.toLowerCase()).not.toContain("token value");
+      expect(line.toLowerCase()).not.toContain("airdrop");
+      expect(line.toLowerCase()).not.toMatch(/\bearn\b/);
+    }
+  });
+
+  it("says points are off-chain, unpaid, not a token, and that nothing is promised", () => {
+    const disclaimer = copy.POINTS_DISCLAIMER.toLowerCase();
+    expect(disclaimer).toContain("off-chain");
+    expect(disclaimer).toContain("unpaid");
+    expect(disclaimer).toContain("not a token");
+    expect(disclaimer).toContain("no cash value");
+    expect(disclaimer).toContain("nothing is promised");
+  });
+
+  it("says points are not redeemable", () => {
+    expect(copy.POINTS_DISCLAIMER.toLowerCase()).toContain("not redeemable");
   });
 });
 

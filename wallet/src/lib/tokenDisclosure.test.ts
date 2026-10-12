@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import appSource from "../App.tsx?raw";
+import pointsSource from "../Points.tsx?raw";
 import copySource from "../copy.ts?raw";
 import copyValueSource from "../CopyValue.tsx?raw";
 import indexHtml from "../../index.html?raw";
@@ -53,6 +54,7 @@ const COPY_SOURCES = [
   copySource,
   disclosureSource,
   appSource,
+  pointsSource,
   celebrationSource,
   receiptSource,
   pickerSource,
@@ -61,7 +63,7 @@ const COPY_SOURCES = [
 ];
 
 function bannedWordsIn(text: string): string[] {
-  const stripped = text.replace(/\bno value\b/gi, " ");
+  const stripped = text.replace(/\bno value\b/gi, " ").replace(/\bno cash value\b/gi, " ");
   return BANNED.filter((word) => new RegExp(`\\b${word}\\b`, "i").test(stripped));
 }
 
@@ -124,6 +126,8 @@ describe("banned words in user-visible copy", () => {
     );
     expect(bannedWordsIn("a live price")).toEqual(["price"]);
     expect(bannedWordsIn("high value")).toEqual(["value"]);
+    expect(bannedWordsIn("They have no cash value, and nothing is promised.")).toEqual([]);
+    expect(bannedWordsIn("high cash value")).toEqual(["value"]);
   });
 
   it("finds none of the banned words in the disclosure, banner, copy module, or UI text", () => {

@@ -61,6 +61,14 @@ export function tokenAddress(chainId: SupportedChainId = BASE_SEPOLIA_CHAIN_ID):
   return optionalAddress(readEnv("VITE_TOKEN_ADDRESS"));
 }
 
+/**
+ * Public origin for GET /points/:wallet and GET /points/leaderboard.
+ * Empty unless VITE_POINTS_API_URL is set — the dashboard then uses labelled example data.
+ */
+export function pointsApiUrl(): string {
+  return readEnv("VITE_POINTS_API_URL").replace(/\/$/, "");
+}
+
 export function rpcUrl(chainId: SupportedChainId): string {
   if (chainId === ARB_SEPOLIA_CHAIN_ID) {
     return readEnv("VITE_ARB_SEPOLIA_RPC_URL") || DEFAULT_RPC[ARB_SEPOLIA_CHAIN_ID];
