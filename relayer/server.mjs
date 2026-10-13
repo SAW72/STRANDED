@@ -1,6 +1,6 @@
 import { createPublicClient, createWalletClient, http as viemHttp, keccak256 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { arbitrumSepolia } from "viem/chains";
+import { arbitrumSepolia, baseSepolia } from "viem/chains";
 import { createRelayerApp } from "./app.mjs";
 import { parseTrustedProxyHops } from "./clientIp.mjs";
 import {
@@ -16,6 +16,7 @@ import {
 import { createKillSwitch, parseEnvFlag } from "./killSwitch.mjs";
 import { createNonceStore } from "./nonceStore.mjs";
 import { createBuildQuote, encodeSwapData } from "./quote.mjs";
+import { assertRpcChainId, parseExplicitChainId } from "./quoteRequest.mjs";
 import { rescueAbi } from "./rescueAbi.mjs";
 import { createRescueLog, orderLogSummary } from "./rescueLog.mjs";
 import { createRescueLimiter, parseRescueLimitConfig } from "./rescueLimit.mjs";
@@ -51,12 +52,21 @@ function relayerPrivateKey() {
 }
 
 const SWAP = process.env.GAS_RESCUE_SWAP_ADDRESS;
-const RPC_URL = process.env.RPC_URL || "https://sepolia-rollup.arbitrum.io/rpc";
+let CHAIN_ID;
+try {
+  CHAIN_ID = parseExplicitChainId(process.env.CHAIN_ID);
+} catch (err) {
+  console.error(err instanceof Error ? err.message : err);
+  process.exit(1);
+}
+const chain = CHAIN_ID === 84532 ? baseSepolia : arbitrumSepolia;
+const RPC_URL =
+  process.env.RPC_URL ||
+  (CHAIN_ID === 84532 ? "https://sepolia.base.org" : "https://sepolia-rollup.arbitrum.io/rpc");
 const PORT = Number(process.env.PORT || 8788);
 const HOST = process.env.HOST || (process.env.RENDER ? "0.0.0.0" : "127.0.0.1");
 const FEE_TO = process.env.FEE_TO;
 const ROUTER = process.env.ROUTER_ADDRESS;
-const CHAIN_ID = Number(process.env.CHAIN_ID || 421614);
 // DEMO_TOKEN overrides TOKEN_ADDRESS after H1. Unset, TOKEN_ADDRESS (live GRTT) stays the demo token.
 const TOKEN = process.env.DEMO_TOKEN || process.env.TOKEN_ADDRESS;
 const DATA_DIR = process.env.DATA_DIR || "./data";
@@ -87,10 +97,10 @@ const transport = viemHttp(RPC_URL, {
     headers: { "User-Agent": "stranded-relayer/1.0" },
   },
 });
-const publicClient = createPublicClient({ chain: arbitrumSepolia, transport });
+const publicClient = createPublicClient({ chain, transport });
 const walletClient = createWalletClient({
   account,
-  chain: arbitrumSepolia,
+  chain,
   transport,
 });
 
@@ -290,6 +300,12 @@ const server = createRelayerApp({
 });
 
 await rescueLimiter.ready;
+try {
+  assertRpcChainId(await publicClient.getChainId(), CHAIN_ID);
+} catch (err) {
+  console.error(err instanceof Error ? err.message : "RPC eth_chainId check failed. Refusing to start.");
+  process.exit(1); // fail closed when RPC eth_chainId does not match CHAIN_ID
+}
 const limitLabel = (value) => (value == null ? "off" : String(value));
 server.listen(PORT, HOST, () => {
   console.log(

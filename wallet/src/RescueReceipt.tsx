@@ -43,7 +43,7 @@ export function RescueReceipt({
     <section className="card" data-testid="rescue-receipt" aria-live="polite">
       <h2>{RECEIPT_TITLE}</h2>
       <p className="subtitle">{RECEIPT_SUBTITLE}</p>
-      <p className="token-disclosure">{tokenDisclosure(symbol)}</p>
+      <p className="token-disclosure">{tokenDisclosure(symbol, chainId)}</p>
       <div className="banner banner-ok" role="status">
         {RECEIPT_TITLE}
       </div>

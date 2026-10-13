@@ -1,4 +1,6 @@
 # Stranded on Render — wallet (static web) + Arb Sepolia Relayer (Node web).
+# Blueprint sync applies this file only. It does not create a Base relayer.
+# The Base Sepolia service is render.base.yaml, which Render does not read.
 # After first deploy: set RELAYER_PRIVATE_KEY and CORS_ORIGINS in the dashboard.
 # Custom domain: attach it to the `stranded` static site, then add https://your.domain to CORS_ORIGINS.
 
@@ -24,6 +26,8 @@ services:
         value: "22"
       - key: VITE_GAS_RESCUE_ADDRESS
         value: "0x21A1ADf810e64B5bd1d530D31abA6856b8DEf688"
+      # Current Base allowlist is gMOCK. Spencer replaces this with the tDEMO
+      # receipt after B1. B4 delists this address. Do not treat it as tDEMO.
       - key: VITE_TOKEN_ADDRESS
         value: "0xE36c35cbF0373D77D00732f7B92dB4fB8fd37166"
       - key: VITE_GAS_RESCUE_ADDRESS_ARB_SEPOLIA
@@ -35,7 +39,8 @@ services:
           type: web
           name: stranded-relayer-arb
           envVarKey: RENDER_EXTERNAL_URL
-      # Optional: live Base Sepolia Relayer (VPS). Leave unset for sample quotes on Base.
+      # No Base relayer is created by this blueprint. Leave unset for sample quotes.
+      # Do not point this at the Arb relayer or a dead VPS.
       - key: VITE_RELAYER_URL
         sync: false
 
