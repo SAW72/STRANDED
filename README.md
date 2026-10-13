@@ -76,7 +76,7 @@ forge test -vv
 
 `GasRescueSwap` coverage: happy-path mock swap (native + WETH unwrap, both testnets), exact `amountSwap` consume (leftover tokenIn reverts), job-only native credit (donated ETH/WETH not swept), end-of-tx tokenIn/WETH/ETH zeros, Permit2 Order witness binding, slippage, underfunded / path / domain / sig without nonce burn, replay, wrong `chainId` / mainnet blocked, `feeAmount + amountSwap` overflow, FoT, reentrancy (permit / transferFrom / router), non-permit and disabled Permit2 fail-closed, owner ≠ relayer, two-step `Ownable2Step` transfer + disabled `renounceOwnership`, pause.
 
-`GasRescueLens` unit tests cover status / readiness (including `amountIn==0` probe ≠ ready) / order hash / F-1 immutability probes / `hackQuestReport`. `ArbSepoliaDemoPath` covers the live demo-router `pathHash` formula. `test/fork/*` hit live Sepolia and **skip** when `ARB_SEPOLIA_RPC_URL` / `BASE_SEPOLIA_RPC_URL` are unset (CI `forge test` stays offline). Spencer-watchable Arb rescue steps: [docs/QA_ARB_SEPOLIA_RESCUE.md](docs/QA_ARB_SEPOLIA_RESCUE.md).
+`GasRescueLens` unit tests cover status / readiness (including `amountIn==0` probe ≠ ready) / order hash / F-1 immutability probes / `hackQuestReport`. `ArbSepoliaDemoPath` covers the live demo-router `pathHash` formula. Historical `test/fork/*` smokes skip when `ARB_SEPOLIA_RPC_URL` / `BASE_SEPOLIA_RPC_URL` are unset. `test/fork/TestDemoSupplyFork.t.sol` reverts `MissingRpc` instead, so the unit CI job excludes that file. The Base and Arb fork jobs set the public RPCs. Spencer-watchable Arb rescue steps: [docs/QA_ARB_SEPOLIA_RESCUE.md](docs/QA_ARB_SEPOLIA_RESCUE.md).
 
 Harness tests in `test/GasRescue.t.sol` stay green.
 
@@ -148,6 +148,7 @@ src/mocks/…
 test/GasRescueSwap.t.sol
 test/GasRescueLens.t.sol
 test/fork/                         # live Sepolia smokes; skip if RPC unset
+test/fork/TestDemoSupplyFork.t.sol # tDEMO B/A sims; revert MissingRpc if RPC unset
 test/GasRescue.t.sol
 test/StrandedRegistry.t.sol
 test/audit/F5F6Audit.t.sol
@@ -162,7 +163,7 @@ script/RescueSwap.s.sol
 script/Deploy.s.sol                # harness
 script/Rescue.s.sol                # harness
 wallet/                            # Vite + React + wagmi/viem (Base + Arb Sepolia)
-relayer/                           # one process per chain: Arb 421614 (default) or Base 84532
+relayer/                           # Arb Sepolia POST /v1/quotes (Render)
 ```
 
 ## Live (testnet)

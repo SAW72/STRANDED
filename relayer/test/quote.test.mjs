@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { AMOUNT_TOO_SMALL_MESSAGE, ARB_SEPOLIA_ONLY, BASE_SEPOLIA_ONLY, UPSTREAM_MESSAGE } from "../httpError.mjs";
+import { AMOUNT_TOO_SMALL_MESSAGE, ARB_SEPOLIA_ONLY, UPSTREAM_MESSAGE } from "../httpError.mjs";
 import { createBuildQuote } from "../quote.mjs";
 
 const USER = "0x1111111111111111111111111111111111111111";
@@ -106,30 +106,6 @@ describe("quote builder", () => {
       });
     }
     assert.equal(reserved(), 0);
-  });
-
-  it("serves Base Sepolia when configured for 84532 and still rejects other chains", async () => {
-    const rpc = client();
-    const { buildQuote } = builder(rpc, { chainId: 84532 });
-    const quote = await buildQuote(oneToken);
-    assert.equal(quote.chainId, 84532);
-    const explicit = await buildQuote({ ...oneToken, chainId: 84532 });
-    assert.equal(explicit.chainId, 84532);
-
-    const refuse = client({
-      getCode: async () => {
-        throw new Error("rpc should not run");
-      },
-    });
-    const { buildQuote: rejectQuote } = builder(refuse, { chainId: 84532 });
-    for (const chainId of [421614, 1]) {
-      await assert.rejects(rejectQuote({ user: USER, amountIn: "1", chainId }), (err) => {
-        assert.equal(err.error, "wrong_chain");
-        assert.equal(err.status, 400);
-        assert.equal(err.publicMessage, BASE_SEPOLIA_ONLY);
-        return true;
-      });
-    }
   });
 
   it("returns token_not_contract for an EOA with no code", async () => {

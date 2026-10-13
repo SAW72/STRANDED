@@ -73,6 +73,7 @@ contract TestDemoSteps is Script {
     uint256 public constant ARB_RECOMMENDED_MAX_PAYOUT = 0.0001 ether;
 
     error WrongChain(uint256 chainId);
+    error BroadcastRefused();
     error FoundryDefaultSender();
     error SenderNotOwner(address sender);
     error Underfunded(uint256 balance);
@@ -87,6 +88,20 @@ contract TestDemoSteps is Script {
         uint256 chainId
     ) internal view {
         if (block.chainid != chainId) revert WrongChain(block.chainid);
+    }
+
+    /// @notice Broadcast is refused unless `TEST_DEMO_BROADCAST_OK=1` and `block.chainid`
+    ///         is `intendedChain`, which itself must be 84532 or 421614.
+    function authorizeBroadcast(
+        uint256 intendedChain
+    ) public view {
+        if (keccak256(bytes(vm.envOr("TEST_DEMO_BROADCAST_OK", string("")))) != keccak256(bytes("1"))) {
+            revert BroadcastRefused();
+        }
+        if (intendedChain != BASE_SEPOLIA_CHAIN_ID && intendedChain != ARB_SEPOLIA_CHAIN_ID) {
+            revert WrongChain(intendedChain);
+        }
+        _requireChain(intendedChain);
     }
 
     function _swap() internal view returns (ILiveSwapAdmin) {
@@ -109,7 +124,7 @@ contract TestDemoSteps is Script {
     function delistBase(
         address sender
     ) public {
-        _requireChain(BASE_SEPOLIA_CHAIN_ID);
+        authorizeBroadcast(BASE_SEPOLIA_CHAIN_ID);
         ILiveSwapAdmin swap = ILiveSwapAdmin(BASE_SWAP);
         require(swap.owner() == OWNER, "B4: owner is not 0x3046...bA9D");
 
@@ -140,9 +155,7 @@ contract TestDemoSteps is Script {
     function deployFaucet(
         address sender
     ) public returns (address faucet, address demo) {
-        if (block.chainid != BASE_SEPOLIA_CHAIN_ID && block.chainid != ARB_SEPOLIA_CHAIN_ID) {
-            revert WrongChain(block.chainid);
-        }
+        authorizeBroadcast(block.chainid);
         string memory step = block.chainid == BASE_SEPOLIA_CHAIN_ID ? "B1" : "A1";
         console2.log(step, "deploy TestDemoFaucet + TestDemoToken");
         console2.log("signer", sender);
@@ -170,7 +183,7 @@ contract TestDemoSteps is Script {
     function deployBaseRouter(
         address sender
     ) public returns (address router) {
-        _requireChain(BASE_SEPOLIA_CHAIN_ID);
+        authorizeBroadcast(BASE_SEPOLIA_CHAIN_ID);
         console2.log("B2 deploy LockedDemoSwapRouter");
         console2.log("signer", sender);
         console2.log("rescue", BASE_SWAP);
@@ -201,9 +214,7 @@ contract TestDemoSteps is Script {
         address demo,
         address router
     ) public returns (address used) {
-        if (block.chainid != BASE_SEPOLIA_CHAIN_ID && block.chainid != ARB_SEPOLIA_CHAIN_ID) {
-            revert WrongChain(block.chainid);
-        }
+        authorizeBroadcast(block.chainid);
         require(demo != address(0), "allowlist: TOKEN_ADDRESS required");
         ILiveSwapAdmin swap = _swap();
         require(swap.owner() == OWNER, "allowlist: owner is not 0x3046...bA9D");
@@ -268,7 +279,7 @@ contract TestDemoSteps is Script {
         address sender,
         address router
     ) public {
-        _requireChain(BASE_SEPOLIA_CHAIN_ID);
+        authorizeBroadcast(BASE_SEPOLIA_CHAIN_ID);
         require(router != address(0) && router != BASE_STALE_ROUTER, "B5: router");
         ILiveSwapAdmin swap = ILiveSwapAdmin(BASE_SWAP);
         require(swap.allowedRouters(router), "B5: allowlist the router in B3 before funding");
@@ -308,7 +319,7 @@ contract TestDemoSteps is Script {
     function setArbMaxPayout(
         address sender
     ) public {
-        _requireChain(ARB_SEPOLIA_CHAIN_ID);
+        authorizeBroadcast(ARB_SEPOLIA_CHAIN_ID);
         LockedDemoSwapRouter router = LockedDemoSwapRouter(payable(ARB_ROUTER));
         require(router.owner() == OWNER, "A3: router owner");
         require(router.rescue() == ARB_SWAP, "A3: router rescue");

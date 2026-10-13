@@ -13,10 +13,8 @@ contract BaseSepoliaLiveTest is Test {
     address internal constant LIVE_OWNER = 0x30466A210961c0C2C13AF0A9d35dfC6E8858bA9D;
     address internal constant LIVE_RELAYER = 0x8240124dc78a27c80354Ca813Df12aa2888A9AF6;
     address internal constant LIVE_WETH = 0x4200000000000000000000000000000000000006;
-    /// @dev Stale pre-B4 allowlist. Public mint. Not tDEMO. B4 removes it.
-    address internal constant STALE_GMOCK = 0xE36c35cbF0373D77D00732f7B92dB4fB8fd37166;
-    /// @dev Stale pre-B4 router. Not LockedDemoSwapRouter. B4 removes it. Do not fund.
-    address internal constant STALE_ROUTER = 0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4;
+    address internal constant LIVE_TOKEN = 0xE36c35cbF0373D77D00732f7B92dB4fB8fd37166;
+    address internal constant LIVE_ROUTER = 0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4;
 
     IGasRescueSwapViews internal swap;
     bool internal forked;
@@ -46,8 +44,8 @@ contract BaseSepoliaLiveTest is Test {
         assertEq(swap.permit2(), address(0));
         assertFalse(swap.permit2Enabled(), "Permit2 stays disabled");
         assertTrue(swap.relayers(LIVE_RELAYER));
-        assertTrue(swap.allowedTokens(STALE_GMOCK), "stale gMOCK still allowlisted until B4");
-        assertTrue(swap.eip2612Tokens(STALE_GMOCK), "stale gMOCK still EIP-2612 until B4");
-        assertTrue(swap.allowedRouters(STALE_ROUTER), "stale 0x94cC still allowlisted until B4");
+        assertTrue(swap.allowedTokens(LIVE_TOKEN));
+        assertTrue(swap.eip2612Tokens(LIVE_TOKEN));
+        assertTrue(swap.allowedRouters(LIVE_ROUTER));
     }
 }

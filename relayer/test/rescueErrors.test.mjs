@@ -33,7 +33,7 @@ function postRescue(url) {
       "content-type": "application/json",
       origin: ORIGIN,
     },
-    body: JSON.stringify({ order: { user: USER, chainId: 421614 } }),
+    body: JSON.stringify({ order: { user: USER } }),
   });
 }
 

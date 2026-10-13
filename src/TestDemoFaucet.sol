@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+
 import {TestDemoToken} from "./TestDemoToken.sol";
 
 /// @title TestDemoFaucet
@@ -10,6 +13,8 @@ import {TestDemoToken} from "./TestDemoToken.sol";
 ///         There is no admin, no withdraw, and no mint. When the faucet
 ///         balance is below one drip, `drip()` reverts `FaucetEmpty`.
 contract TestDemoFaucet {
+    using SafeERC20 for IERC20;
+
     uint256 public constant BASE_SEPOLIA_CHAIN_ID = 84_532;
     uint256 public constant ARB_SEPOLIA_CHAIN_ID = 421_614;
     uint256 public constant DRIP_AMOUNT = 2 ether;
@@ -41,7 +46,7 @@ contract TestDemoFaucet {
         if (block.timestamp < readyAt) revert DripCooldown(readyAt);
         uint256 nextReady = block.timestamp + COOLDOWN;
         nextDrip[msg.sender] = nextReady;
-        token.transfer(msg.sender, DRIP_AMOUNT);
+        IERC20(address(token)).safeTransfer(msg.sender, DRIP_AMOUNT);
         emit Dripped(msg.sender, DRIP_AMOUNT, nextReady);
     }
 }

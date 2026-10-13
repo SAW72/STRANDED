@@ -6,15 +6,18 @@ Token name: **Stranded TEST Demo — No Value**. Symbol: **tDEMO**. Decimals: 18
 
 On-chain notice: `Testnet only (Base Sepolia 84532 or Arbitrum Sepolia 421614). No monetary value. Not for sale. Not a reward.`
 
-Scripts: `script/TestDemoSupply.s.sol`. Keystore placeholder on every broadcast Spencer runs himself:
+Scripts: `script/TestDemoSupply.s.sol`. Every step reverts `BroadcastRefused` unless `TEST_DEMO_BROADCAST_OK=1`, and reverts `WrongChain` unless `block.chainid` is that step's chain (`84532` or `421614`). Keystore placeholder on every broadcast Spencer runs himself:
 
 ```bash
---account <owner-keystore> \
---sender 0x30466A210961c0C2C13AF0A9d35dfC6E8858bA9D \
---broadcast --slow
+TEST_DEMO_BROADCAST_OK=1 \
+forge script script/TestDemoSupply.s.sol:<Contract> \
+  --rpc-url "$RPC" --chain-id <84532|421614> \
+  --account <owner-keystore> \
+  --sender 0x30466A210961c0C2C13AF0A9d35dfC6E8858bA9D \
+  --broadcast --slow
 ```
 
-Simulation omits `--broadcast` and `--account` and passes only `--sender`. Copy addresses from receipts. Do not paste a predicted CREATE address into a later step.
+Simulation keeps `TEST_DEMO_BROADCAST_OK=1`, omits `--broadcast` and `--account`, and passes only `--sender`. Copy addresses from receipts. Do not paste a predicted CREATE address into a later step. Fork tests revert `MissingRpc` when their RPC URL is unset. They do not skip.
 
 Gas figures below are the script's `gasleft` deltas around each call (the inner call, not the 21,000 intrinsic). They come from the fork tests calling the same script helpers against a fork of the live chain, with no broadcast. B5's value transfers were measured after the fork dealt the owner up to exactly 0.071 ETH (0.07 ETH of transfers plus 0.001 ETH headroom). His live Base balance (about 0.0583 ETH) is short of that. The live `forge script` of B5 reverts `Underfunded` until that balance is there. A balance of exactly 0.07 ETH also reverts. `setTokenAllowed` after `setEip2612Token(true)` is a skipped branch on this bytecode (`setEip2612Token(true)` already sets `allowedTokens`), so that delta is not a transaction. A2's `setRouterAllowed` delta is the skipped `if (base)` branch.
 
@@ -186,9 +189,7 @@ No additional gate is proposed. The existing relayer limits (1 rescue per wallet
 
 ## Relayer and wallet
 
-The relayer process serves one chain. `CHAIN_ID` must be the decimal string `421614` or `84532`. Startup exits if it is missing, not decimal, or if the RPC `eth_chainId` differs. A rescue order with no `chainId` is `wrong_chain`. `render.yaml` keeps `stranded-relayer-arb` only. The Base service is `render.base.yaml`, which a Blueprint sync does not create. SDEMO env on the Arb service is unchanged. The live Arb service `srv-daec4n740ujc73el94l0` must have `CHAIN_ID=421614` set before this process ships.
-
-The wallet chain picker still defaults to Arb Sepolia. SDEMO disclosure text is unchanged. Other symbols follow the selected chain.
+Relayer, wallet, and Render changes are not in this PR. SDEMO and the Arb demo addresses stay as they are. These scripts do not call a setter on SDEMO.
 
 ## Simulated gas
 
@@ -196,16 +197,16 @@ Filled from the fork tests on 2026-10-13 (Base Sepolia and Arb Sepolia public RP
 
 | Step | Call | Script gas delta |
 | --- | --- | --- |
-| B4 | `setTokenAllowed(gMOCK, false)` (also clears `eip2612Tokens`) | 16877 |
+| B4 | `setTokenAllowed(gMOCK, false)` (also clears `eip2612Tokens`) | 14377 |
 | B4 | `setRouterAllowed(0x94cC, false)` | 7636 |
-| B1 | `new TestDemoFaucet()` | 1117361 |
-| A1 | `new TestDemoFaucet()` | 1117411 |
-| B2 | `new LockedDemoSwapRouter(...)` | 774864 |
-| B3 | `setEip2612Token(tDEMO, true)` | 51599 |
+| B1 | `new TestDemoFaucet()` | 1165355 |
+| A1 | `new TestDemoFaucet()` | 1165405 |
+| B2 | `new LockedDemoSwapRouter(...)` | 772367 |
+| B3 | `setEip2612Token(tDEMO, true)` | 49099 |
 | B3 | `setTokenAllowed(tDEMO, true)` | skipped (1433 gas in the `if`, not a tx) |
 | B3 | `setRouterAllowed(newRouter, true)` | 24802 |
-| A2 | `setEip2612Token(tDEMO, true)` | 51642 |
+| A2 | `setEip2612Token(tDEMO, true)` | 49142 |
 | A2 | `setTokenAllowed` / `setRouterAllowed` | skipped (1455 and 24 gas, not txs) |
-| B5 | 0.05 ETH to router | 11360 |
+| B5 | 0.05 ETH to router | 8860 |
 | B5 | 0.02 ETH to relayer | 9550 |
-| A3 | `setMaxPayout(0.0001 ether)` | 8286 |
+| A3 | `setMaxPayout(0.0001 ether)` | 5786 |

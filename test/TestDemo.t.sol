@@ -42,6 +42,7 @@ contract TestDemoTest is Test {
         rescue = makeAddr("rescue");
         router = new LockedDemoSwapRouter(makeAddr("owner"), rescue, RATE_NUMERATOR, RATE_DENOMINATOR, MAX_PAYOUT);
         steps = new TestDemoSteps();
+        vm.setEnv("TEST_DEMO_BROADCAST_OK", "1");
     }
 
     function test_token_fixedSupplyNoMintNoOwner() public view {
@@ -267,6 +268,27 @@ contract TestDemoTest is Test {
         assertEq(live.quote(10 ether), 0.0001 ether);
         assertEq(live.rescue(), 0x21A1ADf810e64B5bd1d530D31abA6856b8DEf688);
         assertEq(address(live).balance, 0);
+    }
+
+    function test_broadcast_refusesWithoutOptIn() public {
+        vm.setEnv("TEST_DEMO_BROADCAST_OK", "");
+        vm.chainId(BASE_SEPOLIA_CHAIN_ID);
+        vm.expectRevert(TestDemoSteps.BroadcastRefused.selector);
+        steps.authorizeBroadcast(BASE_SEPOLIA_CHAIN_ID);
+        vm.expectRevert(TestDemoSteps.BroadcastRefused.selector);
+        steps.deployBaseRouter(SPENCER);
+    }
+
+    function test_broadcast_refusesWrongChain() public {
+        vm.setEnv("TEST_DEMO_BROADCAST_OK", "1");
+        vm.chainId(1);
+        vm.expectRevert(abi.encodeWithSelector(TestDemoSteps.WrongChain.selector, uint256(1)));
+        steps.authorizeBroadcast(1);
+        vm.chainId(ARB_SEPOLIA_CHAIN_ID);
+        vm.expectRevert(abi.encodeWithSelector(TestDemoSteps.WrongChain.selector, ARB_SEPOLIA_CHAIN_ID));
+        steps.authorizeBroadcast(BASE_SEPOLIA_CHAIN_ID);
+        vm.expectRevert(abi.encodeWithSelector(TestDemoSteps.WrongChain.selector, ARB_SEPOLIA_CHAIN_ID));
+        steps.delistBase(SPENCER);
     }
 
     function test_scripts_rejectWrongChainAndSender() public {

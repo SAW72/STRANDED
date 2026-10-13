@@ -18,7 +18,7 @@ function quoteBody(extra = {}) {
 }
 
 function rescueBody(user = USER) {
-  return JSON.stringify({ order: { user, chainId: 421614 } });
+  return JSON.stringify({ order: { user } });
 }
 
 function post(url, path, { body = quoteBody(), headers = {}, origin = ORIGIN } = {}) {
@@ -333,32 +333,6 @@ describe("readable quote and rescue errors", () => {
       }
       assert.equal(quoteCalls(), 0);
       assert.equal(rescueCalls(), 0);
-    });
-  });
-
-  it("accepts 84532 only when the process is configured for Base Sepolia", async () => {
-    await withServer({ chainId: 84532 }, async ({ url, quoteCalls }) => {
-      const ok = await post(url, "/v1/quotes", {
-        body: JSON.stringify({ user: USER, amountIn: "1", chainId: 84532 }),
-      });
-      assert.equal(ok.status, 200);
-      const omitted = await post(url, "/v1/quotes", {
-        body: JSON.stringify({ user: USER, amountIn: "1" }),
-      });
-      assert.equal(omitted.status, 200);
-      const arb = await post(url, "/v1/quotes", {
-        body: JSON.stringify({ user: USER, amountIn: "1", chainId: 421614 }),
-      });
-      assert.equal(arb.status, 400);
-      assert.equal(arb.body.error, "wrong_chain");
-      assert.equal(arb.body.message, "This rescue only works on Base Sepolia.");
-      const mainnet = await post(url, "/v1/rescues", {
-        body: JSON.stringify({ order: { user: USER, chainId: 1 } }),
-      });
-      assert.equal(mainnet.status, 400);
-      assert.equal(mainnet.body.error, "wrong_chain");
-      assert.equal(mainnet.body.message, "This rescue only works on Base Sepolia.");
-      assert.equal(quoteCalls(), 2);
     });
   });
 

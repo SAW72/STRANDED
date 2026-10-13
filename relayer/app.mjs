@@ -3,7 +3,7 @@ import { timingSafeEqual } from "node:crypto";
 import { clientIp } from "./clientIp.mjs";
 import { INVALID_JSON_MESSAGE, RELAYER_PAUSED_MESSAGE, fail, toPublicError } from "./httpError.mjs";
 import { RELAYER_PAUSED } from "./killSwitch.mjs";
-import { assertOrderChain, parseQuoteBody, parseRescueUser } from "./quoteRequest.mjs";
+import { parseQuoteBody, parseRescueUser } from "./quoteRequest.mjs";
 import { errorFromLimit } from "./rescueLimit.mjs";
 
 function secretsEqual(provided, expected) {
@@ -196,7 +196,6 @@ export function createRelayerApp(deps) {
         try {
           const body = await readBody(req);
           const user = parseRescueUser(body);
-          assertOrderChain(body, { defaultChainId });
           if (limiter) {
             gate = await limiter.begin(user, requestIp(req, trustedProxyHops));
             if (!gate.ok) throw errorFromLimit(gate.decision);

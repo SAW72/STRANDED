@@ -26,7 +26,52 @@ jobs:
         run: forge --version
 
       - name: Run tests
-        run: forge test -vv
+        run: forge test -vv --no-match-path test/fork/TestDemoSupplyFork.t.sol
+
+  # Public RPC. A missing URL must fail the test (MissingRpc), not vm.skip.
+  fork-base:
+    name: Base Sepolia fork
+    runs-on: ubuntu-latest
+    env:
+      BASE_SEPOLIA_RPC_URL: https://sepolia.base.org
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+
+      - name: Require the Base RPC
+        run: test -n "$BASE_SEPOLIA_RPC_URL"
+
+      - name: Simulate Base B-steps
+        run: forge test --match-path test/fork/TestDemoSupplyFork.t.sol --match-test test_base_simulatesB4ThenDeployAllowlistAndFund -vv
+
+  fork-arb:
+    name: Arb Sepolia fork
+    runs-on: ubuntu-latest
+    env:
+      ARB_SEPOLIA_RPC_URL: https://sepolia-rollup.arbitrum.io/rpc
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+
+      - name: Require the Arb RPC
+        run: test -n "$ARB_SEPOLIA_RPC_URL"
+
+      - name: Simulate Arb A-steps
+        run: forge test --match-path test/fork/TestDemoSupplyFork.t.sol --match-test test_arb_simulatesDeployAllowlistAndRecommendedCap -vv
 
   # Wallet UX (Vite + vitest). No Relayer key. Fixtures when Relayer URL unset.
   wallet:
