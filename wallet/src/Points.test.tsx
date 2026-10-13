@@ -202,6 +202,50 @@ describe("Points page", () => {
     await view.unmount();
   });
 
+  it("hides excluded actions in categories and entries and still shows rescue", async () => {
+    const excluded = ["bug_report", "security", "security_finding", "finding"] as const;
+    const hidden: WalletPoints = {
+      wallet: EXAMPLE_POINTS_ADDRESS,
+      total: 100,
+      rank: 1,
+      categories: [
+        { action: "rescue", points: 100, count: 1 },
+        ...excluded.map((action, index) => ({ action, points: 200 + index, count: 1 })),
+      ],
+      entries: [
+        { action: "rescue", points: 100, txHash: TX, chainId: ARB_SEPOLIA_CHAIN_ID },
+        ...excluded.map((action, index) => ({
+          action,
+          points: 200 + index,
+          txHash: TX,
+          chainId: ARB_SEPOLIA_CHAIN_ID,
+        })),
+      ],
+    };
+    const view = await render(<Points client={client({ getWallet: async () => hidden })} />);
+    await lookup(view.container, EXAMPLE_POINTS_ADDRESS);
+
+    const categories = [...view.container.querySelectorAll("[data-testid='points-category']")].map(
+      (node) => node.textContent ?? "",
+    );
+    const entries = [...view.container.querySelectorAll("[data-testid='points-entry']")].map(
+      (node) => node.textContent ?? "",
+    );
+    expect(categories).toHaveLength(1);
+    expect(entries).toHaveLength(1);
+    expect(categories[0]).toContain("Rescue (placeholder, TBD)");
+    expect(categories[0]).toContain("100");
+    expect(entries[0]).toContain("Rescue (placeholder, TBD)");
+    expect(entries[0]).toContain("100");
+    const visible = `${categories.join("\n")}\n${entries.join("\n")}`;
+    for (const [index, action] of excluded.entries()) {
+      expect(visible).not.toContain(action);
+      expect(visible).not.toContain(String(200 + index));
+    }
+    expect(visible).not.toContain("Other");
+    await view.unmount();
+  });
+
   it("rejects a bug report label in the points source", () => {
     const points = pointsPageSource;
     const copy = copySource;

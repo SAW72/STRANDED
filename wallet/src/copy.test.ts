@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import * as copy from "./copy";
+import copySource from "./copy.ts?raw";
 import {
   AMOUNT_HELPER,
   AMOUNT_LABEL,
@@ -108,6 +109,21 @@ describe("points copy", () => {
 
   it("keeps the registry claim label", () => {
     expect(copy.POINTS_ACTION_REGISTRY_CLAIM).toBe("Registry claim");
+  });
+
+  it("does not export total or rank labels", () => {
+    expect(copy).not.toHaveProperty("POINTS_TOTAL_LABEL");
+    expect(copy).not.toHaveProperty("POINTS_RANK_LABEL");
+    expect(copy).not.toHaveProperty("POINTS_UNRANKED");
+    expect(copySource).not.toMatch(/POINTS_TOTAL_LABEL|POINTS_RANK_LABEL|POINTS_UNRANKED/);
+    expect(copySource).not.toMatch(/["']Total["']/);
+    expect(copySource).not.toMatch(/["']Rank["']/);
+    expect(copySource).not.toMatch(/["']Unranked["']/);
+    for (const value of Object.values(copy)) {
+      if (typeof value !== "string") continue;
+      expect(value).not.toMatch(/\bTotal\b/);
+      expect(value).not.toMatch(/\bRank\b/);
+    }
   });
 });
 

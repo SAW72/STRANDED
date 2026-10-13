@@ -430,6 +430,87 @@ describe("points ledger", () => {
     });
   });
 
+  it("rejects an excluded action on update in both directions", async () => {
+    const excluded = ["bug_report", "security", "security_finding", "finding"];
+    const dir = await mkdtemp(join(tmpdir(), "points-excluded-update-"));
+    const filePath = join(dir, "points-ledger.sqlite");
+    const created = "2024-01-01T00:00:00.000Z";
+    const txFor = (byte) => `0x${byte.repeat(32)}`;
+    const seed = new Database(filePath);
+    seed.exec(`
+      CREATE TABLE points_ledger (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        wallet TEXT NOT NULL,
+        action TEXT NOT NULL,
+        points INTEGER NOT NULL,
+        tx_hash TEXT NOT NULL,
+        metadata TEXT,
+        created_at TEXT NOT NULL,
+        CHECK (action IN (
+          'rescue_completed', 'relayer_job', 'bug_report', 'security', 'security_finding', 'finding'
+        )),
+        CHECK (typeof(points) = 'integer' AND points > 0 AND points <= 500),
+        UNIQUE (wallet, action, tx_hash)
+      ) STRICT;
+    `);
+    const insert = seed.prepare(
+      `INSERT INTO points_ledger (wallet, action, points, tx_hash, metadata, created_at)
+       VALUES (?, ?, 100, ?, NULL, ?)`,
+    );
+    const forward = excluded.map((action, index) => ({ action, txHash: txFor(String(index + 1).padStart(2, "0")) }));
+    for (const row of forward) insert.run(USER, "rescue_completed", row.txHash, created);
+    const reverse = excluded.map((action, index) => ({ action, txHash: txFor(String(index + 5).padStart(2, "0")) }));
+    for (const row of reverse) insert.run(USER, row.action, row.txHash, created);
+    const listedTx = txFor("09");
+    insert.run(USER, "rescue_completed", listedTx, created);
+    const before = seed.prepare("SELECT id, wallet, action, points, tx_hash FROM points_ledger ORDER BY id").all();
+    seed.close();
+
+    const store = createLedgerStore({ dbPath: filePath, now: () => 1_700_000_000_000 });
+    store.close();
+    const db = new Database(filePath);
+    try {
+      const triggerSql = db
+        .prepare("SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = 'points_ledger_no_excluded_update'")
+        .get().sql;
+      assert.match(
+        triggerSql,
+        /WHEN NEW\.action IN \('bug_report', 'security', 'security_finding', 'finding'\)/,
+      );
+      assert.match(
+        triggerSql,
+        /OR OLD\.action IN \('bug_report', 'security', 'security_finding', 'finding'\)/,
+      );
+
+      for (const row of forward) {
+        assert.throws(
+          () => db.prepare("UPDATE points_ledger SET action = ? WHERE tx_hash = ?").run(row.action, row.txHash),
+          /excluded_action/,
+          row.action,
+        );
+      }
+      for (const row of reverse) {
+        assert.throws(
+          () =>
+            db.prepare("UPDATE points_ledger SET action = 'rescue_completed' WHERE tx_hash = ?").run(row.txHash),
+          /excluded_action/,
+          row.action,
+        );
+      }
+      assert.throws(
+        () => db.prepare("UPDATE points_ledger SET action = 'relayer_job' WHERE tx_hash = ?").run(listedTx),
+        /append-only/,
+      );
+      assert.deepEqual(
+        db.prepare("SELECT id, wallet, action, points, tx_hash FROM points_ledger ORDER BY id").all(),
+        before,
+      );
+    } finally {
+      db.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("rejects a null tx_hash and an over-cap points value", async () => {
     await withStore((store) => {
       assert.throws(

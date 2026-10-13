@@ -131,9 +131,6 @@ export const POINTS_LOADING = "Loading points…";
 export const POINTS_EXAMPLE_BADGE = "Example data";
 export const POINTS_EXAMPLE_NOTE =
   "Example data, not a live ledger. These figures are not recorded activity. An empty result means this example has no row for that address.";
-export const POINTS_TOTAL_LABEL = "Total";
-export const POINTS_RANK_LABEL = "Rank";
-export const POINTS_UNRANKED = "Unranked";
 export const POINTS_ADDRESS_RESULT_LABEL = "Address";
 export const POINTS_CATEGORIES_LABEL = "By category";
 export const POINTS_ENTRIES_LABEL = "Entries";
