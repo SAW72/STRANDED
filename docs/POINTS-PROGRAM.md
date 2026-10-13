@@ -20,9 +20,9 @@ Record genuine testnet activity as an off-chain score. Points measure usage. The
 | Action | Points | Notes |
 |---|---|---|
 | Rescue completed (GasRescue) | TBD per verified rescue | Not based on a price or an amount rescued. |
-| Relayer job executed | 50 | Registered operator identity required |
-| Registry find posted (StrandedRegistry) | 30 | Find must be a real stranded balance |
-| Registry find claimed | 50 | Claim must succeed on-chain |
+| Relayer job executed | 50 | Reviewers check for a registered operator identity before points are recorded. |
+| Registry find posted (StrandedRegistry) | 30 | Reviewers check that the find is a real stranded balance before points are recorded. |
+| Registry find claimed | 50 | Reviewers check that the claim succeeded on-chain before points are recorded. |
 | Active wallet session | 10 per week | One session per wallet per ISO week. The week is the server clock. |
 | Security report | No points | Security reports go through the security policy and carry no points. |
 
@@ -39,7 +39,7 @@ Record genuine testnet activity as an off-chain score. Points measure usage. The
 
 - Append-only SQLite table keyed by wallet address. A later replacement could be Postgres. No connection string lives in this repo.
 - On-chain rows are unique on (action, tx_hash), so a second wallet cannot record the same transaction for that action. Other off-chain rows stay unique on (wallet, action, tx_hash).
-- A dev database created before the on-chain unique index is not migrated. Delete `points-ledger.sqlite` and open the store again.
+- Old bug-report and security rows (`bug_report`, `security`, `security_finding`, and `finding`) are kept and hidden. Database triggers block new ones, and the read path excludes them. Nothing is deleted.
 - Append-only is enforced only through the app and the database triggers. `UPDATE` and `DELETE` raise `append-only`. A repeated insert raises `duplicate`.
 - A raw `ON CONFLICT DO NOTHING` raises `duplicate`, because the BEFORE INSERT trigger aborts before SQLite can skip the row.
 - `syntheticTxKey` lowercases its inputs before hashing off-chain keys.

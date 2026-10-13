@@ -8,6 +8,18 @@ Networks: Base Sepolia (84532) and Arbitrum Sepolia (421614). The product contra
 
 The long write-up is [docs/AUDIT-FINDINGS.md](docs/AUDIT-FINDINGS.md) (2026-09-02, then-HEAD `c2e4a17`). Finding 1 in that file is stale. This page is the current snapshot.
 
+## Reporting a vulnerability
+
+Report a vulnerability privately on [SAW72/STRANDED](https://github.com/SAW72/STRANDED) through GitHub private vulnerability reporting.
+
+1. Open the repository on GitHub.
+2. Click the **Security** tab. GitHub labels it **Security and quality**. If that tab is hidden, open the repository menu and choose it.
+3. Click **Report a vulnerability**.
+4. Fill in the vulnerability report.
+5. Click **Submit report**.
+
+A report earns no points and no bounty.
+
 ## What holds
 
 - Both rescue entrypoints are `onlyRelayer`, `nonReentrant`, and `whenNotPaused`. Permit2 stays off until the owner enables it, and the constructor accepts only the zero address or canonical Uniswap Permit2.
