@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import {
-  POINTS_ACTION_BUG_REPORT,
   POINTS_ACTION_OTHER,
   POINTS_ACTION_REGISTRY_CLAIM,
   POINTS_ACTION_REGISTRY_FIND,
@@ -44,8 +43,14 @@ const ACTION_LABELS: Record<string, string> = {
   registry_find: POINTS_ACTION_REGISTRY_FIND,
   registry_claim: POINTS_ACTION_REGISTRY_CLAIM,
   session: POINTS_ACTION_SESSION,
-  bug_report: POINTS_ACTION_BUG_REPORT,
 };
+
+/** Bug reports and security findings are not points actions and are not shown. */
+const UNLISTED_ACTIONS = new Set(["bug_report", "security", "security_finding", "finding"]);
+
+function isListedAction(action: string): boolean {
+  return !UNLISTED_ACTIONS.has(action);
+}
 
 export function isPointsRoute(pathname: string): boolean {
   const normalized = pathname.replace(/\/+$/, "") || "/";
@@ -192,7 +197,7 @@ function Loaded({ result, example }: { result: WalletPoints; example: boolean })
           {POINTS_CATEGORIES_LABEL}
         </h2>
         <ul className="points-list">
-          {result.categories.map((category, index) => (
+          {result.categories.filter((category) => isListedAction(category.action)).map((category, index) => (
             <li className="points-entry" data-testid="points-category" key={category.action + "-" + String(index)}>
               {example ? <ExampleLabel /> : null}
               <span>{actionLabel(category.action)}</span>
@@ -207,7 +212,7 @@ function Loaded({ result, example }: { result: WalletPoints; example: boolean })
           {POINTS_ENTRIES_LABEL}
         </h2>
         <ul className="points-list">
-          {result.entries.map((entry, index) => {
+          {result.entries.filter((entry) => isListedAction(entry.action)).map((entry, index) => {
             const href =
               entry.txHash && entry.chainId != null ? transactionUrl(entry.chainId, entry.txHash) : null;
             return (

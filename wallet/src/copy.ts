@@ -144,5 +144,4 @@ export const POINTS_ACTION_RELAYER_JOB = "Relayer job";
 export const POINTS_ACTION_REGISTRY_FIND = "Registry find";
 export const POINTS_ACTION_REGISTRY_CLAIM = "Registry claim";
 export const POINTS_ACTION_SESSION = "Session";
-export const POINTS_ACTION_BUG_REPORT = "Bug report";
 export const POINTS_ACTION_OTHER = "Other";

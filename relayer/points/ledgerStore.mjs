@@ -31,7 +31,7 @@ import { MAX_POINTS_PER_ROW, score } from "./rubric.mjs";
  * and rejects a caller-supplied total that disagrees. Raw insertion stays
  * inside this module.
  *
- * Rubric ids match docs/POINTS-PROGRAM.md. Amounts come from rubric.mjs.
+ * Amounts come from rubric.mjs. Bug reports and security findings are not actions.
  * Rescue points are the flat 100 placeholder pending Spencer's decision.
  * Each row is capped at MAX_POINTS_PER_ROW here and by a CHECK in schema.sql.
  *
@@ -46,7 +46,6 @@ export const POINTS_ACTIONS = Object.freeze([
   "registry_find_posted",
   "registry_find_claimed",
   "wallet_session",
-  "bug_report",
 ]);
 
 const ACTION_SET = new Set(POINTS_ACTIONS);

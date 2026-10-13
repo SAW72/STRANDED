@@ -136,11 +136,9 @@ describe("points ledger", () => {
       const secretField = "not-stored";
       assert.throws(
         () =>
-          store.appendScored("bug_report", {
+          store.appendScored("rescue_completed", {
             wallet: USER,
-            severity: "low",
-            reportId: "report-1",
-            reproSteps: "steps",
+            txHash: TX,
             points: 100,
             metadata: { private_key: secretField },
           }),
@@ -314,42 +312,80 @@ describe("points ledger", () => {
     for (const action of POINTS_ACTIONS) {
       assert.match(sql, new RegExp(`'${action}'`));
     }
-    assert.equal(POINTS_ACTIONS.length, 6);
+    assert.equal(POINTS_ACTIONS.length, 5);
+    assert.equal(POINTS_ACTIONS.includes("bug_report"), false);
+    assert.equal(sql.includes("'bug_report'"), false);
+    assert.doesNotMatch(sql, /CREATE UNIQUE INDEX points_ledger_bug_action_tx/);
+    assert.doesNotMatch(sql, /action='bug_report'/);
     assert.match(sql, new RegExp(`points <= ${MAX_POINTS_PER_ROW}`));
     assert.match(sql, /CREATE UNIQUE INDEX points_ledger_onchain_action_tx/);
     assert.match(sql, /WHERE substr\(tx_hash,1,2\)='0x'/);
-    assert.match(sql, /CREATE UNIQUE INDEX points_ledger_bug_action_tx/);
-    assert.match(sql, /WHERE action='bug_report'/);
+  });
+
+  it("rejects bug_report in the schema action check", async () => {
+    const sql = readFileSync(new URL("../points/schema.sql", import.meta.url), "utf8");
+    assert.equal(sql.includes("'bug_report'"), false);
+    await withStore((store) => {
+      const filePath = store.filePath;
+      store.close();
+      const db = new Database(filePath);
+      try {
+        const tableSql = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'points_ledger'").get().sql;
+        assert.equal(tableSql.includes("bug_report"), false);
+        const indexes = db
+          .prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'points_ledger'")
+          .all()
+          .map((row) => row.name);
+        assert.equal(indexes.includes("points_ledger_bug_action_tx"), false);
+        assert.throws(
+          () =>
+            db
+              .prepare(
+                `INSERT INTO points_ledger (wallet, action, points, tx_hash, metadata, created_at)
+                 VALUES (?, 'bug_report', 100, ?, NULL, '2024-01-01T00:00:00.000Z')`,
+              )
+              .run(USER, TX),
+          /CHECK constraint failed/,
+        );
+        assert.throws(
+          () =>
+            db
+              .prepare(
+                `INSERT INTO points_ledger (wallet, action, points, tx_hash, metadata, created_at)
+                 VALUES (?, 'security', 300, ?, NULL, '2024-01-01T00:00:00.000Z')`,
+              )
+              .run(USER, TX2),
+          /CHECK constraint failed/,
+        );
+        assert.equal(db.prepare("SELECT COUNT(*) AS n FROM points_ledger WHERE action IN ('bug_report', 'security')").get().n, 0);
+      } finally {
+        db.close();
+      }
+    });
   });
 
   it("rejects a null tx_hash and an over-cap points value", async () => {
     await withStore((store) => {
-      store.appendScored("bug_report", {
-        wallet: USER,
-        severity: "critical",
-        txHash: TX2,
-        points: MAX_POINTS_PER_ROW,
-      });
       assert.throws(
         () =>
-          store.appendScored("bug_report", {
+          store.appendScored("rescue_completed", {
             wallet: USER,
-            severity: "critical",
-            txHash: `0x${"ef".repeat(32)}`,
+            txHash: TX2,
             points: MAX_POINTS_PER_ROW + 1,
           }),
         rejection("invalid_points"),
       );
       assert.throws(
         () =>
-          store.appendScored("bug_report", {
+          store.appendScored("rescue_completed", {
             wallet: USER,
-            severity: "critical",
             txHash: `0x${"12".repeat(32)}`,
             points: String(MAX_POINTS_PER_ROW + 1),
           }),
         rejection("invalid_points"),
       );
+      const row = store.appendScored("rescue_completed", { wallet: USER, txHash: TX2 });
+      assert.equal(row.points, 100);
 
       const filePath = store.filePath;
       store.close();
@@ -370,13 +406,14 @@ describe("points ledger", () => {
             db
               .prepare(
                 `INSERT INTO points_ledger (wallet, action, points, tx_hash, metadata, created_at)
-                 VALUES (?, 'bug_report', ?, ?, NULL, '2024-01-01T00:00:00.000Z')`,
+                 VALUES (?, 'rescue_completed', ?, ?, NULL, '2024-01-01T00:00:00.000Z')`,
               )
-              .run(USER, MAX_POINTS_PER_ROW + 1, syntheticTxKey("bug_report", ["sql-over-cap"])),
+              .run(USER, MAX_POINTS_PER_ROW + 1, TX),
           /CHECK constraint failed/,
         );
-        const top = db.prepare("SELECT points FROM points_ledger WHERE action = 'bug_report'").get();
-        assert.equal(top.points, MAX_POINTS_PER_ROW);
+        const top = db.prepare("SELECT points FROM points_ledger WHERE action = 'rescue_completed'").get();
+        assert.equal(top.points, 100);
+        assert.equal(db.prepare("SELECT COUNT(*) AS n FROM points_ledger WHERE action = 'bug_report'").get().n, 0);
       } finally {
         db.close();
       }
@@ -568,10 +605,6 @@ describe("points ledger", () => {
             "SELECT 1 FROM points_ledger WHERE action=? AND tx_hash=? AND substr(tx_hash,1,2)='0x'",
             ["rescue_completed", TX],
           ],
-          [
-            "SELECT 1 FROM points_ledger WHERE action=? AND tx_hash=? AND action='bug_report'",
-            ["bug_report", `off:${"ab".repeat(32)}`],
-          ],
         ];
         for (const [query, params] of queries) {
           const steps = db.prepare(`EXPLAIN QUERY PLAN ${query}`).all(...params);
@@ -587,49 +620,35 @@ describe("points ledger", () => {
     });
   });
 
-  it("rejects a second wallet using the same bug report key", async () => {
+  it("rejects a bug report or security action and stores zero points", async () => {
     await withStore((store) => {
-      store.appendScored("bug_report", {
-        wallet: USER,
-        severity: "low",
-        reportId: "R-1",
-        reproSteps: "open the page",
-      });
-      assert.throws(
-        () =>
-          store.appendScored("bug_report", {
-            wallet: OTHER,
-            severity: "high",
-            reportId: "R-1",
-            reproSteps: "different words",
-          }),
-        rejection("duplicate"),
-      );
-
-      const steps = "click rescue twice";
-      store.appendScored("bug_report", {
-        wallet: USER,
-        severity: "medium",
-        reproSteps: steps,
-      });
-      assert.throws(
-        () =>
-          store.appendScored("bug_report", {
-            wallet: OTHER,
-            severity: "low",
-            reproSteps: steps,
-          }),
-        rejection("duplicate"),
-      );
-
-      store.appendScored("bug_report", {
-        wallet: OTHER,
-        severity: "low",
-        reportId: "R-2",
-        reproSteps: steps,
-      });
-      assert.equal(store.byWallet(OTHER).length, 1);
-      assert.equal(store.byWallet(USER).filter((row) => row.action === "bug_report").length, 2);
+      const actions = ["bug_report", "security", "security_finding", "finding"];
+      for (const action of actions) {
+        let stored = null;
+        assert.throws(
+          () => {
+            stored = store.appendScored(action, {
+              wallet: USER,
+              severity: "critical",
+              txHash: TX,
+              reproSteps: "open the page",
+              reportId: "R-1",
+              points: 500,
+            });
+          },
+          rejection("invalid_action"),
+          action,
+        );
+        assert.equal(stored, null, action);
+        assert.equal(POINTS_ACTIONS.includes(action), false, action);
+      }
+      assert.equal(store.byWallet(USER).length, 0);
+      assert.equal(store.totals(USER).total, 0);
+      assert.equal(store.totals().total, 0);
+      assert.equal(store.byWallet(USER).some((row) => row.action === "bug_report" || row.action === "security"), false);
+      store.appendScored("rescue_completed", { wallet: USER, txHash: TX });
+      assert.equal(store.totals(USER).total, 100);
+      assert.equal(store.byWallet(USER).every((row) => row.action !== "bug_report" && row.action !== "security"), true);
     });
   });
 });
