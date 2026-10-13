@@ -14,11 +14,12 @@
 -- UNIQUE (wallet, action, tx_hash) rejects a second insert of the same event
 -- for one wallet. On-chain hashes (0x...) are also unique on (action, tx_hash),
 -- so a second wallet cannot claim that transaction for the same action.
--- Bug reports and security findings are not actions in this table.
--- A dev database created before points_ledger_onchain_action_tx is not
--- migrated. If creating that index fails, delete points-ledger.sqlite and
--- open the store again. This file does not rebuild an existing table, so an
--- older points CHECK stays until that reset.
+-- Bug reports and security findings are not scored. Rows already stored are
+-- left in place: this file does not delete or rewrite them and does not
+-- rebuild the table. CREATE TABLE IF NOT EXISTS leaves an older action CHECK.
+-- BEFORE INSERT and BEFORE UPDATE triggers reject bug_report, security,
+-- security_finding, and finding. Reads omit those actions.
+-- The on-chain unique index is created on open without rewriting rows.
 -- UPDATE and DELETE triggers raise 'append-only'.
 -- BEFORE INSERT raises 'duplicate' when the id, (wallet, action, tx_hash),
 -- or an on-chain (action, tx_hash) is already stored.
@@ -95,6 +96,25 @@ CREATE TRIGGER points_ledger_no_delete
 BEFORE DELETE ON points_ledger
 BEGIN
   SELECT RAISE(ABORT, 'append-only');
+END;
+
+-- Reject a new bug or security row. This does not delete or rewrite a row
+-- that is already stored. An older CHECK may still name bug_report.
+DROP TRIGGER IF EXISTS points_ledger_no_excluded_insert;
+CREATE TRIGGER points_ledger_no_excluded_insert
+BEFORE INSERT ON points_ledger
+WHEN NEW.action IN ('bug_report', 'security', 'security_finding', 'finding')
+BEGIN
+  SELECT RAISE(ABORT, 'excluded_action');
+END;
+
+DROP TRIGGER IF EXISTS points_ledger_no_excluded_update;
+CREATE TRIGGER points_ledger_no_excluded_update
+BEFORE UPDATE ON points_ledger
+WHEN NEW.action IN ('bug_report', 'security', 'security_finding', 'finding')
+  OR OLD.action IN ('bug_report', 'security', 'security_finding', 'finding')
+BEGIN
+  SELECT RAISE(ABORT, 'excluded_action');
 END;
 
 -- Predicate matches the on-chain EXISTS exactly so the planner can use this index.

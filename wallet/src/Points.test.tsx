@@ -1,4 +1,7 @@
 // @vitest-environment jsdom
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { act, type ReactElement } from "react";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -105,8 +108,10 @@ describe("Points page", () => {
     const categories = [...view.container.querySelectorAll("[data-testid='points-category']")].map(
       (node) => node.textContent,
     );
-    expect(categories.join(" ")).toContain("Rescue");
+    expect(categories.join(" ")).toContain("Rescue (placeholder, TBD)");
     expect(categories.join(" ")).toContain("100");
+    const rescueRow = categories.find((text) => text.includes("100") && text.includes("Rescue"));
+    expect(rescueRow).toMatch(/placeholder, TBD/);
     expect(categories.join(" ")).toContain("Registry find");
     expect(categories.join(" ")).toContain("30");
     expect(categories.join(" ")).toContain("Session");
@@ -194,44 +199,16 @@ describe("Points page", () => {
     await view.unmount();
   });
 
-  it("does not show a bug report or security finding as a points action", async () => {
-    const getWallet = vi.fn(async () => ({
-      wallet: EXAMPLE_POINTS_ADDRESS,
-      total: 100,
-      rank: 1,
-      categories: [
-        { action: "rescue", points: 100, count: 1 },
-        { action: "bug_report", points: 500, count: 1 },
-        { action: "security", points: 300, count: 1 },
-        { action: "security_finding", points: 200, count: 1 },
-        { action: "finding", points: 100, count: 1 },
-      ],
-      entries: [
-        { action: "rescue", points: 100, txHash: TX, chainId: ARB_SEPOLIA_CHAIN_ID },
-        { action: "bug_report", points: 500, txHash: TX, chainId: ARB_SEPOLIA_CHAIN_ID },
-        { action: "security", points: 300, txHash: null, chainId: null },
-        { action: "security_finding", points: 200, txHash: null, chainId: null },
-        { action: "finding", points: 100, txHash: null, chainId: null },
-      ],
-    }));
-    const view = await render(<Points client={client({ getWallet })} />);
-    await lookup(view.container, EXAMPLE_POINTS_ADDRESS);
-    const text = view.container.textContent ?? "";
-    expect(text).not.toMatch(/bug report/i);
-    expect(text.toLowerCase()).not.toContain("security");
-    const rows = [...view.container.querySelectorAll("[data-testid='points-category'], [data-testid='points-entry']")];
-    expect(rows).toHaveLength(2);
-    for (const row of rows) {
-      const rowText = row.textContent ?? "";
-      expect(rowText).toContain("Rescue");
-      expect(rowText.toLowerCase()).not.toContain("bug report");
-      expect(rowText.toLowerCase()).not.toContain("security");
-      expect(rowText).not.toContain("500");
-      expect(rowText).not.toContain("300");
-      expect(rowText).not.toContain("200");
-    }
-    expect(view.container.querySelector("[data-testid='points-total']")?.textContent).toBe("100");
-    await view.unmount();
+  it("rejects a bug report label in the points source", () => {
+    const dir = dirname(fileURLToPath(import.meta.url));
+    const points = readFileSync(join(dir, "Points.tsx"), "utf8");
+    const copy = readFileSync(join(dir, "copy.ts"), "utf8");
+    expect(points).not.toMatch(/["']Bug report["']/);
+    expect(points).not.toMatch(/POINTS_ACTION_BUG_REPORT/);
+    expect(copy).not.toMatch(/Bug report/);
+    expect(points).not.toMatch(/^\s*(bug_report|security|security_finding|finding)\s*:/m);
+    expect(copy).not.toMatch(/bug_report|security_finding|Security finding|Finding report|POINTS_ACTION_BUG_REPORT/);
+    expect(copy).toMatch(/Rescue \(placeholder, TBD\)/);
   });
 
   it("uses the example client from the page default without a baked URL", async () => {
@@ -240,6 +217,7 @@ describe("Points page", () => {
     expect(view.container.querySelector("[data-testid='points-example']")?.textContent).toMatch(/example data/i);
     await lookup(view.container, EXAMPLE_POINTS_ADDRESS);
     expect(view.container.querySelector("[data-testid='points-total']")?.textContent).toBe("140");
+    expect(view.container.textContent).toContain("Rescue (placeholder, TBD)");
     const href = view.container.querySelector("[data-testid='points-tx']")?.getAttribute("href") ?? "";
     expect(href.startsWith("https://sepolia.arbiscan.io/tx/")).toBe(true);
     await view.unmount();

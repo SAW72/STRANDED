@@ -17,6 +17,54 @@ const MIXED_LOWER = `0x${"abcdef01".repeat(5)}`;
 const TX = `0x${"ab".repeat(32)}`;
 const TX_MIXED = `0x${"aB".repeat(32)}`;
 const TX2 = `0x${"cd".repeat(32)}`;
+const TX3 = `0x${"ef".repeat(32)}`;
+const TX4 = `0x${"12".repeat(32)}`;
+
+/** Action CHECK from main 5789a77, which still allows bug_report. */
+const OLD_SCHEMA_5789A77 = `
+CREATE TABLE points_ledger (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  wallet TEXT NOT NULL,
+  action TEXT NOT NULL,
+  points INTEGER NOT NULL,
+  tx_hash TEXT NOT NULL,
+  metadata TEXT,
+  created_at TEXT NOT NULL,
+  CHECK (
+    length(wallet) = 42
+    AND substr(wallet, 1, 2) = '0x'
+    AND wallet = lower(wallet)
+    AND substr(wallet, 3) NOT GLOB '*[^0-9a-f]*'
+  ),
+  CHECK (
+    action IN (
+      'rescue_completed',
+      'relayer_job',
+      'registry_find_posted',
+      'registry_find_claimed',
+      'wallet_session',
+      'bug_report'
+    )
+  ),
+  CHECK (typeof(points) = 'integer' AND points > 0 AND points <= 500),
+  CHECK (
+    (
+      length(tx_hash) = 66
+      AND substr(tx_hash, 1, 2) = '0x'
+      AND tx_hash = lower(tx_hash)
+      AND substr(tx_hash, 3) NOT GLOB '*[^0-9a-f]*'
+    )
+    OR (
+      length(tx_hash) = 68
+      AND substr(tx_hash, 1, 4) = 'off:'
+      AND substr(tx_hash, 5) NOT GLOB '*[^0-9a-f]*'
+    )
+  ),
+  CHECK (metadata IS NULL OR (json_valid(metadata) AND length(metadata) <= 4096)),
+  CHECK (length(created_at) >= 20),
+  UNIQUE (wallet, action, tx_hash)
+) STRICT;
+`;
 
 function rejection(code) {
   return (err) => err instanceof Error && err.code === code && err.message === code;
@@ -157,7 +205,15 @@ describe("points ledger", () => {
 
   it("has no update or delete path, and triggers block raw UPDATE and DELETE", async () => {
     await withStore((store) => {
-      assert.deepEqual(Object.keys(store).sort(), ["appendScored", "byWallet", "close", "filePath", "totals"]);
+      assert.deepEqual(Object.keys(store).sort(), [
+        "appendScored",
+        "byWallet",
+        "close",
+        "filePath",
+        "leaderboard",
+        "totals",
+        "walletPoints",
+      ]);
       assert.equal(Object.hasOwn(store, "append"), false);
       assert.equal(Object.hasOwn(store, "update"), false);
       assert.equal(Object.hasOwn(store, "delete"), false);
@@ -175,6 +231,8 @@ describe("points ledger", () => {
           .map((row) => row.name);
         assert.deepEqual(triggers, [
           "points_ledger_no_delete",
+          "points_ledger_no_excluded_insert",
+          "points_ledger_no_excluded_update",
           "points_ledger_no_insert",
           "points_ledger_no_update",
         ]);
@@ -314,7 +372,14 @@ describe("points ledger", () => {
     }
     assert.equal(POINTS_ACTIONS.length, 5);
     assert.equal(POINTS_ACTIONS.includes("bug_report"), false);
-    assert.equal(sql.includes("'bug_report'"), false);
+    const tableDdl = sql.slice(sql.indexOf("CREATE TABLE IF NOT EXISTS points_ledger"), sql.indexOf(") STRICT;"));
+    for (const action of ["bug_report", "security", "security_finding", "finding"]) {
+      assert.equal(tableDdl.includes(`'${action}'`), false, action);
+      assert.match(sql, new RegExp(`'${action}'`));
+    }
+    assert.match(sql, /points_ledger_no_excluded_insert/);
+    assert.match(sql, /points_ledger_no_excluded_update/);
+    assert.match(sql, /RAISE\(ABORT, 'excluded_action'\)/);
     assert.doesNotMatch(sql, /CREATE UNIQUE INDEX points_ledger_bug_action_tx/);
     assert.doesNotMatch(sql, /action='bug_report'/);
     assert.match(sql, new RegExp(`points <= ${MAX_POINTS_PER_ROW}`));
@@ -324,7 +389,8 @@ describe("points ledger", () => {
 
   it("rejects bug_report in the schema action check", async () => {
     const sql = readFileSync(new URL("../points/schema.sql", import.meta.url), "utf8");
-    assert.equal(sql.includes("'bug_report'"), false);
+    const tableDdl = sql.slice(sql.indexOf("CREATE TABLE IF NOT EXISTS points_ledger"), sql.indexOf(") STRICT;"));
+    assert.equal(tableDdl.includes("'bug_report'"), false);
     await withStore((store) => {
       const filePath = store.filePath;
       store.close();
@@ -345,7 +411,7 @@ describe("points ledger", () => {
                  VALUES (?, 'bug_report', 100, ?, NULL, '2024-01-01T00:00:00.000Z')`,
               )
               .run(USER, TX),
-          /CHECK constraint failed/,
+          /excluded_action/,
         );
         assert.throws(
           () =>
@@ -355,7 +421,7 @@ describe("points ledger", () => {
                  VALUES (?, 'security', 300, ?, NULL, '2024-01-01T00:00:00.000Z')`,
               )
               .run(USER, TX2),
-          /CHECK constraint failed/,
+          /excluded_action/,
         );
         assert.equal(db.prepare("SELECT COUNT(*) AS n FROM points_ledger WHERE action IN ('bug_report', 'security')").get().n, 0);
       } finally {
@@ -650,5 +716,100 @@ describe("points ledger", () => {
       assert.equal(store.totals(USER).total, 100);
       assert.equal(store.byWallet(USER).every((row) => row.action !== "bug_report" && row.action !== "security"), true);
     });
+  });
+
+  it("keeps a legacy bug_report row and scores only the visible 100", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "points-old-schema-"));
+    const filePath = join(dir, "points-ledger.sqlite");
+    const created = "2024-01-01T00:00:00.000Z";
+    const seed = new Database(filePath);
+    seed.exec(OLD_SCHEMA_5789A77);
+    const insert = seed.prepare(
+      `INSERT INTO points_ledger (wallet, action, points, tx_hash, metadata, created_at)
+       VALUES (?, ?, ?, ?, NULL, ?)`,
+    );
+    insert.run(USER, "rescue_completed", 100, TX, created);
+    insert.run(USER, "bug_report", 500, TX2, created);
+    insert.run(OTHER, "rescue_completed", 100, TX3, created);
+    insert.run(OTHER, "relayer_job", 50, TX3, created);
+    insert.run(OTHER, "registry_find_posted", 30, TX3, created);
+    insert.run(OTHER, "registry_find_claimed", 50, TX3, created);
+    const before = seed.prepare("SELECT id, wallet, action, points, tx_hash, metadata, created_at FROM points_ledger ORDER BY id").all();
+    const rawUser = seed.prepare("SELECT SUM(points) AS points FROM points_ledger WHERE wallet = ?").get(USER);
+    assert.equal(rawUser.points, 600);
+    assert.equal(before.length, 6);
+    seed.close();
+
+    const open = () => createLedgerStore({ dbPath: filePath, now: () => 1_700_000_000_000 });
+    const store = open();
+    try {
+      const view = store.walletPoints(USER);
+      const visible = view.entries.reduce((sum, entry) => sum + entry.points, 0);
+      const categorySum = view.categories.reduce((sum, category) => sum + category.points, 0);
+      assert.equal(visible, 100);
+      assert.equal(categorySum, 100);
+      assert.equal(view.total, visible);
+      assert.equal(store.totals(USER).total, view.total);
+      assert.equal(view.entries.length, 1);
+      assert.equal(view.entries[0].action, "rescue_completed");
+      assert.equal(view.entries[0].points, 100);
+      assert.equal(view.categories.length, 1);
+      assert.equal(view.rank, 2);
+      const board = store.leaderboard();
+      assert.deepEqual(
+        board.rows.map((row) => ({ wallet: row.wallet, total: row.total, rank: row.rank })),
+        [
+          { wallet: OTHER, total: 230, rank: 1 },
+          { wallet: USER, total: 100, rank: 2 },
+        ],
+      );
+      assert.equal(board.rows.some((row) => row.total === 600), false);
+      assert.equal(store.walletPoints(OTHER).rank, 1);
+      assert.equal(store.totals().total, 330);
+    } finally {
+      store.close();
+    }
+
+    const after = new Database(filePath);
+    try {
+      const rows = after.prepare("SELECT id, wallet, action, points, tx_hash, metadata, created_at FROM points_ledger ORDER BY id").all();
+      assert.deepEqual(rows, before);
+      assert.equal(rows.filter((row) => row.action === "bug_report").length, 1);
+      assert.equal(rows.find((row) => row.action === "bug_report").points, 500);
+      const tableSql = after.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'points_ledger'").get().sql;
+      assert.match(tableSql, /'bug_report'/);
+      for (const action of ["bug_report", "security", "security_finding", "finding"]) {
+        assert.throws(
+          () =>
+            after
+              .prepare(
+                `INSERT INTO points_ledger (wallet, action, points, tx_hash, metadata, created_at)
+                 VALUES (?, ?, 100, ?, NULL, ?)`,
+              )
+              .run(OTHER, action, TX4, created),
+          /excluded_action/,
+        );
+      }
+      assert.equal(after.prepare("SELECT COUNT(*) AS n FROM points_ledger").get().n, before.length);
+    } finally {
+      after.close();
+    }
+
+    const again = open();
+    try {
+      assert.equal(again.walletPoints(USER).total, 100);
+      assert.equal(again.walletPoints(USER).rank, 2);
+      assert.equal(again.byWallet(USER).length, 1);
+    } finally {
+      again.close();
+    }
+
+    const finalDb = new Database(filePath);
+    try {
+      const rows = finalDb.prepare("SELECT id, wallet, action, points, tx_hash, metadata, created_at FROM points_ledger ORDER BY id").all();
+      assert.deepEqual(rows, before);
+    } finally {
+      finalDb.close();
+    }
   });
 });
