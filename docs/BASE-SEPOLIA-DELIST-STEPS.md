@@ -158,6 +158,8 @@ Rollback for this step is in the final section headed ROLLBACK ONLY: DO NOT SIGN
 
 These bytes put gMOCK or SwapRouter02 back on the allowlist. They are not part of the delist.
 
+Sign order, from the fully delisted state. `setEip2612Token(gMOCK, true)` alone sets both `allowedTokens[gMOCK]` and `eip2612Tokens[gMOCK]`. That makes `setTokenAllowed(gMOCK, true)` redundant for a full token restore: one token blob suffices, and it is the EIP-2612 blob. `setTokenAllowed(gMOCK, true)` by itself sets `allowedTokens` and leaves `eip2612Tokens` false. The router blob does not change either token flag, so one blob does not revert the whole delist. Sign `setEip2612Token(0xE36c35cbF0373D77D00732f7B92dB4fB8fd37166, true)`, then `setRouterAllowed(0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4, true)`.
+
 `setTokenAllowed(0xE36c35cbF0373D77D00732f7B92dB4fB8fd37166, true)`. Gas estimate `28836`. This restores `allowedTokens` only.
 
 `0x15f69012000000000000000000000000e36c35cbf0373d77d00732f7b92db4fb8fd371660000000000000000000000000000000000000000000000000000000000000001`

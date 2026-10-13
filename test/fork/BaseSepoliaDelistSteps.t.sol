@@ -155,16 +155,50 @@ contract BaseSepoliaDelistStepsTest is Test {
 
         _expectRescueRevert(WITNESS_TOKEN, SWAP_ROUTER_02, GasRescueSwap.RouterNotAllowed.selector);
         _expectRescueRevert(WITNESS_TOKEN, OTHER_ROUTER, GasRescueSwap.PathMismatch.selector);
+    }
 
-        (bytes memory relistToken, bytes memory relistEip, bytes memory relistRouter) = _rollbackTrioFromDoc();
+    /// @dev `setTokenAllowed(gMOCK, true)` sets `allowedTokens` and leaves `eip2612Tokens` false.
+    function test_relistTokenAlone_allowsTokenAndLeavesEipFalse() public {
+        _delistBoth();
+        (bytes memory relistToken,,) = _rollbackTrioFromDoc();
         _ownerCall(relistToken);
-        _ownerCall(relistEip);
-        _ownerCall(relistRouter);
         assertTrue(live.allowedTokens(GMOCK));
-        assertEq(live.eip2612Tokens(GMOCK), true);
+        assertFalse(live.eip2612Tokens(GMOCK));
+        assertFalse(live.allowedRouters(SWAP_ROUTER_02));
+    }
+
+    /// @dev `setEip2612Token(gMOCK, true)` sets both token flags. The router stays delisted.
+    function test_relistEipAlone_setsBothTokenFlags() public {
+        _delistBoth();
+        (, bytes memory relistEip,) = _rollbackTrioFromDoc();
+        _ownerCall(relistEip);
+        assertTrue(live.allowedTokens(GMOCK));
+        assertTrue(live.eip2612Tokens(GMOCK));
+        assertFalse(live.allowedRouters(SWAP_ROUTER_02));
+    }
+
+    /// @dev Token blob first leaves EIP-2612 false; the EIP blob then sets it.
+    ///      Skipping the token call fails the intermediate allowlist assert.
+    function test_relistTokenThenEip_setsEipTrue() public {
+        _delistBoth();
+        (bytes memory relistToken, bytes memory relistEip,) = _rollbackTrioFromDoc();
+        _ownerCall(relistToken);
+        assertTrue(live.allowedTokens(GMOCK));
+        assertFalse(live.eip2612Tokens(GMOCK));
+        _ownerCall(relistEip);
+        assertTrue(live.allowedTokens(GMOCK));
+        assertTrue(live.eip2612Tokens(GMOCK));
+        assertFalse(live.allowedRouters(SWAP_ROUTER_02));
+    }
+
+    /// @dev Router rollback does not touch gMOCK allowlist flags.
+    function test_relistRouterAlone_allowsRouterAndLeavesTokenDelisted() public {
+        _delistBoth();
+        (,, bytes memory relistRouter) = _rollbackTrioFromDoc();
+        _ownerCall(relistRouter);
         assertTrue(live.allowedRouters(SWAP_ROUTER_02));
-        assertTrue(live.allowedRouters(OTHER_ROUTER));
-        assertTrue(live.allowedTokens(WITNESS_TOKEN));
+        assertFalse(live.allowedTokens(GMOCK));
+        assertFalse(live.eip2612Tokens(GMOCK));
     }
 
     /// @dev `setAllowedToken` selector `0x8aaa2284` is named in the doc and is not a function.
@@ -209,6 +243,15 @@ contract BaseSepoliaDelistStepsTest is Test {
         assertTrue(live.allowedRouters(SWAP_ROUTER_02));
         assertTrue(live.allowedRouters(OTHER_ROUTER));
         assertEq(SWAP_ROUTER_02.balance, 0);
+    }
+
+    function _delistBoth() internal {
+        _assertLiveBefore();
+        _ownerCall(DELIST_GMOCK_CALLDATA);
+        _ownerCall(DELIST_ROUTER_CALLDATA);
+        assertFalse(live.allowedTokens(GMOCK));
+        assertFalse(live.eip2612Tokens(GMOCK));
+        assertFalse(live.allowedRouters(SWAP_ROUTER_02));
     }
 
     function _ownerCall(
