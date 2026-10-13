@@ -21,6 +21,7 @@ import {
   SIGNATURE_FAILED,
 } from "./relayerError";
 import disclosureSource from "./tokenDisclosure.ts?raw";
+import { BASE_SEPOLIA_CHAIN_ID } from "./chains";
 import {
   demoBannerText,
   tokenDisclosure,
@@ -94,6 +95,13 @@ describe("token disclosure", () => {
     expect(tokenDisclosure("")).toBe(UNKNOWN_TOKEN_DISCLOSURE);
     expect(tokenDisclosure("   ")).toBe(UNKNOWN_TOKEN_DISCLOSURE);
     expect(tokenDisclosure("not a ticker")).toBe(UNKNOWN_TOKEN_DISCLOSURE);
+    expect(tokenDisclosure("SDEMO", BASE_SEPOLIA_CHAIN_ID)).toBe(SDEMO_DISCLOSURE);
+    expect(tokenDisclosure("tDEMO", BASE_SEPOLIA_CHAIN_ID)).toBe(
+      "tDEMO is a testnet demo token on Base Sepolia. It has no value and is not for sale. This is experimental, unaudited demo software.",
+    );
+    expect(tokenDisclosure("tDEMO")).toBe(
+      "tDEMO is a testnet demo token on Arbitrum Sepolia. It has no value and is not for sale. This is experimental, unaudited demo software.",
+    );
   });
 
   it("builds the site banner from the same ticker", () => {
@@ -110,6 +118,8 @@ describe("banned words in user-visible copy", () => {
       (value): value is string => typeof value === "string",
     ),
     tokenDisclosure("SDEMO"),
+    tokenDisclosure("SDEMO", BASE_SEPOLIA_CHAIN_ID),
+    tokenDisclosure("tDEMO", BASE_SEPOLIA_CHAIN_ID),
     tokenDisclosure("GRTT"),
     tokenDisclosure(null),
     demoBannerText("SDEMO"),
