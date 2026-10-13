@@ -1,7 +1,4 @@
 // @vitest-environment jsdom
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { act, type ReactElement } from "react";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -14,6 +11,8 @@ import {
   type PointsClient,
   type WalletPoints,
 } from "./lib/points";
+import copySource from "./copy.ts?raw";
+import pointsPageSource from "./Points.tsx?raw";
 import { isPointsRoute, Points } from "./Points";
 
 const TX = `0x${"ab".repeat(32)}`;
@@ -200,9 +199,8 @@ describe("Points page", () => {
   });
 
   it("rejects a bug report label in the points source", () => {
-    const dir = dirname(fileURLToPath(import.meta.url));
-    const points = readFileSync(join(dir, "Points.tsx"), "utf8");
-    const copy = readFileSync(join(dir, "copy.ts"), "utf8");
+    const points = pointsPageSource;
+    const copy = copySource;
     expect(points).not.toMatch(/["']Bug report["']/);
     expect(points).not.toMatch(/POINTS_ACTION_BUG_REPORT/);
     expect(copy).not.toMatch(/Bug report/);
