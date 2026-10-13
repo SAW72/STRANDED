@@ -430,7 +430,7 @@ describe("points ledger", () => {
     });
   });
 
-  it("rejects an excluded action on update in both directions", async () => {
+  it("lets a listed update through and rejects an excluded action change", async () => {
     const excluded = ["bug_report", "security", "security_finding", "finding"];
     const dir = await mkdtemp(join(tmpdir(), "points-excluded-update-"));
     const filePath = join(dir, "points-ledger.sqlite");
@@ -461,26 +461,31 @@ describe("points ledger", () => {
     for (const row of forward) insert.run(USER, "rescue_completed", row.txHash, created);
     const reverse = excluded.map((action, index) => ({ action, txHash: txFor(String(index + 5).padStart(2, "0")) }));
     for (const row of reverse) insert.run(USER, row.action, row.txHash, created);
-    const listedTx = txFor("09");
+    const amountTx = txFor("09");
+    const listedTx = txFor("0a");
+    insert.run(USER, "rescue_completed", amountTx, created);
     insert.run(USER, "rescue_completed", listedTx, created);
-    const before = seed.prepare("SELECT id, wallet, action, points, tx_hash FROM points_ledger ORDER BY id").all();
     seed.close();
 
     const store = createLedgerStore({ dbPath: filePath, now: () => 1_700_000_000_000 });
     store.close();
     const db = new Database(filePath);
     try {
-      const triggerSql = db
-        .prepare("SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = 'points_ledger_no_excluded_update'")
-        .get().sql;
-      assert.match(
-        triggerSql,
-        /WHEN NEW\.action IN \('bug_report', 'security', 'security_finding', 'finding'\)/,
+      // The append-only trigger rejects every update. Drop it so this test can see
+      // whether the excluded-update WHEN allows a listed change.
+      db.exec("DROP TRIGGER points_ledger_no_update");
+      const read = db.prepare("SELECT action, points, metadata FROM points_ledger WHERE tx_hash = ?");
+      const note = JSON.stringify({ note: "adjusted" });
+
+      assert.doesNotThrow(() =>
+        db.prepare("UPDATE points_ledger SET points = 250, metadata = ? WHERE tx_hash = ?").run(note, amountTx),
       );
-      assert.match(
-        triggerSql,
-        /OR OLD\.action IN \('bug_report', 'security', 'security_finding', 'finding'\)/,
+      assert.deepEqual(read.get(amountTx), { action: "rescue_completed", points: 250, metadata: note });
+
+      assert.doesNotThrow(() =>
+        db.prepare("UPDATE points_ledger SET action = 'relayer_job' WHERE tx_hash = ?").run(listedTx),
       );
+      assert.deepEqual(read.get(listedTx), { action: "relayer_job", points: 100, metadata: null });
 
       for (const row of forward) {
         assert.throws(
@@ -488,23 +493,16 @@ describe("points ledger", () => {
           /excluded_action/,
           row.action,
         );
+        assert.deepEqual(read.get(row.txHash), { action: "rescue_completed", points: 100, metadata: null });
       }
       for (const row of reverse) {
         assert.throws(
-          () =>
-            db.prepare("UPDATE points_ledger SET action = 'rescue_completed' WHERE tx_hash = ?").run(row.txHash),
+          () => db.prepare("UPDATE points_ledger SET action = 'rescue_completed' WHERE tx_hash = ?").run(row.txHash),
           /excluded_action/,
           row.action,
         );
+        assert.deepEqual(read.get(row.txHash), { action: row.action, points: 100, metadata: null });
       }
-      assert.throws(
-        () => db.prepare("UPDATE points_ledger SET action = 'relayer_job' WHERE tx_hash = ?").run(listedTx),
-        /append-only/,
-      );
-      assert.deepEqual(
-        db.prepare("SELECT id, wallet, action, points, tx_hash FROM points_ledger ORDER BY id").all(),
-        before,
-      );
     } finally {
       db.close();
       rmSync(dir, { recursive: true, force: true });
