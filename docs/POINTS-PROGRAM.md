@@ -46,7 +46,7 @@ Record genuine testnet activity as an off-chain score. Points measure usage. The
 - `tx_hash` is `NOT NULL`. Off-chain actions store a synthetic key.
 - `created_at` is set by the server. A caller-supplied timestamp is ignored.
 - Rows for on-chain actions store the transaction hash for independent verification.
-- Dashboard is read-only: enter a wallet address, see points by category and rank. No login, no connect-wallet button, no sign-up.
+- Dashboard is read-only: enter a wallet address, see recorded activity by category. No login, no connect-wallet button, no sign-up.
 
 ## Not planned
 
