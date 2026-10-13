@@ -12,8 +12,6 @@ import {IGasRescueSwap} from "../../src/interfaces/IGasRescueSwap.sol";
 
 /// @notice Fork proof of docs/BASE-SEPOLIA-DELIST-STEPS.md.
 ///         Sends the doc's exact calldata. No key, no signature, no broadcast.
-///         Uses `BASE_SEPOLIA_RPC_URL` when set. Otherwise uses the fork already
-///         selected by `forge test --fork-url`, or the public Base Sepolia RPC.
 contract BaseSepoliaDelistStepsTest is Test {
     uint256 internal constant BASE_SEPOLIA_CHAIN_ID = 84_532;
     uint256 internal constant FORK_BLOCK = 48_077_171;
@@ -68,13 +66,22 @@ contract BaseSepoliaDelistStepsTest is Test {
         live = GasRescueSwap(payable(LIVE_SWAP));
     }
 
+    /// @dev Step calldata is the doc prefix before the rollback heading.
+    ///      A blob that re-allows gMOCK or SwapRouter02 in that prefix fails the test.
     function test_docCalldataMatchesConstants() public view {
         string memory doc = vm.readFile(DOC_PATH);
-        assertEq(_fromHex(_firstCalldataAfter(doc, "## Step 1")), DELIST_GMOCK_CALLDATA);
-        assertEq(_fromHex(_firstCalldataAfter(doc, "## Step 2")), DELIST_ROUTER_CALLDATA);
-        assertEq(_fromHex(_firstCalldataAfter(doc, "Rollback setTokenAllowed calldata")), ROLLBACK_TOKEN_CALLDATA);
-        assertEq(_fromHex(_firstCalldataAfter(doc, "Rollback setEip2612Token calldata")), ROLLBACK_EIP2612_CALLDATA);
-        assertEq(_fromHex(_firstCalldataAfter(doc, "Rollback setRouterAllowed calldata")), ROLLBACK_ROUTER_CALLDATA);
+        bytes memory raw = bytes(doc);
+        uint256 cut = _indexOf(raw, bytes("## ROLLBACK ONLY: DO NOT SIGN unless reverting"), 0);
+        require(cut != type(uint256).max, "rollback heading missing");
+        string memory steps = _prefix(raw, cut);
+        assertEq(_fromHex(_firstCalldataAfter(steps, "## Step 1")), DELIST_GMOCK_CALLDATA);
+        assertEq(_fromHex(_firstCalldataAfter(steps, "## Step 2")), DELIST_ROUTER_CALLDATA);
+        assertTrue(_reallows(ROLLBACK_TOKEN_CALLDATA));
+        assertTrue(_reallows(ROLLBACK_EIP2612_CALLDATA));
+        assertTrue(_reallows(ROLLBACK_ROUTER_CALLDATA));
+        assertFalse(_reallows(DELIST_GMOCK_CALLDATA));
+        assertFalse(_reallows(DELIST_ROUTER_CALLDATA));
+        _assertNoReallow(steps);
     }
 
     function test_nonOwner_exactCalldataReverts() public {
@@ -148,6 +155,38 @@ contract BaseSepoliaDelistStepsTest is Test {
 
         _expectRescueRevert(WITNESS_TOKEN, SWAP_ROUTER_02, GasRescueSwap.RouterNotAllowed.selector);
         _expectRescueRevert(WITNESS_TOKEN, OTHER_ROUTER, GasRescueSwap.PathMismatch.selector);
+
+        (bytes memory relistToken, bytes memory relistEip, bytes memory relistRouter) = _rollbackTrioFromDoc();
+        _ownerCall(relistToken);
+        _ownerCall(relistEip);
+        _ownerCall(relistRouter);
+        assertTrue(live.allowedTokens(GMOCK));
+        assertEq(live.eip2612Tokens(GMOCK), true);
+        assertTrue(live.allowedRouters(SWAP_ROUTER_02));
+        assertTrue(live.allowedRouters(OTHER_ROUTER));
+        assertTrue(live.allowedTokens(WITNESS_TOKEN));
+    }
+
+    /// @dev `setAllowedToken` selector `0x8aaa2284` is named in the doc and is not a function.
+    ///      The same delist bytes sent to SwapRouter02 do not change the swap allowlist.
+    function test_wrongSelectorAndWrongTargetLeaveAllowlist() public {
+        _assertLiveBefore();
+        bytes memory doc = bytes(vm.readFile(DOC_PATH));
+        require(_indexOf(doc, bytes("0x8aaa2284"), 0) != type(uint256).max, "doc missing 0x8aaa2284");
+
+        bytes memory wrongSel = abi.encodeWithSelector(bytes4(hex"8aaa2284"), GMOCK, false);
+        vm.prank(LIVE_OWNER);
+        (bool selOk,) = LIVE_SWAP.call(wrongSel);
+        assertFalse(selOk);
+        _assertAllowlistUnchanged();
+
+        vm.prank(LIVE_OWNER);
+        (bool tokenTargetOk,) = SWAP_ROUTER_02.call(DELIST_GMOCK_CALLDATA);
+        assertFalse(tokenTargetOk);
+        vm.prank(LIVE_OWNER);
+        (bool routerTargetOk,) = SWAP_ROUTER_02.call(DELIST_ROUTER_CALLDATA);
+        assertFalse(routerTargetOk);
+        _assertAllowlistUnchanged();
     }
 
     function _assertLiveBefore() internal view {
@@ -162,6 +201,35 @@ contract BaseSepoliaDelistStepsTest is Test {
         assertTrue(live.allowedRouters(OTHER_ROUTER));
         assertEq(SWAP_ROUTER_02.balance, 0);
         assertEq(IERC20(GMOCK).totalSupply(), 10 ** 39 + 10 ** 19 + 1000);
+    }
+
+    function _assertAllowlistUnchanged() internal view {
+        assertTrue(live.allowedTokens(GMOCK));
+        assertTrue(live.eip2612Tokens(GMOCK));
+        assertTrue(live.allowedRouters(SWAP_ROUTER_02));
+        assertTrue(live.allowedRouters(OTHER_ROUTER));
+        assertEq(SWAP_ROUTER_02.balance, 0);
+    }
+
+    function _ownerCall(
+        bytes memory data
+    ) internal {
+        vm.prank(LIVE_OWNER);
+        (bool ok,) = LIVE_SWAP.call(data);
+        assertTrue(ok);
+    }
+
+    function _rollbackTrioFromDoc() internal view returns (bytes memory token, bytes memory eip, bytes memory router) {
+        bytes memory raw = bytes(vm.readFile(DOC_PATH));
+        uint256 cut = _indexOf(raw, bytes("## ROLLBACK ONLY: DO NOT SIGN unless reverting"), 0);
+        require(cut != type(uint256).max, "rollback heading missing");
+        token = _fromHex(_nthLongHex(raw, cut, 0));
+        eip = _fromHex(_nthLongHex(raw, cut, 1));
+        router = _fromHex(_nthLongHex(raw, cut, 2));
+        assertEq(token, ROLLBACK_TOKEN_CALLDATA);
+        assertEq(eip, ROLLBACK_EIP2612_CALLDATA);
+        assertEq(router, ROLLBACK_ROUTER_CALLDATA);
+        assertEq(_nthLongHex(raw, cut, 3), "");
     }
 
     function _expectRescueRevert(
@@ -217,6 +285,58 @@ contract BaseSepoliaDelistStepsTest is Test {
         assertEq(logs[0].data, abi.encode(false));
     }
 
+    function _prefix(
+        bytes memory raw,
+        uint256 len
+    ) internal pure returns (string memory) {
+        bytes memory out = new bytes(len);
+        for (uint256 i = 0; i < len; i++) {
+            out[i] = raw[i];
+        }
+        return string(out);
+    }
+
+    function _assertNoReallow(
+        string memory steps
+    ) internal pure {
+        bytes memory hay = bytes(steps);
+        for (uint256 i = 0; i + 137 < hay.length; i++) {
+            if (hay[i] != bytes1("0") || hay[i + 1] != bytes1("x")) continue;
+            uint256 n = 0;
+            while (i + 2 + n < hay.length && _isHex(hay[i + 2 + n])) n++;
+            if (n != 136) continue;
+            bytes memory hexWord = new bytes(138);
+            for (uint256 j = 0; j < 138; j++) {
+                hexWord[j] = hay[i + j];
+            }
+            if (_reallows(_fromHex(string(hexWord)))) revert("rollback blob before heading");
+        }
+    }
+
+    /// @dev True when the blob is `setTokenAllowed(gMOCK,true)`, `setEip2612Token(gMOCK,true)`,
+    ///      or `setRouterAllowed(SwapRouter02,true)`.
+    function _reallows(
+        bytes memory blob
+    ) internal pure returns (bool) {
+        if (blob.length != 68) return false;
+        bytes32 selWord;
+        bytes32 addrWord;
+        bytes32 flagWord;
+        assembly {
+            selWord := mload(add(blob, 32))
+            addrWord := mload(add(blob, 36))
+            flagWord := mload(add(blob, 68))
+        }
+        if (uint256(flagWord) != 1) return false;
+        bytes4 sel = bytes4(selWord);
+        address who = address(uint160(uint256(addrWord)));
+        if (who == GMOCK && (sel == bytes4(hex"15f69012") || sel == bytes4(hex"ae6dda45"))) return true;
+        if (who == SWAP_ROUTER_02 && sel == bytes4(hex"6cc88edb")) return true;
+        return false;
+    }
+
+    /// @dev The 136-nibble blob on the `| Calldata |` row of `marker`'s section.
+    ///      A blob that sits elsewhere in the section is ignored.
     function _firstCalldataAfter(
         string memory doc,
         string memory marker
@@ -224,18 +344,37 @@ contract BaseSepoliaDelistStepsTest is Test {
         bytes memory hay = bytes(doc);
         uint256 from = _indexOf(hay, bytes(marker), 0);
         require(from != type(uint256).max, marker);
+        uint256 row = _indexOf(hay, bytes("| Calldata |"), from);
+        require(row != type(uint256).max, "Calldata row missing");
+        uint256 next = _indexOf(hay, bytes("\n## "), from + bytes(marker).length);
+        if (next != type(uint256).max) require(row < next, "Calldata row missing in section");
+        string memory hexWord = _nthLongHex(hay, row, 0);
+        require(bytes(hexWord).length != 0, string.concat("missing calldata after ", marker));
+        return hexWord;
+    }
+
+    /// @dev `nth` is zero-based. Returns an empty string when fewer blobs remain.
+    function _nthLongHex(
+        bytes memory hay,
+        uint256 from,
+        uint256 nth
+    ) internal pure returns (string memory) {
+        uint256 seen = 0;
         for (uint256 i = from; i + 137 < hay.length; i++) {
             if (hay[i] != bytes1("0") || hay[i + 1] != bytes1("x")) continue;
             uint256 n = 0;
             while (i + 2 + n < hay.length && _isHex(hay[i + 2 + n])) n++;
             if (n != 136) continue;
-            bytes memory out = new bytes(138);
-            for (uint256 j = 0; j < 138; j++) {
-                out[j] = hay[i + j];
+            if (seen == nth) {
+                bytes memory out = new bytes(138);
+                for (uint256 j = 0; j < 138; j++) {
+                    out[j] = hay[i + j];
+                }
+                return string(out);
             }
-            return string(out);
+            seen++;
         }
-        revert(string.concat("missing calldata after ", marker));
+        return "";
     }
 
     function _fromHex(

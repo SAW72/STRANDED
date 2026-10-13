@@ -91,17 +91,7 @@ cast receipt <step-1 tx hash> --rpc-url "$BASE_SEPOLIA_RPC_URL"
 
 The receipt must contain those two topics. topic1 is gMOCK. data is `false`.
 
-### Rollback setTokenAllowed calldata
-
-`setTokenAllowed(0xE36c35cbF0373D77D00732f7B92dB4fB8fd37166, true)`. Gas estimate `28836`. This restores `allowedTokens` only.
-
-`0x15f69012000000000000000000000000e36c35cbf0373d77d00732f7b92db4fb8fd371660000000000000000000000000000000000000000000000000000000000000001`
-
-### Rollback setEip2612Token calldata
-
-`setEip2612Token(0xE36c35cbF0373D77D00732f7B92dB4fB8fd37166, true)`. Gas estimate `32292`. On this bytecode, `allowed == true` also sets `allowedTokens`.
-
-`0xae6dda45000000000000000000000000e36c35cbf0373d77d00732f7b92db4fb8fd371660000000000000000000000000000000000000000000000000000000000000001`
+Rollback for this step is in the final section headed ROLLBACK ONLY: DO NOT SIGN unless reverting.
 
 ## Step 2 — remove SwapRouter02 from the router allowlist
 
@@ -162,7 +152,19 @@ cast receipt <step-2 tx hash> --rpc-url "$BASE_SEPOLIA_RPC_URL"
 
 The receipt must contain that topic. topic1 is SwapRouter02. data is `false`.
 
-### Rollback setRouterAllowed calldata
+Rollback for this step is in the final section headed ROLLBACK ONLY: DO NOT SIGN unless reverting.
+
+## ROLLBACK ONLY: DO NOT SIGN unless reverting
+
+These bytes put gMOCK or SwapRouter02 back on the allowlist. They are not part of the delist.
+
+`setTokenAllowed(0xE36c35cbF0373D77D00732f7B92dB4fB8fd37166, true)`. Gas estimate `28836`. This restores `allowedTokens` only.
+
+`0x15f69012000000000000000000000000e36c35cbf0373d77d00732f7b92db4fb8fd371660000000000000000000000000000000000000000000000000000000000000001`
+
+`setEip2612Token(0xE36c35cbF0373D77D00732f7B92dB4fB8fd37166, true)`. Gas estimate `32292`. On this bytecode, `allowed == true` also sets `allowedTokens`.
+
+`0xae6dda45000000000000000000000000e36c35cbf0373d77d00732f7b92db4fb8fd371660000000000000000000000000000000000000000000000000000000000000001`
 
 `setRouterAllowed(0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4, true)`. Gas estimate `29040`.
 
