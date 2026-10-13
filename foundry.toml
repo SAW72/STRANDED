@@ -12,6 +12,7 @@ via_ir = true
 ffi = false
 bytecode_hash = "none"
 cbor_metadata = false
+fs_permissions = [{ access = "read", path = "docs/BASE-SEPOLIA-DELIST-STEPS.md" }]
 
 [fmt]
 line_length = 120

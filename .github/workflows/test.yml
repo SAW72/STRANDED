@@ -28,6 +28,38 @@ jobs:
       - name: Run tests
         run: forge test -vv
 
+  # Base Sepolia fork proof for the delist steps. No key and no broadcast.
+  # When BASE_SEPOLIA_RPC_URL is unset, --fork-url falls back to the public RPC.
+  # The test pins block 48,077,171 itself. Same public-RPC shape as the relayer
+  # workflow's chain-id check against https://sepolia.base.org.
+  fork:
+    name: Base Sepolia delist fork
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+
+      - name: Show forge version
+        run: forge --version
+
+      - name: Fork proof
+        run: |
+          set -euo pipefail
+          RPC="${BASE_SEPOLIA_RPC_URL:-https://sepolia.base.org}"
+          CHAIN="$(cast chain-id --rpc-url "$RPC")"
+          echo "chain_id=${CHAIN}"
+          test "$CHAIN" = "84532"
+          forge test --match-contract BaseSepoliaDelistStepsTest -vv \
+            --fork-url "$RPC" \
+            --fork-block-number 48077171
+
   # Wallet UX (Vite + vitest). No Relayer key. Fixtures when Relayer URL unset.
   wallet:
     name: Wallet build + test
