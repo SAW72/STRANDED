@@ -3,6 +3,7 @@ import { chmodSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
+import { EXCLUDED_POINTS_ACTIONS } from "../../shared/excludedPointsActions.mjs";
 import { MAX_POINTS_PER_ROW, score } from "./rubric.mjs";
 
 /**
@@ -53,13 +54,7 @@ export const POINTS_ACTIONS = Object.freeze([
   "wallet_session",
 ]);
 
-/** Stored on an old file, never scored, and rejected on a new write. */
-export const EXCLUDED_POINTS_ACTIONS = Object.freeze([
-  "bug_report",
-  "security",
-  "security_finding",
-  "finding",
-]);
+export { EXCLUDED_POINTS_ACTIONS };
 
 const EXCLUDED_ACTION_SQL = EXCLUDED_POINTS_ACTIONS.map((action) => `'${action}'`).join(", ");
 

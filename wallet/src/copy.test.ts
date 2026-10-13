@@ -111,6 +111,11 @@ describe("points copy", () => {
     expect(copy.POINTS_ACTION_REGISTRY_CLAIM).toBe("Registry claim");
   });
 
+  it("labels a rescue as Rescue", () => {
+    expect(copy.POINTS_ACTION_RESCUE).toBe("Rescue");
+    expect(copySource).not.toMatch(/placeholder, TBD/);
+  });
+
   it("does not export total or rank labels", () => {
     expect(copy).not.toHaveProperty("POINTS_TOTAL_LABEL");
     expect(copy).not.toHaveProperty("POINTS_RANK_LABEL");

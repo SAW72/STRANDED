@@ -25,6 +25,7 @@ import {
   POINTS_TITLE,
   POINTS_TX_LABEL,
 } from "./copy";
+import { EXCLUDED_POINTS_ACTIONS } from "../../shared/excludedPointsActions.mjs";
 import { chainLabel, isSupportedChainId, transactionUrl } from "./lib/chains";
 import { shortenBytes32 } from "./lib/format";
 import {
@@ -43,7 +44,7 @@ const ACTION_LABELS: Record<string, string> = {
 };
 
 /** Bug reports and security findings are not points actions and are not shown. */
-const UNLISTED_ACTIONS = new Set(["bug_report", "security", "security_finding", "finding"]);
+const UNLISTED_ACTIONS = new Set(EXCLUDED_POINTS_ACTIONS);
 
 function isListedAction(action: string): boolean {
   return !UNLISTED_ACTIONS.has(action);
@@ -67,7 +68,9 @@ type Lookup =
   | { kind: "loaded"; result: WalletPoints };
 
 function isEmptyResult(result: WalletPoints): boolean {
-  return result.total === 0 && result.categories.length === 0 && result.entries.length === 0;
+  const categories = result.categories.filter((category) => isListedAction(category.action));
+  const entries = result.entries.filter((entry) => isListedAction(entry.action));
+  return categories.length === 0 && entries.length === 0;
 }
 
 export function Points({ client }: { client?: PointsClient }) {
@@ -129,6 +132,7 @@ export function Points({ client }: { client?: PointsClient }) {
             autoCorrect="off"
             spellCheck={false}
             aria-invalid={lookup.kind === "invalid"}
+            aria-describedby={lookup.kind === "invalid" ? "points-address-error" : undefined}
             onChange={(event) => setInput(event.target.value)}
           />
         </label>
@@ -137,7 +141,7 @@ export function Points({ client }: { client?: PointsClient }) {
         </button>
       </form>
       {lookup.kind === "invalid" ? (
-        <p className="danger" role="alert" data-testid="points-invalid">
+        <p id="points-address-error" className="danger" role="alert" data-testid="points-invalid">
           {POINTS_INVALID_ADDRESS}
         </p>
       ) : null}

@@ -112,10 +112,10 @@ describe("Points page", () => {
     const categories = [...view.container.querySelectorAll("[data-testid='points-category']")].map(
       (node) => node.textContent,
     );
-    expect(categories.join(" ")).toContain("Rescue (placeholder, TBD)");
+    expect(categories.join(" ")).toContain("Rescue");
     expect(categories.join(" ")).toContain("100");
     const rescueRow = categories.find((text) => text.includes("100") && text.includes("Rescue"));
-    expect(rescueRow).toMatch(/placeholder, TBD/);
+    expect(rescueRow).not.toMatch(/placeholder|TBD/);
     expect(categories.join(" ")).toContain("Registry find");
     expect(categories.join(" ")).toContain("30");
     expect(categories.join(" ")).toContain("Session");
@@ -152,9 +152,12 @@ describe("Points page", () => {
     const view = await render(<Points client={client({ getWallet })} />);
     await lookup(view.container, "not-an-address");
     expect(getWallet).not.toHaveBeenCalled();
-    expect(view.container.querySelector("[data-testid='points-invalid']")?.textContent).toBe(
-      "Enter a valid wallet address.",
-    );
+    const error = view.container.querySelector("[data-testid='points-invalid']");
+    const input = view.container.querySelector("[data-testid='points-address']");
+    expect(error?.textContent).toBe("Enter a valid wallet address.");
+    expect(error?.id).toBe("points-address-error");
+    expect(input?.getAttribute("aria-describedby")).toBe("points-address-error");
+    expect(input?.getAttribute("aria-invalid")).toBe("true");
     expect(view.container.querySelector("[data-testid='points-loaded']")).toBeNull();
     expect(view.container.querySelector("[data-testid='points-error']")).toBeNull();
     await view.unmount();
@@ -233,9 +236,10 @@ describe("Points page", () => {
     );
     expect(categories).toHaveLength(1);
     expect(entries).toHaveLength(1);
-    expect(categories[0]).toContain("Rescue (placeholder, TBD)");
+    expect(categories[0]).toContain("Rescue");
     expect(categories[0]).toContain("100");
-    expect(entries[0]).toContain("Rescue (placeholder, TBD)");
+    expect(categories[0]).not.toMatch(/placeholder|TBD/);
+    expect(entries[0]).toContain("Rescue");
     expect(entries[0]).toContain("100");
     const visible = `${categories.join("\n")}\n${entries.join("\n")}`;
     for (const [index, action] of excluded.entries()) {
@@ -243,6 +247,34 @@ describe("Points page", () => {
       expect(visible).not.toContain(String(200 + index));
     }
     expect(visible).not.toContain("Other");
+    await view.unmount();
+  });
+
+  it("shows the empty state when every row is an excluded action", async () => {
+    const excludedOnly: WalletPoints = {
+      wallet: EXAMPLE_POINTS_ADDRESS,
+      total: 500,
+      rank: 1,
+      categories: [
+        { action: "bug_report", points: 500, count: 1 },
+        { action: "security", points: 300, count: 1 },
+        { action: "security_finding", points: 200, count: 1 },
+        { action: "finding", points: 100, count: 1 },
+      ],
+      entries: [
+        { action: "bug_report", points: 500, txHash: TX, chainId: ARB_SEPOLIA_CHAIN_ID },
+        { action: "security", points: 300, txHash: TX, chainId: ARB_SEPOLIA_CHAIN_ID },
+        { action: "security_finding", points: 200, txHash: null, chainId: null },
+        { action: "finding", points: 100, txHash: null, chainId: null },
+      ],
+    };
+    const view = await render(<Points client={client({ getWallet: async () => excludedOnly })} />);
+    await lookup(view.container, EXAMPLE_POINTS_ADDRESS);
+    expect(view.container.querySelector("[data-testid='points-loaded']")).toBeNull();
+    expect(view.container.querySelector("[data-testid='points-empty']")?.textContent).toMatch(/no points/i);
+    expect(view.container.querySelector("[data-testid='points-category']")).toBeNull();
+    expect(view.container.querySelector("[data-testid='points-entry']")).toBeNull();
+    expect(view.container.textContent).not.toMatch(/bug_report|security_finding|finding|\bsecurity\b|Other/);
     await view.unmount();
   });
 
@@ -254,7 +286,8 @@ describe("Points page", () => {
     expect(copy).not.toMatch(/Bug report/);
     expect(points).not.toMatch(/^\s*(bug_report|security|security_finding|finding)\s*:/m);
     expect(copy).not.toMatch(/bug_report|security_finding|Security finding|Finding report|POINTS_ACTION_BUG_REPORT/);
-    expect(copy).toMatch(/Rescue \(placeholder, TBD\)/);
+    expect(copy).toContain('POINTS_ACTION_RESCUE = "Rescue"');
+    expect(copy).not.toMatch(/placeholder, TBD/);
     expect(copy).toContain(POINTS_DISCLAIMER);
     expect(copy).toContain(POINTS_INTRO);
     expect(copy).toContain('POINTS_ACTION_REGISTRY_CLAIM = "Registry claim"');
@@ -272,7 +305,8 @@ describe("Points page", () => {
     expect(view.container.querySelector("[data-testid='points-rank']")).toBeNull();
     expect(view.container.textContent).not.toMatch(/\bTotal\b/);
     expect(view.container.textContent).not.toMatch(/\bRank\b/);
-    expect(view.container.textContent).toContain("Rescue (placeholder, TBD)");
+    expect(view.container.textContent).toContain("Rescue");
+    expect(view.container.textContent).not.toMatch(/placeholder, TBD/);
     const href = view.container.querySelector("[data-testid='points-tx']")?.getAttribute("href") ?? "";
     expect(href.startsWith("https://sepolia.arbiscan.io/tx/")).toBe(true);
     await view.unmount();
