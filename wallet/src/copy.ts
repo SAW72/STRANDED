@@ -118,9 +118,9 @@ export const SWITCH_TO_PREFIX = "Switch to";
 export const POINTS_TITLE = "Points";
 export const POINTS_NAV_LABEL = "Points";
 export const POINTS_BACK_LABEL = "Back";
-export const POINTS_INTRO = "Enter a wallet address to see points by category, the total, and rank.";
+export const POINTS_INTRO = "Enter a wallet address to see recorded activity by category.";
 export const POINTS_DISCLAIMER =
-  "Points are off-chain, unpaid, and not a token. They have no cash value, are not redeemable, and nothing is promised.";
+  "Points are an off-chain record of activity only. They are not a token, have no cash value, can't be sold, transferred or redeemed, may be adjusted or cancelled at any time, and do not convert to anything.";
 export const POINTS_ADDRESS_LABEL = "Wallet address";
 export const POINTS_ADDRESS_PLACEHOLDER = "0x…";
 export const POINTS_LOOKUP_LABEL = "Look up";

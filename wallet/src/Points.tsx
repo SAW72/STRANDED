@@ -22,11 +22,8 @@ import {
   POINTS_LOADING,
   POINTS_LOOKUP_LABEL,
   POINTS_NO_TX,
-  POINTS_RANK_LABEL,
   POINTS_TITLE,
-  POINTS_TOTAL_LABEL,
   POINTS_TX_LABEL,
-  POINTS_UNRANKED,
 } from "./copy";
 import { chainLabel, isSupportedChainId, transactionUrl } from "./lib/chains";
 import { shortenBytes32 } from "./lib/format";
@@ -181,10 +178,7 @@ function Loaded({ result, example }: { result: WalletPoints; example: boolean })
       <div data-testid="points-result">
         {example ? <ExampleLabel /> : null}
         <dl className="kv">
-          <dt>{POINTS_TOTAL_LABEL}</dt>
-          <dd data-testid="points-total">{String(result.total)}</dd>
-          <dt>{POINTS_RANK_LABEL}</dt>
-          <dd data-testid="points-rank">{result.rank == null ? POINTS_UNRANKED : String(result.rank)}</dd>
+          {/* Total and rank stay hidden until category weights are set. */}
           <dt>{POINTS_ADDRESS_RESULT_LABEL}</dt>
           <dd className="mono" data-testid="points-wallet">
             {result.wallet}

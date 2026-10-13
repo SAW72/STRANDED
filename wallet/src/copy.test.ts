@@ -96,17 +96,18 @@ describe("points copy", () => {
     }
   });
 
-  it("says points are off-chain, unpaid, not a token, and that nothing is promised", () => {
-    const disclaimer = copy.POINTS_DISCLAIMER.toLowerCase();
-    expect(disclaimer).toContain("off-chain");
-    expect(disclaimer).toContain("unpaid");
-    expect(disclaimer).toContain("not a token");
-    expect(disclaimer).toContain("no cash value");
-    expect(disclaimer).toContain("nothing is promised");
+  it("states the points disclaimer exactly", () => {
+    expect(copy.POINTS_DISCLAIMER).toBe(
+      "Points are an off-chain record of activity only. They are not a token, have no cash value, can't be sold, transferred or redeemed, may be adjusted or cancelled at any time, and do not convert to anything.",
+    );
   });
 
-  it("says points are not redeemable", () => {
-    expect(copy.POINTS_DISCLAIMER.toLowerCase()).toContain("not redeemable");
+  it("introduces recorded activity by category", () => {
+    expect(copy.POINTS_INTRO).toBe("Enter a wallet address to see recorded activity by category.");
+  });
+
+  it("keeps the registry claim label", () => {
+    expect(copy.POINTS_ACTION_REGISTRY_CLAIM).toBe("Registry claim");
   });
 });
 

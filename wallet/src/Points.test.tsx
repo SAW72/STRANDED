@@ -11,6 +11,7 @@ import {
   type PointsClient,
   type WalletPoints,
 } from "./lib/points";
+import { POINTS_DISCLAIMER, POINTS_INTRO } from "./copy";
 import copySource from "./copy.ts?raw";
 import pointsPageSource from "./Points.tsx?raw";
 import { isPointsRoute, Points } from "./Points";
@@ -92,15 +93,19 @@ describe("Points page", () => {
     document.body.innerHTML = "";
   });
 
-  it("renders a loaded ledger with category points, total, rank, and tx links", async () => {
+  it("renders a loaded ledger with category points and tx links, without total or rank", async () => {
     const getWallet = vi.fn(async () => loadedWallet);
     const view = await render(<Points client={client({ getWallet })} />);
     await lookup(view.container, "  " + EXAMPLE_POINTS_ADDRESS.toUpperCase().replace("0X", "0x") + " ");
 
     expect(getWallet).toHaveBeenCalledWith(EXAMPLE_POINTS_ADDRESS);
     expect(view.container.querySelector("[data-testid='points-loaded']")).not.toBeNull();
-    expect(view.container.querySelector("[data-testid='points-total']")?.textContent).toBe("140");
-    expect(view.container.querySelector("[data-testid='points-rank']")?.textContent).toBe("2");
+    expect(view.container.querySelector("[data-testid='points-total']")).toBeNull();
+    expect(view.container.querySelector("[data-testid='points-rank']")).toBeNull();
+    expect(view.container.textContent).not.toMatch(/\bTotal\b/);
+    expect(view.container.textContent).not.toMatch(/\bRank\b/);
+    expect(view.container.querySelector("[data-testid='points-disclaimer']")?.textContent).toBe(POINTS_DISCLAIMER);
+    expect(view.container.textContent).toContain(POINTS_INTRO);
     expect(view.container.querySelector("[data-testid='points-wallet']")?.textContent).toBe(
       EXAMPLE_POINTS_ADDRESS,
     );
@@ -118,7 +123,6 @@ describe("Points page", () => {
     expect(links).toHaveLength(2);
     expect(links[0]?.getAttribute("href")).toBe(transactionUrl(ARB_SEPOLIA_CHAIN_ID, TX));
     expect(view.container.textContent).toContain("No transaction");
-    expect(view.container.textContent).toContain("nothing is promised");
     expect(view.container.textContent?.toLowerCase()).not.toContain("reward");
     expect(view.container.textContent).not.toContain("$");
     expect(view.container.textContent?.toLowerCase()).not.toContain("connect wallet");
@@ -207,6 +211,12 @@ describe("Points page", () => {
     expect(points).not.toMatch(/^\s*(bug_report|security|security_finding|finding)\s*:/m);
     expect(copy).not.toMatch(/bug_report|security_finding|Security finding|Finding report|POINTS_ACTION_BUG_REPORT/);
     expect(copy).toMatch(/Rescue \(placeholder, TBD\)/);
+    expect(copy).toContain(POINTS_DISCLAIMER);
+    expect(copy).toContain(POINTS_INTRO);
+    expect(copy).toContain('POINTS_ACTION_REGISTRY_CLAIM = "Registry claim"');
+    expect(points).not.toMatch(/data-testid=["']points-total["']/);
+    expect(points).not.toMatch(/data-testid=["']points-rank["']/);
+    expect(points).not.toMatch(/POINTS_TOTAL_LABEL|POINTS_RANK_LABEL|POINTS_UNRANKED/);
   });
 
   it("uses the example client from the page default without a baked URL", async () => {
@@ -214,7 +224,10 @@ describe("Points page", () => {
     const view = await render(<Points />);
     expect(view.container.querySelector("[data-testid='points-example']")?.textContent).toMatch(/example data/i);
     await lookup(view.container, EXAMPLE_POINTS_ADDRESS);
-    expect(view.container.querySelector("[data-testid='points-total']")?.textContent).toBe("140");
+    expect(view.container.querySelector("[data-testid='points-total']")).toBeNull();
+    expect(view.container.querySelector("[data-testid='points-rank']")).toBeNull();
+    expect(view.container.textContent).not.toMatch(/\bTotal\b/);
+    expect(view.container.textContent).not.toMatch(/\bRank\b/);
     expect(view.container.textContent).toContain("Rescue (placeholder, TBD)");
     const href = view.container.querySelector("[data-testid='points-tx']")?.getAttribute("href") ?? "";
     expect(href.startsWith("https://sepolia.arbiscan.io/tx/")).toBe(true);
