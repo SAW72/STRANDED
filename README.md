@@ -142,6 +142,8 @@ src/interfaces/IStrandedRegistry.sol
 src/GasRescue.sol                  # fee-skim harness
 src/interfaces/IGasRescue.sol
 src/GatedDemoToken.sol             # H1 fixed-supply SDEMO; no mint, no owner
+src/TestDemoToken.sol              # tDEMO, fixed 1e12, testnet only, no mint, no owner
+src/TestDemoFaucet.sol             # 2 tDEMO / wallet / 24h, no owner
 src/mocks/…
 test/GasRescueSwap.t.sol
 test/GasRescueLens.t.sol
@@ -155,11 +157,12 @@ script/DeployStrandedRegistry.s.sol  # testnet registry; Spencer --broadcast onl
 script/InspectGasRescueSwap.s.sol  # read-only; no keys
 script/HackQuestStatus.s.sol       # Lens consumer; HackQuest JSON; no keys
 script/MigrateH1GatedDemoToken.s.sol # H1 simulate-only; Spencer signs; no --broadcast here
+script/TestDemoSupply.s.sol        # tDEMO B1–B5 and Arb A-steps; simulate-only; Spencer signs
 script/RescueSwap.s.sol
 script/Deploy.s.sol                # harness
 script/Rescue.s.sol                # harness
 wallet/                            # Vite + React + wagmi/viem (Base + Arb Sepolia)
-relayer/                           # Arb Sepolia POST /v1/quotes (Render)
+relayer/                           # one process per chain: Arb 421614 (default) or Base 84532
 ```
 
 ## Live (testnet)
@@ -173,7 +176,7 @@ relayer/                           # Arb Sepolia POST /v1/quotes (Render)
 | Chain | GasRescueSwap (judged) | Mock / notes |
 | --- | --- | --- |
 | Arb Sepolia `421614` | [`0x65e712222745A8FCCbF038A90Fa75caB0867993D`](https://sepolia.arbiscan.io/address/0x65e712222745A8FCCbF038A90Fa75caB0867993D) | Demo token **SDEMO** "Stranded Demo Token" [`0xE3cb1AC5EDc70D3a85250a8c00cBe3A45AFc616C`](https://sepolia.arbiscan.io/address/0xE3cb1AC5EDc70D3a85250a8c00cBe3A45AFc616C) (testnet, fixed supply 20, no value); **locked** router [`0xFE22f32eF7a8f64B6c9E1CCAe31817B54184f7fc`](https://sepolia.arbiscan.io/address/0xFE22f32eF7a8f64B6c9E1CCAe31817B54184f7fc) (0.0195 ETH); WETH `0x980B62Da83eFf3D4576C647993b0c1D7faf17c73`. Retired Oct 1, 2026 and no longer usable: GRTT `0x5649…d713`, gMOCK `0x3000…B318`, open router `0x6804…25A8` (0 ETH). |
-| Base Sepolia `84532` | [`0x21A1ADf810e64B5bd1d530D31abA6856b8DEf688`](https://sepolia.basescan.org/address/0x21A1ADf810e64B5bd1d530D31abA6856b8DEf688) | Mock `0xE36c35cbF0373D77D00732f7B92dB4fB8fd37166`; router `0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4`; WETH `0x4200000000000000000000000000000000000006` |
+| Base Sepolia `84532` | [`0x21A1ADf810e64B5bd1d530D31abA6856b8DEf688`](https://sepolia.basescan.org/address/0x21A1ADf810e64B5bd1d530D31abA6856b8DEf688) | Stale allowlist until Spencer signs B4: gMOCK `0xE36c35cbF0373D77D00732f7B92dB4fB8fd37166` (public mint) and unidentified router `0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4` (0 ETH, no cap). Do not fund that router. tDEMO is not deployed yet. WETH `0x4200000000000000000000000000000000000006` |
 
 `GasRescueLens` is **not on-chain** (KNOW). Day-5 `HackQuestStatus` still works without that deploy — it constructs Lens in-script (`lensEphemeral=true`, no broadcast) and prints `hotWalletUnderfunded`, `liveSubmitBlocked`, `recommendedJudgePath`, `judgeNote`, `feePostureNote`, and `liveVsTip`. With the 2026-10-01 hot-wallet balance above 0.10 ETH, the recommended judge path is **`live-submit-ok-if-user-funded`**. Do not list `StrandedRegistry` here (merged Phase-2 scaffold; not judged).
 
@@ -207,6 +210,14 @@ The contract creates 20 SDEMO in the constructor and has no `mint`. Supply stays
 - The Steward wallet transfers 2 SDEMO per named judge or QA wallet, on request only. Those wallets are the demo and hackathon-judge wallets named above.
 - Log every transfer (date, recipient, amount, tx hash) in [docs/SDEMO_DISTRIBUTION_LOG.md](docs/SDEMO_DISTRIBUTION_LOG.md). The migration script does not move balances.
 - Do not change `setRate` or `setMaxPayout` on the router during judging. Do not call `sweepToken` on SDEMO on the router during judging. SDEMO held by the router is never swept and sent out again. The 0.01 ETH ceiling assumes that.
+
+## Stranded TEST Demo (tDEMO)
+
+> **Stranded TEST Demo (tDEMO): testnet demo only. No monetary value.** The token name is "Stranded TEST Demo — No Value". It is not for sale and not a reward. It deploys only on Base Sepolia (84532) or Arbitrum Sepolia (421614). Nothing here is on mainnet, and nothing in this section has been broadcast.
+
+tDEMO has a fixed supply of 1e12 tokens, minted once to a no-owner faucet. The faucet drips 2 tDEMO per wallet per 24 hours and reverts `FaucetEmpty` when it cannot pay that amount. There is no `mint` and no owner. SDEMO above is unchanged.
+
+Spencer signs the simulate-only scripts in [docs/TEST_DEMO_SUPPLY.md](docs/TEST_DEMO_SUPPLY.md). On Base the order is delist gMOCK and `0x94cC…2bc4`, then deploy, allowlist, then fund. On Arb the same faucet is allowlisted next to SDEMO, and the existing locked router `0xFE22…f7fc` is reused. Agents do not broadcast and do not hold keys.
 
 ## Wallet UX
 

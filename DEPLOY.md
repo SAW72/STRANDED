@@ -75,6 +75,10 @@ curl -sS https://stranded-relayer-arb.onrender.com/health
 
 Expect `ok: true`, `chainId: 421614`, `swap: 0x65e7…`. Then open https://strandedtoken.trade, pick **Arb Sepolia**, connect, quote, sign. Do not use https://gas-rescue.onrender.com for a rescue; the relayer will not send `Access-Control-Allow-Origin` for that host.
 
+## 6. Base Sepolia relayer (same code, not provisioned here)
+
+`render.yaml` also describes `stranded-relayer-base`. It is the same Node process with `CHAIN_ID=84532`, swap `0x21A1ADf810e64B5bd1d530D31abA6856b8DEf688`, and `RPC_URL=https://sepolia.base.org`. `TOKEN_ADDRESS`, `DEMO_TOKEN`, and `ROUTER_ADDRESS` are unset until Spencer pastes the B1 and B2 receipts. Do not apply that service until he says GO. The Arb service and its SDEMO addresses stay as they are. A Base process rejects chain `421614`. An Arb process rejects chain `84532`.
+
 ## Do not
 
 - Put `RELAYER_PRIVATE_KEY` or owner keys in `render.yaml` or git

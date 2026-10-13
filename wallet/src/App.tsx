@@ -693,7 +693,7 @@ function RescueApp() {
         <button className="btn" type="button" disabled={tokenBalance === undefined || useFixture} onClick={() => void fillMax()}>
           Use full balance
         </button>
-        <p className="token-disclosure">{tokenDisclosure(demoSymbol)}</p>
+        <p className="token-disclosure">{tokenDisclosure(demoSymbol, selectedChainId)}</p>
       </section>
 
       {receipt ? (
@@ -706,7 +706,7 @@ function RescueApp() {
       <section className="card">
         <h2>4. {REVIEW_TITLE}</h2>
         <p className="subtitle">{REVIEW_SUBTITLE}</p>
-        <p className="token-disclosure">{tokenDisclosure(demoSymbol)}</p>
+        <p className="token-disclosure">{tokenDisclosure(demoSymbol, selectedChainId)}</p>
 
         {quoteSource === "fixture" && (
           <div className="banner banner-sample" role="status">

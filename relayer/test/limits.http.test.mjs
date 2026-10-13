@@ -336,6 +336,32 @@ describe("readable quote and rescue errors", () => {
     });
   });
 
+  it("accepts 84532 only when the process is configured for Base Sepolia", async () => {
+    await withServer({ chainId: 84532 }, async ({ url, quoteCalls }) => {
+      const ok = await post(url, "/v1/quotes", {
+        body: JSON.stringify({ user: USER, amountIn: "1", chainId: 84532 }),
+      });
+      assert.equal(ok.status, 200);
+      const omitted = await post(url, "/v1/quotes", {
+        body: JSON.stringify({ user: USER, amountIn: "1" }),
+      });
+      assert.equal(omitted.status, 200);
+      const arb = await post(url, "/v1/quotes", {
+        body: JSON.stringify({ user: USER, amountIn: "1", chainId: 421614 }),
+      });
+      assert.equal(arb.status, 400);
+      assert.equal(arb.body.error, "wrong_chain");
+      assert.equal(arb.body.message, "This rescue only works on Base Sepolia.");
+      const mainnet = await post(url, "/v1/rescues", {
+        body: JSON.stringify({ order: { user: USER, chainId: 1 } }),
+      });
+      assert.equal(mainnet.status, 400);
+      assert.equal(mainnet.body.error, "wrong_chain");
+      assert.equal(mainnet.body.message, "This rescue only works on Base Sepolia.");
+      assert.equal(quoteCalls(), 2);
+    });
+  });
+
   it("prefers a readable 400 over a 429 when the body is invalid", async () => {
     let t = 1_000;
     await limitedServer({ config: { perWallet: 1, perIp: 1, windowMs: 60_000 }, now: () => t }, async ({ url }) => {
