@@ -2,6 +2,8 @@
 
 **Status:** Draft. Points are off-chain scores and are unpaid. No rewards are promised.
 
+Points are an off-chain record of activity only. They are not a token, have no cash value, can't be sold, transferred or redeemed, may be adjusted or cancelled at any time, and do not convert to anything. No token, airdrop, conversion, snapshot or claim is planned.
+
 ## Purpose
 
 Record genuine testnet activity as an off-chain score. Points measure usage. They are not a payment and they are not transferable.
@@ -17,22 +19,20 @@ Record genuine testnet activity as an off-chain score. Points measure usage. The
 
 | Action | Points | Notes |
 |---|---|---|
-| Rescue completed (GasRescue) | 100 | Flat placeholder, pending Spencer's decision. Not based on a price or an amount rescued. |
+| Rescue completed (GasRescue) | TBD per verified rescue | Not based on a price or an amount rescued. |
 | Relayer job executed | 50 | Registered operator identity required |
 | Registry find posted (StrandedRegistry) | 30 | Find must be a real stranded balance |
 | Registry find claimed | 50 | Claim must succeed on-chain |
 | Active wallet session | 10 per week | One session per wallet per ISO week. The week is the server clock. |
-| Bug report / security finding | 100–500 by severity | Must include a tx hash or reproducible steps |
-
-Severity bands in code: low 100, medium 200, high 300, critical 500. Critical is also the maximum stored on one ledger row.
+| Security report | No points | Security reports go through the security policy and carry no points. |
 
 ## Anti-gaming
 
-- One rescue scores the flat 100 once. A second wallet cannot claim the same rescue transaction.
+- One verified rescue is scored once. A second wallet cannot claim the same rescue transaction.
 - One wallet session per wallet per ISO week. The week is the server clock; a caller-supplied time is ignored.
 - No referral bonuses.
 - No points for holding or transferring a balance.
-- Bug reports require a transaction hash or reproducible steps.
+- Security reports go through the security policy and carry no points.
 - Relayer jobs require a registered operator identity.
 - A single ledger row cannot exceed 500 points.
 

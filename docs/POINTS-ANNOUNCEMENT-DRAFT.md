@@ -18,23 +18,22 @@ Starting today, we record **points** for real activity on our testnets:
 - Running a relayer job
 - Posting or claiming a registry find
 - Staying active with a connected wallet
-- Reporting bugs or security issues
 
 A few things this is *not*:
 
 - **Not a token.** Points are off-chain scores. Nothing is minted, traded, or transferable.
-- **Not a promise.** No rewards are guaranteed. If a token is ever launched, points *may* be considered — but that decision, and any conversion rate, happens only after activity is complete. Nothing is promised today.
+- **Not a promise.** No rewards are guaranteed. Points do not convert to anything. No token, airdrop, conversion, snapshot or claim is planned.
 - **Not a price signal.** We will never show dollar values or token estimates alongside points. Points measure usage, not worth.
 
 You can check your points anytime at [dashboard URL] by entering your wallet address. No account needed.
 
-If you find something broken, report it — verified findings earn points too, and they make the product better for everyone.
+Security reports go through the security policy and carry no points.
 
 ---
 
 ## Why this wording matters
 
-- "May be considered" instead of "will be rewarded" — avoids inducing consideration.
+- Points do not convert. The draft does not describe a token, airdrop, conversion, snapshot, or claim.
 - No dollar values, no token estimates — avoids pricing the consideration.
 - No login or connect-wallet-to-earn — the dashboard is purely informational.
 - Activity is recorded post-facto — the announcement describes what already happened, not what to do next.
