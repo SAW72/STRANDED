@@ -8,13 +8,7 @@ import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
 import { EXCLUDED_POINTS_ACTIONS } from "../../shared/excludedPointsActions.mjs";
-import {
-  EXCLUDED_POINTS_ACTIONS as ledgerExcluded,
-  POINTS_ACTIONS,
-  createLedgerStore,
-  isDuplicateError,
-  syntheticTxKey,
-} from "../points/ledgerStore.mjs";
+import { POINTS_ACTIONS, createLedgerStore, isDuplicateError, syntheticTxKey } from "../points/ledgerStore.mjs";
 import { MAX_POINTS_PER_ROW } from "../points/rubric.mjs";
 
 const USER = "0x1111111111111111111111111111111111111111";
@@ -394,23 +388,44 @@ describe("points ledger", () => {
     assert.match(sql, /WHERE substr\(tx_hash,1,2\)='0x'/);
   });
 
-  it("matches schema trigger action lists to the excluded-action constant", () => {
+  it("rejects each shared excluded action and accepts listed actions on the real schema", () => {
     const sql = readFileSync(new URL("../points/schema.sql", import.meta.url), "utf8");
-    const points = readFileSync(new URL("../../wallet/src/Points.tsx", import.meta.url), "utf8");
-    const lists = [];
-    for (const block of sql.match(/CREATE TRIGGER\s+\w+[\s\S]*?END;/g) ?? []) {
-      for (const match of block.matchAll(/IN\s*\(([^)]*)\)/g)) {
-        lists.push([...match[1].matchAll(/'([^']*)'/g)].map((item) => item[1]));
-      }
+    const db = new Database(":memory:");
+    const txFor = (n) => `0x${n.toString(16).padStart(2, "0").repeat(32)}`;
+    try {
+      db.exec(sql);
+      const insert = db.prepare(
+        `INSERT INTO points_ledger (wallet, action, points, tx_hash, metadata, created_at)
+         VALUES (?, ?, 100, ?, NULL, '2024-01-01T00:00:00.000Z')`,
+      );
+      const actionOf = db.prepare("SELECT action FROM points_ledger WHERE tx_hash = ?");
+      POINTS_ACTIONS.forEach((action, index) => {
+        const txHash = txFor(index + 1);
+        insert.run(USER, action, txHash);
+        assert.equal(actionOf.get(txHash).action, action);
+      });
+      EXCLUDED_POINTS_ACTIONS.forEach((action, index) => {
+        assert.throws(() => insert.run(USER, action, txFor(20 + index)), /excluded_action/, action);
+        const rescueTx = txFor(40 + index);
+        insert.run(USER, "rescue_completed", rescueTx);
+        assert.throws(
+          () => db.prepare("UPDATE points_ledger SET action = ? WHERE tx_hash = ?").run(action, rescueTx),
+          /excluded_action/,
+          action,
+        );
+        assert.equal(actionOf.get(rescueTx).action, "rescue_completed");
+      });
+      assert.throws(
+        () => insert.run(USER, "audit", txFor(90)),
+        (err) => {
+          assert.equal(/excluded_action/.test(err.message), false);
+          assert.match(err.message, /CHECK constraint failed/);
+          return true;
+        },
+      );
+    } finally {
+      db.close();
     }
-    assert.equal(lists.length, 3);
-    for (const list of lists) {
-      assert.deepEqual(list, [...EXCLUDED_POINTS_ACTIONS]);
-    }
-    assert.deepEqual([...ledgerExcluded], [...EXCLUDED_POINTS_ACTIONS]);
-    assert.match(points, /from "\.\.\/\.\.\/shared\/excludedPointsActions\.mjs"/);
-    assert.match(points, /new Set\(EXCLUDED_POINTS_ACTIONS\)/);
-    assert.doesNotMatch(points, /new Set\(\s*\[/);
   });
 
   it("rejects bug_report in the schema action check", async () => {

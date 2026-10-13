@@ -116,6 +116,10 @@ describe("points copy", () => {
     expect(copySource).not.toMatch(/placeholder, TBD/);
   });
 
+  it("says point weights are placeholders under the category list", () => {
+    expect(copy.POINTS_WEIGHTS_NOTE).toBe("Point weights are placeholders and may change.");
+  });
+
   it("does not export total or rank labels", () => {
     expect(copy).not.toHaveProperty("POINTS_TOTAL_LABEL");
     expect(copy).not.toHaveProperty("POINTS_RANK_LABEL");

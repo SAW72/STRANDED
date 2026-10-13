@@ -24,6 +24,7 @@ import {
   POINTS_NO_TX,
   POINTS_TITLE,
   POINTS_TX_LABEL,
+  POINTS_WEIGHTS_NOTE,
 } from "./copy";
 import { EXCLUDED_POINTS_ACTIONS } from "../../shared/excludedPointsActions.mjs";
 import { chainLabel, isSupportedChainId, transactionUrl } from "./lib/chains";
@@ -194,6 +195,7 @@ function Loaded({ result, example }: { result: WalletPoints; example: boolean })
           {example ? <ExampleLabel /> : null}
           {POINTS_CATEGORIES_LABEL}
         </h2>
+        <p data-testid="points-weights">{POINTS_WEIGHTS_NOTE}</p>
         <ul className="points-list">
           {result.categories.filter((category) => isListedAction(category.action)).map((category, index) => (
             <li className="points-entry" data-testid="points-category" key={category.action + "-" + String(index)}>

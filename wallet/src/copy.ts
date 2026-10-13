@@ -133,6 +133,7 @@ export const POINTS_EXAMPLE_NOTE =
   "Example data, not a live ledger. These figures are not recorded activity. An empty result means this example has no row for that address.";
 export const POINTS_ADDRESS_RESULT_LABEL = "Address";
 export const POINTS_CATEGORIES_LABEL = "By category";
+export const POINTS_WEIGHTS_NOTE = "Point weights are placeholders and may change.";
 export const POINTS_ENTRIES_LABEL = "Entries";
 export const POINTS_TX_LABEL = "Transaction";
 export const POINTS_NO_TX = "No transaction";
