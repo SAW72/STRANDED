@@ -16,7 +16,7 @@ Scripts: `script/TestDemoSupply.s.sol`. Keystore placeholder on every broadcast 
 
 Simulation omits `--broadcast` and `--account` and passes only `--sender`. Copy addresses from receipts. Do not paste a predicted CREATE address into a later step.
 
-Gas figures below are the script's `gasleft` deltas around each call (the inner call, not the 21,000 intrinsic). They come from the fork tests calling the same script helpers against a fork of the live chain, with no broadcast. B5's value transfers were measured after the fork dealt the owner up to exactly 0.07 ETH, because his live Base balance (about 0.0583 ETH) cannot cover 0.07 ETH. The live `forge script` of B5 reverts `Underfunded` until that balance is there. `setTokenAllowed` after `setEip2612Token(true)` is a skipped branch on this bytecode (`setEip2612Token(true)` already sets `allowedTokens`), so that delta is not a transaction. A2's `setRouterAllowed` delta is the skipped `if (base)` branch.
+Gas figures below are the script's `gasleft` deltas around each call (the inner call, not the 21,000 intrinsic). They come from the fork tests calling the same script helpers against a fork of the live chain, with no broadcast. B5's value transfers were measured after the fork dealt the owner up to exactly 0.071 ETH (0.07 ETH of transfers plus 0.001 ETH headroom). His live Base balance (about 0.0583 ETH) is short of that. The live `forge script` of B5 reverts `Underfunded` until that balance is there. A balance of exactly 0.07 ETH also reverts. `setTokenAllowed` after `setEip2612Token(true)` is a skipped branch on this bytecode (`setEip2612Token(true)` already sets `allowedTokens`), so that delta is not a transaction. A2's `setRouterAllowed` delta is the skipped `if (base)` branch.
 
 ## Who signs
 
@@ -33,13 +33,14 @@ Run **B4, then B1, then B2, then B3, then B5**. Delist before deploy. Fund last,
 
 ### B4 — delist stale allowlist
 
-`B4_DelistStaleAllowlist`. Three calls on `0x21A1ADf810e64B5bd1d530D31abA6856b8DEf688`:
+`B4_DelistStaleAllowlist`. Two calls on `0x21A1ADf810e64B5bd1d530D31abA6856b8DEf688`, the same two as `docs/BASE-SEPOLIA-DELIST-STEPS.md`. `setTokenAllowed(token, false)` also sets `eip2612Tokens[token]` to false. There is no second token transaction.
 
 1. `setTokenAllowed(0xE36c35cbF0373D77D00732f7B92dB4fB8fd37166, false)`
-2. `setEip2612Token(0xE36c35cbF0373D77D00732f7B92dB4fB8fd37166, false)`
-3. `setRouterAllowed(0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4, false)`
+   calldata `0x15f69012000000000000000000000000e36c35cbf0373d77d00732f7b92db4fb8fd371660000000000000000000000000000000000000000000000000000000000000000`
+2. `setRouterAllowed(0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4, false)`
+   calldata `0x6cc88edb00000000000000000000000094cc0aac535ccdb3c01d6787d6413c739ae12bc40000000000000000000000000000000000000000000000000000000000000000`
 
-gMOCK has public `mint`. Router `0x94cC…2bc4` is not `LockedDemoSwapRouter` and holds 0 ETH. Do not fund it.
+gMOCK has public `mint`. Router `0x94cC…2bc4` is Uniswap SwapRouter02, holds 0 ETH, and is not the capped router. Do not fund it. After step 1, `allowedTokens` and `eip2612Tokens` for gMOCK are both false.
 
 ```bash
 forge script script/TestDemoSupply.s.sol:B4_DelistStaleAllowlist \
@@ -96,7 +97,7 @@ forge script script/TestDemoSupply.s.sol:B3_AllowlistTestDemo \
 - `0.05 ether` to the B2 router (500 rescues at 0.0001 ETH)
 - `0.02 ether` to `0x8240124dc78a27c80354Ca813Df12aa2888A9AF6`
 
-The script reverts `Underfunded` unless the owner holds at least 0.07 ETH. On 2026-10-13 the owner held about 0.0583 ETH on Base Sepolia, so B5 does not simulate against live state until he collects faucet ETH. Sources are the free Base Sepolia faucets (Coinbase CDP, Alchemy, QuickNode, Superchain, Chainlink) and the Base Sepolia bridge from Ethereum Sepolia. No purchase.
+The script reverts `Underfunded` unless the owner holds at least 0.071 ETH: the 0.07 ETH it sends, plus 0.001 ETH headroom so those two transfers can pay gas. A balance of exactly 0.07 ETH reverts. On 2026-10-13 the owner held about 0.0583 ETH on Base Sepolia, so B5 does not simulate against live state until he collects faucet ETH. Sources are the free Base Sepolia faucets (Coinbase CDP, Alchemy, QuickNode, Superchain, Chainlink) and the Base Sepolia bridge from Ethereum Sepolia. No purchase.
 
 ```bash
 ROUTER_ADDRESS=<B2 receipt> \
@@ -185,7 +186,7 @@ No additional gate is proposed. The existing relayer limits (1 rescue per wallet
 
 ## Relayer and wallet
 
-The relayer process serves one chain, chosen by `CHAIN_ID`. Unset, it stays **421614** and still rejects 84532 with "This rescue only works on Arbitrum Sepolia." `CHAIN_ID=84532` accepts only Base Sepolia. `render.yaml` keeps `stranded-relayer-arb` and adds `stranded-relayer-base` for Spencer to apply later. SDEMO env on the Arb service is unchanged.
+The relayer process serves one chain. `CHAIN_ID` must be the decimal string `421614` or `84532`. Startup exits if it is missing, not decimal, or if the RPC `eth_chainId` differs. A rescue order with no `chainId` is `wrong_chain`. `render.yaml` keeps `stranded-relayer-arb` only. The Base service is `render.base.yaml`, which a Blueprint sync does not create. SDEMO env on the Arb service is unchanged. The live Arb service `srv-daec4n740ujc73el94l0` must have `CHAIN_ID=421614` set before this process ships.
 
 The wallet chain picker still defaults to Arb Sepolia. SDEMO disclosure text is unchanged. Other symbols follow the selected chain.
 
@@ -195,9 +196,8 @@ Filled from the fork tests on 2026-10-13 (Base Sepolia and Arb Sepolia public RP
 
 | Step | Call | Script gas delta |
 | --- | --- | --- |
-| B4 | `setTokenAllowed(gMOCK, false)` | 16889 |
-| B4 | `setEip2612Token(gMOCK, false)` | 3090 |
-| B4 | `setRouterAllowed(0x94cC, false)` | 7647 |
+| B4 | `setTokenAllowed(gMOCK, false)` (also clears `eip2612Tokens`) | 16877 |
+| B4 | `setRouterAllowed(0x94cC, false)` | 7636 |
 | B1 | `new TestDemoFaucet()` | 1117361 |
 | A1 | `new TestDemoFaucet()` | 1117411 |
 | B2 | `new LockedDemoSwapRouter(...)` | 774864 |
@@ -206,6 +206,6 @@ Filled from the fork tests on 2026-10-13 (Base Sepolia and Arb Sepolia public RP
 | B3 | `setRouterAllowed(newRouter, true)` | 24802 |
 | A2 | `setEip2612Token(tDEMO, true)` | 51642 |
 | A2 | `setTokenAllowed` / `setRouterAllowed` | skipped (1455 and 24 gas, not txs) |
-| B5 | 0.05 ETH to router | 11321 |
-| B5 | 0.02 ETH to relayer | 9553 |
+| B5 | 0.05 ETH to router | 11360 |
+| B5 | 0.02 ETH to relayer | 9550 |
 | A3 | `setMaxPayout(0.0001 ether)` | 8286 |

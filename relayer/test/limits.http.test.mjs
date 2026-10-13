@@ -18,7 +18,7 @@ function quoteBody(extra = {}) {
 }
 
 function rescueBody(user = USER) {
-  return JSON.stringify({ order: { user } });
+  return JSON.stringify({ order: { user, chainId: 421614 } });
 }
 
 function post(url, path, { body = quoteBody(), headers = {}, origin = ORIGIN } = {}) {

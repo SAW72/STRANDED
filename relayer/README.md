@@ -1,6 +1,6 @@
 # Testnet relayer
 
-One process serves one testnet. The default is Arbitrum Sepolia (`CHAIN_ID=421614`), which is the main demo. Set `CHAIN_ID=84532` and a Base Sepolia `RPC_URL` to serve Base Sepolia instead. The same code handles both. It serves `POST /v1/quotes` and `POST /v1/rescues`. The process binds `0.0.0.0:$PORT` on Render and `127.0.0.1` locally. A quote or rescue for any other chain, including the other testnet, is `wrong_chain`.
+One process serves one testnet. `CHAIN_ID` must be the decimal string `421614` (Arb Sepolia, the main demo) or `84532` (Base Sepolia). There is no default. Startup exits if `CHAIN_ID` is missing or not that decimal form, and if the RPC `eth_chainId` is different. Set `RPC_URL` to that chain. The same code handles both. It serves `POST /v1/quotes` and `POST /v1/rescues`. The process binds `0.0.0.0:$PORT` on Render and `127.0.0.1` locally. A quote for any other chain, including the other testnet, is `wrong_chain`. A rescue order that omits `chainId` is `wrong_chain` too.
 
 Runtime secrets stay in the environment. Do not put `RELAYER_PRIVATE_KEY` in a file or in git. This service does not broadcast from unit tests.
 
@@ -84,7 +84,7 @@ Bad input is HTTP 400 with `{ "ok": false, "error": "<code>", "message": "..." }
 | Malformed token address | `invalid_address` | That token address doesn't look right. |
 | Missing, non-numeric, negative, or zero amount | `invalid_amount` | That amount isn't valid. Please check it and try again. |
 | The amount split does not fit | `invalid_amount_split` | That amount isn't valid. Please check it and try again. |
-| Chain other than this process's `CHAIN_ID` | `wrong_chain` | Arb process: This rescue only works on Arbitrum Sepolia. Base process: This rescue only works on Base Sepolia. |
+| Chain other than this process's `CHAIN_ID`, or a rescue order with no `chainId` | `wrong_chain` | Arb process: This rescue only works on Arbitrum Sepolia. Base process: This rescue only works on Base Sepolia. |
 | Token has no contract code | `token_not_contract` | That token isn't supported for rescue. |
 | Amount is too small to pay gas | `amount_too_small` | That amount is too small to rescue. Please try a larger amount. |
 | Amount is larger than the wallet balance | `insufficient_balance` | That amount is larger than this wallet's balance. |

@@ -66,6 +66,8 @@ contract TestDemoSteps is Script {
     uint256 public constant BASE_RATE_DENOMINATOR = 1e18;
     uint256 public constant BASE_MAX_PAYOUT = 0.0001 ether;
     uint256 public constant BASE_ROUTER_FUND = 0.05 ether;
+    /// @dev Left on the owner after the two B5 transfers so the funding txs can pay gas.
+    uint256 public constant BASE_FUND_HEADROOM = 0.001 ether;
     uint256 public constant BASE_RELAYER_FUND = 0.02 ether;
     /// @dev Recommended Arb cap. 0.2 tDEMO still quotes 0.0001 ETH. 2 tDEMO hits this cap.
     uint256 public constant ARB_RECOMMENDED_MAX_PAYOUT = 0.0001 ether;
@@ -112,28 +114,25 @@ contract TestDemoSteps is Script {
         require(swap.owner() == OWNER, "B4: owner is not 0x3046...bA9D");
 
         bytes memory delistToken = abi.encodeCall(ILiveSwapAdmin.setTokenAllowed, (BASE_GMOCK, false));
-        bytes memory delistEip = abi.encodeCall(ILiveSwapAdmin.setEip2612Token, (BASE_GMOCK, false));
         bytes memory delistRouter = abi.encodeCall(ILiveSwapAdmin.setRouterAllowed, (BASE_STALE_ROUTER, false));
         _logCall("B4 setTokenAllowed(gMOCK, false)", BASE_SWAP, delistToken);
-        _logCall("B4 setEip2612Token(gMOCK, false)", BASE_SWAP, delistEip);
         _logCall("B4 setRouterAllowed(0x94cC...2bc4, false)", BASE_SWAP, delistRouter);
         console2.log("signer", sender);
 
         uint256 g0 = gasleft();
         vm.startBroadcast(sender);
+        // setTokenAllowed(false) also clears eip2612Tokens. No second token call.
         swap.setTokenAllowed(BASE_GMOCK, false);
         uint256 g1 = gasleft();
-        swap.setEip2612Token(BASE_GMOCK, false);
-        uint256 g2 = gasleft();
         swap.setRouterAllowed(BASE_STALE_ROUTER, false);
-        uint256 g3 = gasleft();
+        uint256 g2 = gasleft();
         vm.stopBroadcast();
 
         console2.log("B4 gas setTokenAllowed", g0 - g1);
-        console2.log("B4 gas setEip2612Token", g1 - g2);
-        console2.log("B4 gas setRouterAllowed", g2 - g3);
+        console2.log("B4 gas setRouterAllowed", g1 - g2);
 
-        require(!swap.allowedTokens(BASE_GMOCK) && !swap.eip2612Tokens(BASE_GMOCK), "B4: gMOCK still listed");
+        require(!swap.allowedTokens(BASE_GMOCK), "B4: gMOCK still listed");
+        require(!swap.eip2612Tokens(BASE_GMOCK), "B4: eip2612 flag still set");
         require(!swap.allowedRouters(BASE_STALE_ROUTER), "B4: stale router still listed");
     }
 
@@ -281,9 +280,10 @@ contract TestDemoSteps is Script {
         uint256 need = BASE_ROUTER_FUND + BASE_RELAYER_FUND;
         console2.log("B5 fund router", BASE_ROUTER_FUND);
         console2.log("B5 fund relayer", BASE_RELAYER_FUND);
+        console2.log("B5 headroom", BASE_FUND_HEADROOM);
         console2.log("B5 signer balance", sender.balance);
         console2.log("signer", sender);
-        if (sender.balance < need) revert Underfunded(sender.balance);
+        if (sender.balance < need + BASE_FUND_HEADROOM) revert Underfunded(sender.balance);
 
         uint256 routerBefore = address(deployed).balance;
         uint256 relayerBefore = RELAYER.balance;

@@ -18,6 +18,36 @@ export function isTestnetChainId(chainId) {
   return n === ARB_SEPOLIA_CHAIN_ID || n === BASE_SEPOLIA_CHAIN_ID;
 }
 
+const CHAIN_ID_DECIMAL = "CHAIN_ID must be set explicitly as a decimal string.";
+const CHAIN_ID_TESTNET = "CHAIN_ID must be 421614 (Arb Sepolia) or 84532 (Base Sepolia).";
+
+/**
+ * Process env CHAIN_ID. Missing, blank, hex, or any non-canonical decimal is an error.
+ * There is no default of 421614.
+ * @param {unknown} raw
+ */
+export function parseExplicitChainId(raw) {
+  if (typeof raw !== "string") throw new Error(CHAIN_ID_DECIMAL);
+  const trimmed = raw.trim();
+  if (!/^[0-9]+$/.test(trimmed)) throw new Error(CHAIN_ID_DECIMAL);
+  const chainId = Number(trimmed);
+  if (String(chainId) !== trimmed || !isTestnetChainId(chainId)) throw new Error(CHAIN_ID_TESTNET);
+  return chainId;
+}
+
+/**
+ * Startup check. The RPC eth_chainId must be this process's CHAIN_ID.
+ * A mismatch or a non-integer report throws so the caller can exit.
+ * @param {unknown} rpcChainId
+ * @param {number} expectedChainId
+ */
+export function assertRpcChainId(rpcChainId, expectedChainId) {
+  const reported = typeof rpcChainId === "bigint" ? Number(rpcChainId) : Number(rpcChainId);
+  if (!Number.isInteger(reported) || reported !== expectedChainId) {
+    throw new Error(`RPC eth_chainId ${String(rpcChainId)} does not match CHAIN_ID ${expectedChainId}.`);
+  }
+}
+
 /** Message for the chain this process serves. Arb wording stays the existing sentence. */
 export function configuredChainMessage(chainId) {
   const n = Number(chainId);
@@ -68,7 +98,7 @@ export function parseWholeAmount(value, field, opts = {}) {
 
 /**
  * Cheap quote checks (no RPC). The process serves one testnet:
- * Arb Sepolia (421614, the default) or Base Sepolia (84532).
+ * Arb Sepolia (421614) or Base Sepolia (84532), whichever CHAIN_ID names.
  * @param {object} body
  * @param {{ defaultChainId?: number }} [opts]
  */
@@ -138,8 +168,7 @@ export function parseRescueUser(body) {
 }
 
 /**
- * Rescue orders name a chain. When they do, it must be this process's testnet.
- * A body with no `order.chainId` is left to the contract.
+ * Rescue orders must name this process's testnet. A missing chainId is wrong_chain.
  * @param {object} body
  * @param {{ defaultChainId?: number }} [opts]
  */
@@ -149,9 +178,11 @@ export function assertOrderChain(body, opts = {}) {
     throw fail(400, "wrong_chain", configuredChainMessage(defaultChainId));
   }
   const order = body && typeof body === "object" ? body.order : undefined;
-  if (!order || typeof order !== "object") return;
-  if (order.chainId === undefined || order.chainId === null || order.chainId === "") return;
-  const n = Number(order.chainId);
+  const chainRaw = order && typeof order === "object" ? order.chainId : undefined;
+  if (chainRaw === undefined || chainRaw === null || String(chainRaw).trim() === "") {
+    throw fail(400, "wrong_chain", configuredChainMessage(defaultChainId));
+  }
+  const n = Number(chainRaw);
   if (!Number.isInteger(n) || n !== defaultChainId) {
     throw fail(400, "wrong_chain", configuredChainMessage(defaultChainId));
   }

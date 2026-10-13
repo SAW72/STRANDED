@@ -25,7 +25,7 @@ contract TestDemoSupplyForkTest is Test {
 
         steps.delistBase(owner);
         assertFalse(swap.allowedTokens(gmock));
-        assertFalse(swap.eip2612Tokens(gmock));
+        assertFalse(swap.eip2612Tokens(gmock), "setTokenAllowed(false) clears the EIP-2612 flag");
         assertFalse(swap.allowedRouters(stale));
 
         (address faucet, address demo) = steps.deployFaucet(owner);
@@ -36,12 +36,16 @@ contract TestDemoSupplyForkTest is Test {
         assertTrue(swap.allowedRouters(router));
         assertFalse(swap.allowedRouters(stale));
 
-        uint256 need = steps.BASE_ROUTER_FUND() + steps.BASE_RELAYER_FUND();
+        uint256 transfers = steps.BASE_ROUTER_FUND() + steps.BASE_RELAYER_FUND();
+        uint256 need = transfers + steps.BASE_FUND_HEADROOM();
         if (owner.balance < need) {
             vm.expectRevert(abi.encodeWithSelector(TestDemoSteps.Underfunded.selector, owner.balance));
             steps.fundBase(owner, router);
-            vm.deal(owner, need);
         }
+        vm.deal(owner, transfers);
+        vm.expectRevert(abi.encodeWithSelector(TestDemoSteps.Underfunded.selector, transfers));
+        steps.fundBase(owner, router);
+        vm.deal(owner, need);
         uint256 relayerBefore = steps.RELAYER().balance;
         steps.fundBase(owner, router);
         assertEq(router.balance, steps.BASE_ROUTER_FUND());
@@ -51,7 +55,7 @@ contract TestDemoSupplyForkTest is Test {
         vm.prank(address(0xB0B));
         TestDemoFaucet(faucet).drip();
         assertEq(TestDemoToken(demo).balanceOf(address(0xB0B)), 2 ether);
-        console2.log("base fork owner balance before deal was under 0.07 ether");
+        console2.log("base fork funded with 0.001 ether headroom above the two transfers");
         console2.log("base router", router);
         console2.log("base tDEMO", demo);
     }

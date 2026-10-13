@@ -16,7 +16,7 @@ import {
 import { createKillSwitch, parseEnvFlag } from "./killSwitch.mjs";
 import { createNonceStore } from "./nonceStore.mjs";
 import { createBuildQuote, encodeSwapData } from "./quote.mjs";
-import { isTestnetChainId } from "./quoteRequest.mjs";
+import { assertRpcChainId, parseExplicitChainId } from "./quoteRequest.mjs";
 import { rescueAbi } from "./rescueAbi.mjs";
 import { createRescueLog, orderLogSummary } from "./rescueLog.mjs";
 import { createRescueLimiter, parseRescueLimitConfig } from "./rescueLimit.mjs";
@@ -52,9 +52,11 @@ function relayerPrivateKey() {
 }
 
 const SWAP = process.env.GAS_RESCUE_SWAP_ADDRESS;
-const CHAIN_ID = Number(process.env.CHAIN_ID || 421614);
-if (!isTestnetChainId(CHAIN_ID)) {
-  console.error("CHAIN_ID must be 421614 (Arb Sepolia) or 84532 (Base Sepolia).");
+let CHAIN_ID;
+try {
+  CHAIN_ID = parseExplicitChainId(process.env.CHAIN_ID);
+} catch (err) {
+  console.error(err instanceof Error ? err.message : err);
   process.exit(1);
 }
 const chain = CHAIN_ID === 84532 ? baseSepolia : arbitrumSepolia;
@@ -298,6 +300,12 @@ const server = createRelayerApp({
 });
 
 await rescueLimiter.ready;
+try {
+  assertRpcChainId(await publicClient.getChainId(), CHAIN_ID);
+} catch (err) {
+  console.error(err instanceof Error ? err.message : "RPC eth_chainId check failed. Refusing to start.");
+  process.exit(1); // fail closed when RPC eth_chainId does not match CHAIN_ID
+}
 const limitLabel = (value) => (value == null ? "off" : String(value));
 server.listen(PORT, HOST, () => {
   console.log(

@@ -1,8 +1,6 @@
-# Stranded on Render — wallet (static web) + testnet relayers (Node web).
-# Arb Sepolia `stranded-relayer-arb` (chain 421614) stays the main demo.
-# `stranded-relayer-base` is the same relayer code with CHAIN_ID 84532.
-# Do not apply that service until Spencer says GO. TOKEN and ROUTER stay
-# unset until the B1 and B2 receipts exist. Do not point them at gMOCK or 0x94cC.
+# Stranded on Render — wallet (static web) + Arb Sepolia Relayer (Node web).
+# Blueprint sync applies this file only. It does not create a Base relayer.
+# The Base Sepolia service is render.base.yaml, which Render does not read.
 # After first deploy: set RELAYER_PRIVATE_KEY and CORS_ORIGINS in the dashboard.
 # Custom domain: attach it to the `stranded` static site, then add https://your.domain to CORS_ORIGINS.
 
@@ -41,7 +39,8 @@ services:
           type: web
           name: stranded-relayer-arb
           envVarKey: RENDER_EXTERNAL_URL
-      # Optional: live Base Sepolia Relayer (VPS). Leave unset for sample quotes on Base.
+      # No Base relayer is created by this blueprint. Leave unset for sample quotes.
+      # Do not point this at the Arb relayer or a dead VPS.
       - key: VITE_RELAYER_URL
         sync: false
 
@@ -81,49 +80,6 @@ services:
       - key: CORS_ORIGINS
         sync: false
       # Relayer-side pause. Health stays 200 with paused=true.
-      - key: KILL_SWITCH
-        value: "0"
-      - key: ADMIN_SECRET
-        sync: false
-      - key: DATA_DIR
-        value: "./data"
-      - key: BROADCAST_MAX_ATTEMPTS
-        value: "3"
-      - key: BROADCAST_RETRY_BASE_MS
-        value: "200"
-
-  # Same Node relayer as stranded-relayer-arb. Chain comes from CHAIN_ID.
-  # Spencer applies this only after a GO. Set TOKEN_ADDRESS, DEMO_TOKEN, and
-  # ROUTER_ADDRESS from the B1 and B2 receipts before the process can boot.
-  - type: web
-    name: stranded-relayer-base
-    runtime: node
-    plan: starter
-    rootDir: relayer
-    buildCommand: npm ci
-    startCommand: node server.mjs
-    healthCheckPath: /health
-    envVars:
-      - key: NODE_VERSION
-        value: "22"
-      - key: RELAYER_PRIVATE_KEY
-        sync: false
-      - key: GAS_RESCUE_SWAP_ADDRESS
-        value: "0x21A1ADf810e64B5bd1d530D31abA6856b8DEf688"
-      - key: TOKEN_ADDRESS
-        sync: false
-      - key: DEMO_TOKEN
-        sync: false
-      - key: ROUTER_ADDRESS
-        sync: false
-      - key: FEE_TO
-        value: "0x30466A210961c0C2C13AF0A9d35dfC6E8858bA9D"
-      - key: CHAIN_ID
-        value: "84532"
-      - key: RPC_URL
-        value: "https://sepolia.base.org"
-      - key: CORS_ORIGINS
-        sync: false
       - key: KILL_SWITCH
         value: "0"
       - key: ADMIN_SECRET
