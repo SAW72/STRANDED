@@ -112,6 +112,12 @@ https://stranded.onrender.com is not this service. The service name is `stranded
 
 Syncing the Blueprint (or adding Rewrite `/*` → `/index.html` under the static site's Redirects/Rewrites) installs the general SPA fallback from `render.yaml`. The published `points/index.html` does not depend on that sync.
 
+## 7. Base Sepolia relayer (same code, not in the blueprint)
+
+`render.base.yaml` describes `stranded-relayer-base`. Render Blueprint sync reads `render.yaml` only, so a sync does not create that service. Do not apply that file until Spencer says GO.
+
+`CHAIN_ID` is required at startup as a decimal string, `421614` or `84532`. There is no default. The live Arb service must already have `CHAIN_ID=421614` before this process ships. A rescue order with no `chainId` is `wrong_chain`.
+
 ## Do not
 
 - Put `RELAYER_PRIVATE_KEY` or owner keys in `render.yaml` or git
