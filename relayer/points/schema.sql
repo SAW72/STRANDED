@@ -14,15 +14,15 @@
 -- UNIQUE (wallet, action, tx_hash) rejects a second insert of the same event
 -- for one wallet. On-chain hashes (0x...) are also unique on (action, tx_hash),
 -- so a second wallet cannot claim that transaction for the same action.
--- Bug-report keys are unique on (action, tx_hash) for every wallet. The key is
--- the report id, or the steps when there is no report id.
--- A dev database created before points_ledger_onchain_action_tx is not
--- migrated. If creating that index fails, delete points-ledger.sqlite and
--- open the store again. This file does not rebuild an existing table, so an
--- older points CHECK stays until that reset.
+-- Bug reports and security findings are not scored. Rows already stored are
+-- left in place: this file does not delete or rewrite them and does not
+-- rebuild the table. CREATE TABLE IF NOT EXISTS leaves an older action CHECK.
+-- BEFORE INSERT and BEFORE UPDATE triggers reject bug_report, security,
+-- security_finding, and finding. Reads omit those actions.
+-- The on-chain unique index is created on open without rewriting rows.
 -- UPDATE and DELETE triggers raise 'append-only'.
 -- BEFORE INSERT raises 'duplicate' when the id, (wallet, action, tx_hash),
--- an on-chain (action, tx_hash), or a bug-report key is already stored.
+-- or an on-chain (action, tx_hash) is already stored.
 -- Each of those checks is its own EXISTS so SQLite can use an index.
 -- That fires before ON CONFLICT, so a raw
 -- INSERT ... ON CONFLICT DO NOTHING raises 'duplicate' instead of skipping
@@ -52,8 +52,7 @@ CREATE TABLE IF NOT EXISTS points_ledger (
       'relayer_job',
       'registry_find_posted',
       'registry_find_claimed',
-      'wallet_session',
-      'bug_report'
+      'wallet_session'
     )
   ),
   CHECK (typeof(points) = 'integer' AND points > 0 AND points <= 500),
@@ -81,7 +80,6 @@ BEFORE INSERT ON points_ledger
 WHEN EXISTS(SELECT 1 FROM points_ledger WHERE id=NEW.id)
   OR EXISTS(SELECT 1 FROM points_ledger WHERE wallet=NEW.wallet AND action=NEW.action AND tx_hash=NEW.tx_hash)
   OR (substr(NEW.tx_hash,1,2)='0x' AND EXISTS(SELECT 1 FROM points_ledger WHERE action=NEW.action AND tx_hash=NEW.tx_hash AND substr(tx_hash,1,2)='0x'))
-  OR (NEW.action='bug_report' AND EXISTS(SELECT 1 FROM points_ledger WHERE action=NEW.action AND tx_hash=NEW.tx_hash AND action='bug_report'))
 BEGIN
   SELECT RAISE(ABORT, 'duplicate');
 END;
@@ -100,14 +98,30 @@ BEGIN
   SELECT RAISE(ABORT, 'append-only');
 END;
 
+-- Reject a new bug or security row. This does not delete or rewrite a row
+-- that is already stored. An older CHECK may still name bug_report.
+DROP TRIGGER IF EXISTS points_ledger_no_excluded_insert;
+CREATE TRIGGER points_ledger_no_excluded_insert
+BEFORE INSERT ON points_ledger
+WHEN NEW.action IN ('bug_report', 'security', 'security_finding', 'finding')
+BEGIN
+  SELECT RAISE(ABORT, 'excluded_action');
+END;
+
+DROP TRIGGER IF EXISTS points_ledger_no_excluded_update;
+CREATE TRIGGER points_ledger_no_excluded_update
+BEFORE UPDATE ON points_ledger
+WHEN NEW.action IN ('bug_report', 'security', 'security_finding', 'finding')
+  OR OLD.action IN ('bug_report', 'security', 'security_finding', 'finding')
+BEGIN
+  SELECT RAISE(ABORT, 'excluded_action');
+END;
+
 -- Predicate matches the on-chain EXISTS exactly so the planner can use this index.
 DROP INDEX IF EXISTS points_ledger_onchain_action_tx;
 CREATE UNIQUE INDEX points_ledger_onchain_action_tx
 ON points_ledger(action, tx_hash)
 WHERE substr(tx_hash,1,2)='0x';
 
--- Bug keys only. Predicate matches the bug-report EXISTS exactly.
+-- The bug-report action is gone. Drop a leftover index from an older file.
 DROP INDEX IF EXISTS points_ledger_bug_action_tx;
-CREATE UNIQUE INDEX points_ledger_bug_action_tx
-ON points_ledger(action, tx_hash)
-WHERE action='bug_report';
