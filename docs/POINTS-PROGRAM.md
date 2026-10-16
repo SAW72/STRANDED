@@ -1,6 +1,6 @@
 # STRANDED Points Program
 
-**Status:** Draft. Points are off-chain scores and are unpaid. No rewards are promised.
+**Status:** Draft. Points are off-chain scores and are unpaid. No rewards are offered.
 
 Points are an off-chain record of activity only. They are not a token, have no cash value, can't be sold, transferred or redeemed, may be adjusted or cancelled at any time, and do not convert to anything. No token, airdrop, conversion, snapshot or claim is planned.
 
@@ -10,8 +10,8 @@ Record genuine testnet activity as an off-chain score. Points measure usage. The
 
 ## Design principles
 
-1. **Post-facto only.** Points are recorded for activity that already happened. Nothing in the activity phase says that using the product will be paid.
-2. **No consideration.** No purchase, no referral, and no holding requirement. Points come from using the product.
+1. **Recorded after the fact.** Points record activity that already happened. Using the product is not paid.
+2. **Nothing to buy.** No purchase, referral or holding requirement. Points come from using the product.
 3. **No cash value.** Scores are not shown with a price, and scoring does not use one.
 4. **Verifiable.** Every on-chain action carries its transaction hash so the ledger can be checked against Arbitrum Sepolia.
 
@@ -19,7 +19,7 @@ Record genuine testnet activity as an off-chain score. Points measure usage. The
 
 | Action | Points | Notes |
 |---|---|---|
-| Rescue completed (GasRescue) | TBD per verified rescue | Not based on a price or an amount rescued. |
+| Rescue completed (GasRescue) | Flat placeholder number. Not based on a price or an amount rescued. Point weights are placeholders and may change. | Not based on a price or an amount rescued. |
 | Relayer job executed | 50 | Reviewers check for a registered operator identity before points are recorded. |
 | Registry find posted (StrandedRegistry) | 30 | Reviewers check that the find is a real stranded balance before points are recorded. |
 | Registry find claimed | 50 | Reviewers check that the claim succeeded on-chain before points are recorded. |
@@ -48,8 +48,6 @@ Record genuine testnet activity as an off-chain score. Points measure usage. The
 - Rows for on-chain actions store the transaction hash for independent verification.
 - Dashboard is read-only: enter a wallet address, see recorded activity by category. No login, no connect-wallet button, no sign-up.
 
-## Not planned
+## What points are not
 
-Not planned. Points have no cash or token value.
-
-There is no launch, airdrop, conversion rate, or cash redemption in this program. Snapshot trees, on-chain claims, and allocation tables are not part of the ledger.
+Points have no cash or token value. There is no launch, airdrop, conversion rate or cash redemption in this program. Snapshot trees, on-chain claims, and allocation tables are not part of the ledger.
