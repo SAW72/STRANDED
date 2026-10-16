@@ -10,12 +10,15 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {GasRescueSwap} from "../../src/GasRescueSwap.sol";
 import {IGasRescueSwap} from "../../src/interfaces/IGasRescueSwap.sol";
 
+interface IRouterWeth9 {
+    function WETH9() external view returns (address);
+}
+
 /// @notice Fork proof of docs/BASE-SEPOLIA-DELIST-STEPS.md.
 ///         Sends the doc's exact calldata. No key, no signature, no broadcast.
 contract BaseSepoliaDelistStepsTest is Test {
     uint256 internal constant BASE_SEPOLIA_CHAIN_ID = 84_532;
     uint256 internal constant FORK_BLOCK = 48_077_171;
-    string internal constant PUBLIC_RPC = "https://sepolia.base.org";
     string internal constant DOC_PATH = "docs/BASE-SEPOLIA-DELIST-STEPS.md";
 
     address internal constant LIVE_SWAP = 0x21A1ADf810e64B5bd1d530D31abA6856b8DEf688;
@@ -57,10 +60,13 @@ contract BaseSepoliaDelistStepsTest is Test {
 
     function setUp() public {
         string memory rpc = vm.envOr("BASE_SEPOLIA_RPC_URL", string(""));
-        if (bytes(rpc).length == 0 && block.chainid == BASE_SEPOLIA_CHAIN_ID) {
+        if (bytes(rpc).length == 0 && block.chainid != BASE_SEPOLIA_CHAIN_ID) {
+            vm.skip(true);
+            return;
+        }
+        if (bytes(rpc).length == 0) {
             if (block.number != FORK_BLOCK) vm.rollFork(FORK_BLOCK);
         } else {
-            if (bytes(rpc).length == 0) rpc = PUBLIC_RPC;
             vm.createSelectFork(rpc, FORK_BLOCK);
         }
         live = GasRescueSwap(payable(LIVE_SWAP));
@@ -103,8 +109,8 @@ contract BaseSepoliaDelistStepsTest is Test {
         assertTrue(live.allowedRouters(OTHER_ROUTER));
     }
 
-    /// @dev Applies the doc bytes with `LIVE_SWAP.call`. gMOCK is the only live allowed
-    ///      token, so a witness token is allowlisted first and must stay true.
+    /// @dev Applies the doc bytes with `LIVE_SWAP.call`. A witness token is allowlisted
+    ///      first and must stay true.
     function test_ownerCalldata_delistsTargets_andRescueReverts() public {
         _assertLiveBefore();
 
@@ -155,6 +161,31 @@ contract BaseSepoliaDelistStepsTest is Test {
 
         _expectRescueRevert(WITNESS_TOKEN, SWAP_ROUTER_02, GasRescueSwap.RouterNotAllowed.selector);
         _expectRescueRevert(WITNESS_TOKEN, OTHER_ROUTER, GasRescueSwap.PathMismatch.selector);
+    }
+
+    /// @dev Sending each delist blob a second time succeeds and leaves the delisted flags.
+    function test_doubleDelist_succeedsAndLeavesState() public {
+        _delistBoth();
+        _ownerCall(DELIST_GMOCK_CALLDATA);
+        _ownerCall(DELIST_ROUTER_CALLDATA);
+        assertFalse(live.allowedTokens(GMOCK));
+        assertFalse(live.eip2612Tokens(GMOCK));
+        assertFalse(live.allowedRouters(SWAP_ROUTER_02));
+        assertTrue(live.allowedRouters(OTHER_ROUTER));
+        assertEq(IERC20(GMOCK).totalSupply(), 10 ** 39 + 10 ** 19 + 1000);
+        assertEq(SWAP_ROUTER_02.balance, 0);
+    }
+
+    /// @dev A stranger can call gMOCK `mint(address,uint256)` at the pin.
+    function test_strangerMint_increasesGmockSupply() public {
+        _assertLiveBefore();
+        uint256 supply = IERC20(GMOCK).totalSupply();
+        uint256 bal = IERC20(GMOCK).balanceOf(STRANGER);
+        vm.prank(STRANGER);
+        (bool ok,) = GMOCK.call(abi.encodeWithSignature("mint(address,uint256)", STRANGER, uint256(1)));
+        assertTrue(ok);
+        assertEq(IERC20(GMOCK).totalSupply(), supply + 1);
+        assertEq(IERC20(GMOCK).balanceOf(STRANGER), bal + 1);
     }
 
     /// @dev `setTokenAllowed(gMOCK, true)` sets `allowedTokens` and leaves `eip2612Tokens` false.
@@ -233,6 +264,7 @@ contract BaseSepoliaDelistStepsTest is Test {
         assertTrue(live.eip2612Tokens(GMOCK));
         assertTrue(live.allowedRouters(SWAP_ROUTER_02));
         assertTrue(live.allowedRouters(OTHER_ROUTER));
+        assertEq(IRouterWeth9(SWAP_ROUTER_02).WETH9(), WETH);
         assertEq(SWAP_ROUTER_02.balance, 0);
         assertEq(IERC20(GMOCK).totalSupply(), 10 ** 39 + 10 ** 19 + 1000);
     }

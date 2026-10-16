@@ -1,8 +1,8 @@
 # Base Sepolia delist steps (unsigned)
 
-Testnet only. Each call needs Spencer's explicit approval to sign.
+Testnet only. Each call needs the owner's explicit approval to sign.
 
-Spencer signs these two calls himself from `0x30466A210961c0C2C13AF0A9d35dfC6E8858bA9D`. Chain id `84532` (Base Sepolia). Target is `GasRescueSwap` `0x21A1ADf810e64B5bd1d530D31abA6856b8DEf688`.
+The owner signs these two calls from `0x30466A210961c0C2C13AF0A9d35dfC6E8858bA9D`. Chain id `84532` (Base Sepolia). Target is `GasRescueSwap` `0x21A1ADf810e64B5bd1d530D31abA6856b8DEf688`.
 
 That owner is a 7702-delegated EOA. At block `48,077,171` its code is `0xef010063c0c19a282a1b52b07dd5a65b58948a07dae32b`, so the delegate is `0x63c0c19a282a1B52b07dD5a65b58948A07DAE32B`.
 
@@ -12,9 +12,9 @@ No key is in this repo. These steps are not signed here and are not broadcast. `
 
 `src/GasRescueSwap.sol` exposes `setTokenAllowed(address,bool)`. `cast sig "setTokenAllowed(address,bool)"` is `0x15f69012`. `cast sig "setAllowedToken(address,bool)"` is `0x8aaa2284`, and that name is not a function in the source.
 
-gMOCK `0xE36c35cbF0373D77D00732f7B92dB4fB8fd37166` is publicly mintable (`mint(address,uint256)`) and allowlisted. At block `48,077,171` its supply is `10**39 + 10**19 + 1000` wei, about `1e39`. It is the only allowlisted token at that block.
+gMOCK `0xE36c35cbF0373D77D00732f7B92dB4fB8fd37166` is publicly mintable (`mint(address,uint256)` succeeds from a non-owner) and allowlisted. At block `48,077,171` its supply is `10**39 + 10**19 + 1000` wei, about `1e39`.
 
-`0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4` is Uniswap SwapRouter02. It holds `0` ETH and it is not the capped router. The function that removes it from `allowedRouters` is `setRouterAllowed(address,bool)`. That is the only write to `allowedRouters`.
+`0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4` is Uniswap SwapRouter02. At that block `WETH9()` returns `0x4200000000000000000000000000000000000006`. It holds `0` ETH and it is not the capped router. The function that removes it from `allowedRouters` is `setRouterAllowed(address,bool)`. That is the only write to `allowedRouters`.
 
 `0x48ab70f0eeb92082100eFa49189654663f48f285` is also allowlisted as a router at that block. Step 2 does not clear it.
 

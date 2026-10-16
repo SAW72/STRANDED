@@ -6,21 +6,26 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 # Unit tests only. Do not wire RELAYER_PRIVATE_KEY (or any hot key) into this
 # job. Relayer secret consumption lives in relayer.yml and is runtime-only.
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           submodules: recursive
+          persist-credentials: false
 
       - name: Install Foundry
-        uses: foundry-rs/foundry-toolchain@v1
+        uses: foundry-rs/foundry-toolchain@908c540300062bd5a7e473851cdb4282204cee09 # v1
         with:
-          version: stable
+          version: v1.8.5
 
       - name: Show forge version
         run: forge --version
@@ -29,22 +34,26 @@ jobs:
         run: forge test -vv
 
   # Base Sepolia fork proof for the delist steps. No key and no broadcast.
-  # When BASE_SEPOLIA_RPC_URL is unset, --fork-url falls back to the public RPC.
-  # The test pins block 48,077,171 itself. Same public-RPC shape as the relayer
-  # workflow's chain-id check against https://sepolia.base.org.
+  # This workflow never sets BASE_SEPOLIA_RPC_URL. The job always uses the
+  # public endpoint https://sepolia.base.org. --fork-url selects chain id 84532,
+  # so the fork tests run. Without that fork, an unset env var skips them.
+  # The suite line must show 10 passed and 0 skipped. This job is not a required
+  # status check; a failure here is still a failure (no continue-on-error).
   fork:
     name: Base Sepolia delist fork
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           submodules: recursive
+          persist-credentials: false
 
       - name: Install Foundry
-        uses: foundry-rs/foundry-toolchain@v1
+        uses: foundry-rs/foundry-toolchain@908c540300062bd5a7e473851cdb4282204cee09 # v1
         with:
-          version: stable
+          version: v1.8.5
 
       - name: Show forge version
         run: forge --version
@@ -52,27 +61,32 @@ jobs:
       - name: Fork proof
         run: |
           set -euo pipefail
-          RPC="${BASE_SEPOLIA_RPC_URL:-https://sepolia.base.org}"
+          RPC="https://sepolia.base.org"
           CHAIN="$(cast chain-id --rpc-url "$RPC")"
           echo "chain_id=${CHAIN}"
           test "$CHAIN" = "84532"
           forge test --match-contract BaseSepoliaDelistStepsTest -vv \
             --fork-url "$RPC" \
-            --fork-block-number 48077171
+            --fork-block-number 48077171 \
+            2>&1 | tee fork-summary.txt
+          grep -F "10 passed; 0 failed; 0 skipped" fork-summary.txt
 
   # Wallet UX (Vite + vitest). No Relayer key. Fixtures when Relayer URL unset.
   wallet:
     name: Wallet build + test
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: wallet
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "22"
           cache: npm
