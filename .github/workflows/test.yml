@@ -37,18 +37,20 @@ jobs:
   fork-base:
     name: Base Sepolia fork
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     env:
       BASE_SEPOLIA_RPC_URL: https://sepolia.base.org
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           submodules: recursive
+          persist-credentials: false
 
       - name: Install Foundry
-        uses: foundry-rs/foundry-toolchain@v1
+        uses: foundry-rs/foundry-toolchain@908c540300062bd5a7e473851cdb4282204cee09 # v1
         with:
-          version: stable
+          version: v1.8.5
 
       - name: Require the Base RPC
         run: test -n "$BASE_SEPOLIA_RPC_URL"
@@ -59,18 +61,20 @@ jobs:
   fork-arb:
     name: Arb Sepolia fork
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     env:
       ARB_SEPOLIA_RPC_URL: https://sepolia-rollup.arbitrum.io/rpc
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           submodules: recursive
+          persist-credentials: false
 
       - name: Install Foundry
-        uses: foundry-rs/foundry-toolchain@v1
+        uses: foundry-rs/foundry-toolchain@908c540300062bd5a7e473851cdb4282204cee09 # v1
         with:
-          version: stable
+          version: v1.8.5
 
       - name: Require the Arb RPC
         run: test -n "$ARB_SEPOLIA_RPC_URL"
