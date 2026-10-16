@@ -16,11 +16,13 @@ gMOCK `0xE36c35cbF0373D77D00732f7B92dB4fB8fd37166` is publicly mintable (`mint(a
 
 `0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4` is Uniswap SwapRouter02. At that block `WETH9()` returns `0x4200000000000000000000000000000000000006`. It holds `0` ETH and it is not the capped router. The function that removes it from `allowedRouters` is `setRouterAllowed(address,bool)`. That is the only write to `allowedRouters`.
 
-`0x48ab70f0eeb92082100eFa49189654663f48f285` is also allowlisted as a router at that block. Step 2 does not clear it.
+`0x48aB70F0eeb92082100EFA49189654663F48f285` is also allowlisted as a router at that block. Step 2 does not clear it.
 
 `setTokenAllowed(token, false)` also sets `eip2612Tokens[token]` to false in the same call.
 
 ## Pre-checks
+
+`$BASE_SEPOLIA_RPC_URL` must be a Base Sepolia (chain id `84532`) JSON-RPC endpoint, for example `https://sepolia.base.org`. The chain-id pre-check must print `84532`.
 
 Both reads must match before either signature.
 
@@ -37,6 +39,8 @@ cast call 0x21A1ADf810e64B5bd1d530D31abA6856b8DEf688 \
 ```
 
 Expected: `0x30466A210961c0C2C13AF0A9d35dfC6E8858bA9D`.
+
+Sign Step 1 before Step 2. After Step 1 no token is allowlisted, so nothing can route through either router: `src/GasRescueSwap.sol` reverts `TokenNotAllowed` before `RouterNotAllowed`. If the router is removed first, gMOCK stays allowlisted and can still be rescued through `0x48aB70F0eeb92082100EFA49189654663F48f285`.
 
 ## Step 1 — delist gMOCK
 
@@ -111,7 +115,7 @@ cast calldata "setRouterAllowed(address,bool)" \
   0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4 false
 ```
 
-Take Uniswap SwapRouter02 off the router allowlist. A rescue that names it then reverts `RouterNotAllowed`. This call does not move the `0` ETH that contract holds. `0x48ab70f0eeb92082100eFa49189654663f48f285` stays allowlisted.
+Take Uniswap SwapRouter02 off the router allowlist. A rescue that names it then reverts `RouterNotAllowed`. This call does not move the `0` ETH that contract holds. `0x48aB70F0eeb92082100EFA49189654663F48f285` stays allowlisted.
 
 Post-check (after the transaction is mined):
 
@@ -127,7 +131,7 @@ Expected: `false`. The same call returns `true` before this step.
 ```bash
 cast call 0x21A1ADf810e64B5bd1d530D31abA6856b8DEf688 \
   "allowedRouters(address)(bool)" \
-  0x48ab70f0eeb92082100eFa49189654663f48f285 \
+  0x48aB70F0eeb92082100EFA49189654663F48f285 \
   --rpc-url "$BASE_SEPOLIA_RPC_URL"
 ```
 
@@ -160,14 +164,16 @@ These bytes put gMOCK or SwapRouter02 back on the allowlist. They are not part o
 
 Sign order, from the fully delisted state. `setEip2612Token(gMOCK, true)` alone sets both `allowedTokens[gMOCK]` and `eip2612Tokens[gMOCK]`. That makes `setTokenAllowed(gMOCK, true)` redundant for a full token restore: one token blob suffices, and it is the EIP-2612 blob. `setTokenAllowed(gMOCK, true)` by itself sets `allowedTokens` and leaves `eip2612Tokens` false. The router blob does not change either token flag, so one blob does not revert the whole delist. Sign `setEip2612Token(0xE36c35cbF0373D77D00732f7B92dB4fB8fd37166, true)`, then `setRouterAllowed(0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4, true)`.
 
-`setTokenAllowed(0xE36c35cbF0373D77D00732f7B92dB4fB8fd37166, true)`. Gas estimate `28836`. This restores `allowedTokens` only.
+Gas estimates below are from the fully delisted state at block `48,077,171` (both steps already applied). Each figure is its own `cast estimate` from the owner; the second and third are not measured after an earlier rollback blob. The wallet will re-estimate at signing time.
+
+`setTokenAllowed(0xE36c35cbF0373D77D00732f7B92dB4fB8fd37166, true)`. Gas estimate `47696`. This restores `allowedTokens` only.
 
 `0x15f69012000000000000000000000000e36c35cbf0373d77d00732f7b92db4fb8fd371660000000000000000000000000000000000000000000000000000000000000001`
 
-`setEip2612Token(0xE36c35cbF0373D77D00732f7B92dB4fB8fd37166, true)`. Gas estimate `32292`. On this bytecode, `allowed == true` also sets `allowedTokens`.
+`setEip2612Token(0xE36c35cbF0373D77D00732f7B92dB4fB8fd37166, true)`. Gas estimate `71738`. On this bytecode, `allowed == true` also sets `allowedTokens`.
 
 `0xae6dda45000000000000000000000000e36c35cbf0373d77d00732f7b92db4fb8fd371660000000000000000000000000000000000000000000000000000000000000001`
 
-`setRouterAllowed(0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4, true)`. Gas estimate `29040`.
+`setRouterAllowed(0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4, true)`. Gas estimate `47899`.
 
 `0x6cc88edb00000000000000000000000094cc0aac535ccdb3c01d6787d6413c739ae12bc40000000000000000000000000000000000000000000000000000000000000001`
