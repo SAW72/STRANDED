@@ -3,6 +3,7 @@ import { chmodSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
+import { EXCLUDED_POINTS_ACTIONS } from "../../shared/excludedPointsActions.mjs";
 import { MAX_POINTS_PER_ROW, score } from "./rubric.mjs";
 
 /**
@@ -31,14 +32,19 @@ import { MAX_POINTS_PER_ROW, score } from "./rubric.mjs";
  * and rejects a caller-supplied total that disagrees. Raw insertion stays
  * inside this module.
  *
- * Rubric ids match docs/POINTS-PROGRAM.md. Amounts come from rubric.mjs.
+ * Amounts come from rubric.mjs. Bug reports and security findings are not actions.
  * Rescue points are the flat 100 placeholder pending Spencer's decision.
  * Each row is capped at MAX_POINTS_PER_ROW here and by a CHECK in schema.sql.
  *
- * On-chain rows are unique on (action, tx_hash), so a second wallet cannot
- * claim the same transaction for that action. A dev database created before
- * that index is not migrated: delete points-ledger.sqlite and open the store
- * again. This file does not rebuild an existing table.
+ * On-chain rows are unique on (action, tx_hash). schema.sql creates that
+ * index on open and does not rewrite rows.
+ *
+ * Bug reports and security findings already stored are kept. This module
+ * does not delete or rewrite ledger rows and does not rebuild the table.
+ * schema.sql installs BEFORE INSERT and BEFORE UPDATE triggers that reject
+ * bug_report, security, security_finding, and finding. Reads omit those
+ * actions, so a wallet total, its categories, its entries, its rank, and
+ * the leaderboard are sums over the same visible rows.
  */
 export const POINTS_ACTIONS = Object.freeze([
   "rescue_completed",
@@ -46,8 +52,11 @@ export const POINTS_ACTIONS = Object.freeze([
   "registry_find_posted",
   "registry_find_claimed",
   "wallet_session",
-  "bug_report",
 ]);
+
+export { EXCLUDED_POINTS_ACTIONS };
+
+const EXCLUDED_ACTION_SQL = EXCLUDED_POINTS_ACTIONS.map((action) => `'${action}'`).join(", ");
 
 const ACTION_SET = new Set(POINTS_ACTIONS);
 const ADDRESS_RE = /^0x[0-9a-f]{40}$/;
@@ -261,18 +270,21 @@ export function createLedgerStore(opts = {}) {
     SELECT id, wallet, action, points, tx_hash AS txHash, metadata, created_at AS createdAt
     FROM points_ledger
     WHERE wallet = ?
+      AND action NOT IN (${EXCLUDED_ACTION_SQL})
     ORDER BY created_at ASC, id ASC
   `);
   const sumForWallet = db.prepare(`
     SELECT action, SUM(points) AS points
     FROM points_ledger
     WHERE wallet = ?
+      AND action NOT IN (${EXCLUDED_ACTION_SQL})
     GROUP BY action
     ORDER BY action ASC
   `);
   const sumAll = db.prepare(`
     SELECT wallet, action, SUM(points) AS points
     FROM points_ledger
+    WHERE action NOT IN (${EXCLUDED_ACTION_SQL})
     GROUP BY wallet, action
     ORDER BY wallet ASC, action ASC
   `);
@@ -338,6 +350,53 @@ export function createLedgerStore(opts = {}) {
     return byWalletStmt.all(normalizeWallet(wallet)).map(mapRow);
   }
 
+  function categoriesFor(entries) {
+    const byAction = new Map();
+    for (const entry of entries) {
+      let category = byAction.get(entry.action);
+      if (!category) {
+        category = { action: entry.action, points: 0, count: 0 };
+        byAction.set(entry.action, category);
+      }
+      category.points = addPoints(category.points, entry.points);
+      category.count += 1;
+    }
+    return [...byAction.values()];
+  }
+
+  /**
+   * Leaderboard of visible totals. Excluded actions are omitted, same as totals().
+   */
+  function leaderboard() {
+    assertOpen();
+    const rows = totals().wallets
+      .filter((row) => row.total > 0)
+      .sort((a, b) => b.total - a.total || (a.wallet < b.wallet ? -1 : a.wallet > b.wallet ? 1 : 0))
+      .map((row, index) => ({ rank: index + 1, wallet: row.wallet, total: row.total }));
+    return { rows };
+  }
+
+  /**
+   * One wallet's visible points. total, categories, entries, and rank all
+   * come from the rows byWallet() returns.
+   */
+  function walletPoints(wallet) {
+    assertOpen();
+    const key = normalizeWallet(wallet);
+    const entries = byWallet(key);
+    const categories = categoriesFor(entries);
+    let total = 0;
+    for (const entry of entries) total = addPoints(total, entry.points);
+    const ranked = leaderboard().rows.find((row) => row.wallet === key);
+    return {
+      wallet: key,
+      total,
+      rank: ranked ? ranked.rank : null,
+      categories,
+      entries,
+    };
+  }
+
   /**
    * Point totals. Pass a wallet for that address only.
    * With no wallet, returns the sum across every address.
@@ -373,5 +432,5 @@ export function createLedgerStore(opts = {}) {
     db.close();
   }
 
-  return Object.freeze({ appendScored, byWallet, totals, close, filePath });
+  return Object.freeze({ appendScored, byWallet, close, filePath, leaderboard, totals, walletPoints });
 }
