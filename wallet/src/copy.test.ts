@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import * as copy from "./copy";
+import copySource from "./copy.ts?raw";
 import {
   AMOUNT_HELPER,
   AMOUNT_LABEL,
@@ -96,17 +97,42 @@ describe("points copy", () => {
     }
   });
 
-  it("says points are off-chain, unpaid, not a token, and that nothing is promised", () => {
-    const disclaimer = copy.POINTS_DISCLAIMER.toLowerCase();
-    expect(disclaimer).toContain("off-chain");
-    expect(disclaimer).toContain("unpaid");
-    expect(disclaimer).toContain("not a token");
-    expect(disclaimer).toContain("no cash value");
-    expect(disclaimer).toContain("nothing is promised");
+  it("states the points disclaimer exactly", () => {
+    expect(copy.POINTS_DISCLAIMER).toBe(
+      "Points are an off-chain record of activity only. They are not a token, have no cash value, can't be sold, transferred or redeemed, may be adjusted or cancelled at any time, and do not convert to anything.",
+    );
   });
 
-  it("says points are not redeemable", () => {
-    expect(copy.POINTS_DISCLAIMER.toLowerCase()).toContain("not redeemable");
+  it("introduces recorded activity by category", () => {
+    expect(copy.POINTS_INTRO).toBe("Enter a wallet address to see recorded activity by category.");
+  });
+
+  it("keeps the registry claim label", () => {
+    expect(copy.POINTS_ACTION_REGISTRY_CLAIM).toBe("Registry claim");
+  });
+
+  it("labels a rescue as Rescue", () => {
+    expect(copy.POINTS_ACTION_RESCUE).toBe("Rescue");
+    expect(copySource).not.toMatch(/placeholder, TBD/);
+  });
+
+  it("says point weights are placeholders under the category list", () => {
+    expect(copy.POINTS_WEIGHTS_NOTE).toBe("Point weights are placeholders and may change.");
+  });
+
+  it("does not export total or rank labels", () => {
+    expect(copy).not.toHaveProperty("POINTS_TOTAL_LABEL");
+    expect(copy).not.toHaveProperty("POINTS_RANK_LABEL");
+    expect(copy).not.toHaveProperty("POINTS_UNRANKED");
+    expect(copySource).not.toMatch(/POINTS_TOTAL_LABEL|POINTS_RANK_LABEL|POINTS_UNRANKED/);
+    expect(copySource).not.toMatch(/["']Total["']/);
+    expect(copySource).not.toMatch(/["']Rank["']/);
+    expect(copySource).not.toMatch(/["']Unranked["']/);
+    for (const value of Object.values(copy)) {
+      if (typeof value !== "string") continue;
+      expect(value).not.toMatch(/\bTotal\b/);
+      expect(value).not.toMatch(/\bRank\b/);
+    }
   });
 });
 

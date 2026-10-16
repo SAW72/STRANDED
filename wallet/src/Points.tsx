@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import {
-  POINTS_ACTION_BUG_REPORT,
   POINTS_ACTION_OTHER,
   POINTS_ACTION_REGISTRY_CLAIM,
   POINTS_ACTION_REGISTRY_FIND,
@@ -23,12 +22,11 @@ import {
   POINTS_LOADING,
   POINTS_LOOKUP_LABEL,
   POINTS_NO_TX,
-  POINTS_RANK_LABEL,
   POINTS_TITLE,
-  POINTS_TOTAL_LABEL,
   POINTS_TX_LABEL,
-  POINTS_UNRANKED,
+  POINTS_WEIGHTS_NOTE,
 } from "./copy";
+import { EXCLUDED_POINTS_ACTIONS } from "../../shared/excludedPointsActions.mjs";
 import { chainLabel, isSupportedChainId, transactionUrl } from "./lib/chains";
 import { shortenBytes32 } from "./lib/format";
 import {
@@ -44,8 +42,14 @@ const ACTION_LABELS: Record<string, string> = {
   registry_find: POINTS_ACTION_REGISTRY_FIND,
   registry_claim: POINTS_ACTION_REGISTRY_CLAIM,
   session: POINTS_ACTION_SESSION,
-  bug_report: POINTS_ACTION_BUG_REPORT,
 };
+
+/** Bug reports and security findings are not points actions and are not shown. */
+const UNLISTED_ACTIONS = new Set(EXCLUDED_POINTS_ACTIONS);
+
+function isListedAction(action: string): boolean {
+  return !UNLISTED_ACTIONS.has(action);
+}
 
 export function isPointsRoute(pathname: string): boolean {
   const normalized = pathname.replace(/\/+$/, "") || "/";
@@ -65,7 +69,9 @@ type Lookup =
   | { kind: "loaded"; result: WalletPoints };
 
 function isEmptyResult(result: WalletPoints): boolean {
-  return result.total === 0 && result.categories.length === 0 && result.entries.length === 0;
+  const categories = result.categories.filter((category) => isListedAction(category.action));
+  const entries = result.entries.filter((entry) => isListedAction(entry.action));
+  return categories.length === 0 && entries.length === 0;
 }
 
 export function Points({ client }: { client?: PointsClient }) {
@@ -127,6 +133,7 @@ export function Points({ client }: { client?: PointsClient }) {
             autoCorrect="off"
             spellCheck={false}
             aria-invalid={lookup.kind === "invalid"}
+            aria-describedby={lookup.kind === "invalid" ? "points-address-error" : undefined}
             onChange={(event) => setInput(event.target.value)}
           />
         </label>
@@ -135,7 +142,7 @@ export function Points({ client }: { client?: PointsClient }) {
         </button>
       </form>
       {lookup.kind === "invalid" ? (
-        <p className="danger" role="alert" data-testid="points-invalid">
+        <p id="points-address-error" className="danger" role="alert" data-testid="points-invalid">
           {POINTS_INVALID_ADDRESS}
         </p>
       ) : null}
@@ -176,10 +183,7 @@ function Loaded({ result, example }: { result: WalletPoints; example: boolean })
       <div data-testid="points-result">
         {example ? <ExampleLabel /> : null}
         <dl className="kv">
-          <dt>{POINTS_TOTAL_LABEL}</dt>
-          <dd data-testid="points-total">{String(result.total)}</dd>
-          <dt>{POINTS_RANK_LABEL}</dt>
-          <dd data-testid="points-rank">{result.rank == null ? POINTS_UNRANKED : String(result.rank)}</dd>
+          {/* Total and rank stay hidden until category weights are set. */}
           <dt>{POINTS_ADDRESS_RESULT_LABEL}</dt>
           <dd className="mono" data-testid="points-wallet">
             {result.wallet}
@@ -191,8 +195,9 @@ function Loaded({ result, example }: { result: WalletPoints; example: boolean })
           {example ? <ExampleLabel /> : null}
           {POINTS_CATEGORIES_LABEL}
         </h2>
+        <p data-testid="points-weights">{POINTS_WEIGHTS_NOTE}</p>
         <ul className="points-list">
-          {result.categories.map((category, index) => (
+          {result.categories.filter((category) => isListedAction(category.action)).map((category, index) => (
             <li className="points-entry" data-testid="points-category" key={category.action + "-" + String(index)}>
               {example ? <ExampleLabel /> : null}
               <span>{actionLabel(category.action)}</span>
@@ -207,7 +212,7 @@ function Loaded({ result, example }: { result: WalletPoints; example: boolean })
           {POINTS_ENTRIES_LABEL}
         </h2>
         <ul className="points-list">
-          {result.entries.map((entry, index) => {
+          {result.entries.filter((entry) => isListedAction(entry.action)).map((entry, index) => {
             const href =
               entry.txHash && entry.chainId != null ? transactionUrl(entry.chainId, entry.txHash) : null;
             return (

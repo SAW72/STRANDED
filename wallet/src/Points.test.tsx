@@ -11,6 +11,10 @@ import {
   type PointsClient,
   type WalletPoints,
 } from "./lib/points";
+import { POINTS_DISCLAIMER, POINTS_INTRO, POINTS_WEIGHTS_NOTE } from "./copy";
+import { EXCLUDED_POINTS_ACTIONS } from "../../shared/excludedPointsActions.mjs";
+import copySource from "./copy.ts?raw";
+import pointsPageSource from "./Points.tsx?raw";
 import { isPointsRoute, Points } from "./Points";
 
 const TX = `0x${"ab".repeat(32)}`;
@@ -90,15 +94,25 @@ describe("Points page", () => {
     document.body.innerHTML = "";
   });
 
-  it("renders a loaded ledger with category points, total, rank, and tx links", async () => {
+  it("renders a loaded ledger with category points and tx links, without total or rank", async () => {
     const getWallet = vi.fn(async () => loadedWallet);
     const view = await render(<Points client={client({ getWallet })} />);
     await lookup(view.container, "  " + EXAMPLE_POINTS_ADDRESS.toUpperCase().replace("0X", "0x") + " ");
 
     expect(getWallet).toHaveBeenCalledWith(EXAMPLE_POINTS_ADDRESS);
     expect(view.container.querySelector("[data-testid='points-loaded']")).not.toBeNull();
-    expect(view.container.querySelector("[data-testid='points-total']")?.textContent).toBe("140");
-    expect(view.container.querySelector("[data-testid='points-rank']")?.textContent).toBe("2");
+    expect(view.container.querySelector("[data-testid='points-total']")).toBeNull();
+    expect(view.container.querySelector("[data-testid='points-rank']")).toBeNull();
+    expect(view.container.textContent).not.toMatch(/\bTotal\b/);
+    expect(view.container.textContent).not.toMatch(/\bRank\b/);
+    expect(view.container.querySelector("[data-testid='points-disclaimer']")?.textContent).toBe(POINTS_DISCLAIMER);
+    expect(view.container.textContent).toContain(POINTS_INTRO);
+    const weights = view.container.querySelector("[data-testid='points-weights']");
+    expect(weights?.textContent).toBe(POINTS_WEIGHTS_NOTE);
+    const categoryBlock = [...view.container.querySelectorAll("[data-testid='points-result']")].find((node) =>
+      node.textContent?.includes("By category"),
+    );
+    expect(categoryBlock?.textContent).toContain(POINTS_WEIGHTS_NOTE);
     expect(view.container.querySelector("[data-testid='points-wallet']")?.textContent).toBe(
       EXAMPLE_POINTS_ADDRESS,
     );
@@ -107,6 +121,8 @@ describe("Points page", () => {
     );
     expect(categories.join(" ")).toContain("Rescue");
     expect(categories.join(" ")).toContain("100");
+    const rescueRow = categories.find((text) => text.includes("100") && text.includes("Rescue"));
+    expect(rescueRow).not.toMatch(/placeholder|TBD/);
     expect(categories.join(" ")).toContain("Registry find");
     expect(categories.join(" ")).toContain("30");
     expect(categories.join(" ")).toContain("Session");
@@ -114,7 +130,6 @@ describe("Points page", () => {
     expect(links).toHaveLength(2);
     expect(links[0]?.getAttribute("href")).toBe(transactionUrl(ARB_SEPOLIA_CHAIN_ID, TX));
     expect(view.container.textContent).toContain("No transaction");
-    expect(view.container.textContent).toContain("nothing is promised");
     expect(view.container.textContent?.toLowerCase()).not.toContain("reward");
     expect(view.container.textContent).not.toContain("$");
     expect(view.container.textContent?.toLowerCase()).not.toContain("connect wallet");
@@ -135,6 +150,8 @@ describe("Points page", () => {
     expect(getWallet).toHaveBeenCalledWith(EMPTY_ADDRESS);
     expect(view.container.querySelector("[data-testid='points-empty']")?.textContent).toMatch(/no points/i);
     expect(view.container.querySelector("[data-testid='points-loaded']")).toBeNull();
+    expect(view.container.querySelector("[data-testid='points-weights']")).toBeNull();
+    expect(view.container.textContent).not.toContain(POINTS_WEIGHTS_NOTE);
     expect(view.container.querySelector("[data-testid='points-disclaimer']")?.textContent).toMatch(/not a token/i);
     await view.unmount();
   });
@@ -144,9 +161,12 @@ describe("Points page", () => {
     const view = await render(<Points client={client({ getWallet })} />);
     await lookup(view.container, "not-an-address");
     expect(getWallet).not.toHaveBeenCalled();
-    expect(view.container.querySelector("[data-testid='points-invalid']")?.textContent).toBe(
-      "Enter a valid wallet address.",
-    );
+    const error = view.container.querySelector("[data-testid='points-invalid']");
+    const input = view.container.querySelector("[data-testid='points-address']");
+    expect(error?.textContent).toBe("Enter a valid wallet address.");
+    expect(error?.id).toBe("points-address-error");
+    expect(input?.getAttribute("aria-describedby")).toBe("points-address-error");
+    expect(input?.getAttribute("aria-invalid")).toBe("true");
     expect(view.container.querySelector("[data-testid='points-loaded']")).toBeNull();
     expect(view.container.querySelector("[data-testid='points-error']")).toBeNull();
     await view.unmount();
@@ -194,12 +214,174 @@ describe("Points page", () => {
     await view.unmount();
   });
 
+  for (const action of EXCLUDED_POINTS_ACTIONS) {
+    it(`hides ${action} beside a rescue row`, async () => {
+      const beside: WalletPoints = {
+        wallet: EXAMPLE_POINTS_ADDRESS,
+        total: 117,
+        rank: 1,
+        categories: [
+          { action: "rescue", points: 100, count: 1 },
+          { action, points: 17, count: 1 },
+        ],
+        entries: [
+          { action: "rescue", points: 100, txHash: TX, chainId: ARB_SEPOLIA_CHAIN_ID },
+          { action, points: 17, txHash: TX, chainId: ARB_SEPOLIA_CHAIN_ID },
+        ],
+      };
+      const view = await render(<Points client={client({ getWallet: async () => beside })} />);
+      await lookup(view.container, EXAMPLE_POINTS_ADDRESS);
+      const categories = [...view.container.querySelectorAll("[data-testid='points-category']")].map(
+        (node) => node.textContent ?? "",
+      );
+      const entries = [...view.container.querySelectorAll("[data-testid='points-entry']")].map(
+        (node) => node.textContent ?? "",
+      );
+      expect(categories).toHaveLength(1);
+      expect(entries).toHaveLength(1);
+      expect(categories[0]).toContain("Rescue");
+      expect(categories[0]).toContain("100");
+      expect(entries[0]).toContain("Rescue");
+      expect(`${categories.join(" ")}\n${entries.join(" ")}`).not.toContain("17");
+      expect(`${categories.join(" ")}\n${entries.join(" ")}`).not.toContain(action);
+      expect(view.container.querySelector("[data-testid='points-weights']")?.textContent).toBe(POINTS_WEIGHTS_NOTE);
+      await view.unmount();
+    });
+  }
+
+  it("shows an action that is not on the excluded list beside rescue", async () => {
+    const beside: WalletPoints = {
+      wallet: EXAMPLE_POINTS_ADDRESS,
+      total: 117,
+      rank: 1,
+      categories: [
+        { action: "rescue", points: 100, count: 1 },
+        { action: "audit", points: 17, count: 1 },
+      ],
+      entries: [
+        { action: "rescue", points: 100, txHash: TX, chainId: ARB_SEPOLIA_CHAIN_ID },
+        { action: "audit", points: 17, txHash: TX, chainId: ARB_SEPOLIA_CHAIN_ID },
+      ],
+    };
+    const view = await render(<Points client={client({ getWallet: async () => beside })} />);
+    await lookup(view.container, EXAMPLE_POINTS_ADDRESS);
+    const categories = [...view.container.querySelectorAll("[data-testid='points-category']")].map(
+      (node) => node.textContent ?? "",
+    );
+    const entries = [...view.container.querySelectorAll("[data-testid='points-entry']")].map(
+      (node) => node.textContent ?? "",
+    );
+    expect(categories).toHaveLength(2);
+    expect(entries).toHaveLength(2);
+    expect(categories.join(" ")).toContain("Rescue");
+    expect(categories.join(" ")).toContain("100");
+    expect(categories.join(" ")).toContain("17");
+    expect(entries.join(" ")).toContain("17");
+    await view.unmount();
+  });
+
+  it("hides excluded actions in categories and entries and still shows rescue", async () => {
+    const excluded = ["bug_report", "security", "security_finding", "finding"] as const;
+    const hidden: WalletPoints = {
+      wallet: EXAMPLE_POINTS_ADDRESS,
+      total: 100,
+      rank: 1,
+      categories: [
+        { action: "rescue", points: 100, count: 1 },
+        ...excluded.map((action, index) => ({ action, points: 200 + index, count: 1 })),
+      ],
+      entries: [
+        { action: "rescue", points: 100, txHash: TX, chainId: ARB_SEPOLIA_CHAIN_ID },
+        ...excluded.map((action, index) => ({
+          action,
+          points: 200 + index,
+          txHash: TX,
+          chainId: ARB_SEPOLIA_CHAIN_ID,
+        })),
+      ],
+    };
+    const view = await render(<Points client={client({ getWallet: async () => hidden })} />);
+    await lookup(view.container, EXAMPLE_POINTS_ADDRESS);
+
+    const categories = [...view.container.querySelectorAll("[data-testid='points-category']")].map(
+      (node) => node.textContent ?? "",
+    );
+    const entries = [...view.container.querySelectorAll("[data-testid='points-entry']")].map(
+      (node) => node.textContent ?? "",
+    );
+    expect(categories).toHaveLength(1);
+    expect(entries).toHaveLength(1);
+    expect(categories[0]).toContain("Rescue");
+    expect(categories[0]).toContain("100");
+    expect(categories[0]).not.toMatch(/placeholder|TBD/);
+    expect(entries[0]).toContain("Rescue");
+    expect(entries[0]).toContain("100");
+    const visible = `${categories.join("\n")}\n${entries.join("\n")}`;
+    for (const [index, action] of excluded.entries()) {
+      expect(visible).not.toContain(action);
+      expect(visible).not.toContain(String(200 + index));
+    }
+    expect(visible).not.toContain("Other");
+    await view.unmount();
+  });
+
+  it("shows the empty state when every row is an excluded action", async () => {
+    const excludedOnly: WalletPoints = {
+      wallet: EXAMPLE_POINTS_ADDRESS,
+      total: 500,
+      rank: 1,
+      categories: [
+        { action: "bug_report", points: 500, count: 1 },
+        { action: "security", points: 300, count: 1 },
+        { action: "security_finding", points: 200, count: 1 },
+        { action: "finding", points: 100, count: 1 },
+      ],
+      entries: [
+        { action: "bug_report", points: 500, txHash: TX, chainId: ARB_SEPOLIA_CHAIN_ID },
+        { action: "security", points: 300, txHash: TX, chainId: ARB_SEPOLIA_CHAIN_ID },
+        { action: "security_finding", points: 200, txHash: null, chainId: null },
+        { action: "finding", points: 100, txHash: null, chainId: null },
+      ],
+    };
+    const view = await render(<Points client={client({ getWallet: async () => excludedOnly })} />);
+    await lookup(view.container, EXAMPLE_POINTS_ADDRESS);
+    expect(view.container.querySelector("[data-testid='points-loaded']")).toBeNull();
+    expect(view.container.querySelector("[data-testid='points-empty']")?.textContent).toMatch(/no points/i);
+    expect(view.container.querySelector("[data-testid='points-category']")).toBeNull();
+    expect(view.container.querySelector("[data-testid='points-entry']")).toBeNull();
+    expect(view.container.textContent).not.toMatch(/bug_report|security_finding|finding|\bsecurity\b|Other/);
+    await view.unmount();
+  });
+
+  it("rejects a bug report label in the points source", () => {
+    const points = pointsPageSource;
+    const copy = copySource;
+    expect(points).not.toMatch(/["']Bug report["']/);
+    expect(points).not.toMatch(/POINTS_ACTION_BUG_REPORT/);
+    expect(copy).not.toMatch(/Bug report/);
+    expect(points).not.toMatch(/^\s*(bug_report|security|security_finding|finding)\s*:/m);
+    expect(copy).not.toMatch(/bug_report|security_finding|Security finding|Finding report|POINTS_ACTION_BUG_REPORT/);
+    expect(copy).toContain('POINTS_ACTION_RESCUE = "Rescue"');
+    expect(copy).not.toMatch(/placeholder, TBD/);
+    expect(copy).toContain(POINTS_DISCLAIMER);
+    expect(copy).toContain(POINTS_INTRO);
+    expect(copy).toContain('POINTS_ACTION_REGISTRY_CLAIM = "Registry claim"');
+    expect(points).not.toMatch(/data-testid=["']points-total["']/);
+    expect(points).not.toMatch(/data-testid=["']points-rank["']/);
+    expect(points).not.toMatch(/POINTS_TOTAL_LABEL|POINTS_RANK_LABEL|POINTS_UNRANKED/);
+  });
+
   it("uses the example client from the page default without a baked URL", async () => {
     expect(createPointsClient().source).toBe("example");
     const view = await render(<Points />);
     expect(view.container.querySelector("[data-testid='points-example']")?.textContent).toMatch(/example data/i);
     await lookup(view.container, EXAMPLE_POINTS_ADDRESS);
-    expect(view.container.querySelector("[data-testid='points-total']")?.textContent).toBe("140");
+    expect(view.container.querySelector("[data-testid='points-total']")).toBeNull();
+    expect(view.container.querySelector("[data-testid='points-rank']")).toBeNull();
+    expect(view.container.textContent).not.toMatch(/\bTotal\b/);
+    expect(view.container.textContent).not.toMatch(/\bRank\b/);
+    expect(view.container.textContent).toContain("Rescue");
+    expect(view.container.textContent).not.toMatch(/placeholder, TBD/);
     const href = view.container.querySelector("[data-testid='points-tx']")?.getAttribute("href") ?? "";
     expect(href.startsWith("https://sepolia.arbiscan.io/tx/")).toBe(true);
     await view.unmount();
