@@ -5,14 +5,12 @@ import { join } from "node:path";
 import { describe, it } from "node:test";
 import { createLedgerStore, syntheticTxKey } from "../points/ledgerStore.mjs";
 import {
-  BUG_SEVERITY_POINTS,
   FIXED_POINTS,
   MAX_POINTS_PER_ROW,
   RESCUE_POINTS_PLACEHOLDER,
   isoWeekKey,
   pointsForAction,
   score,
-  scoreBugReport,
   scoreReferral,
   scoreRelayerJob,
   scoreRescue,
@@ -56,7 +54,7 @@ describe("points rubric", () => {
       assert.ok(scored.points <= MAX_POINTS_PER_ROW);
     }
     assert.equal(RESCUE_POINTS_PLACEHOLDER, 100);
-    assert.equal(BUG_SEVERITY_POINTS.critical, MAX_POINTS_PER_ROW);
+    assert.equal(FIXED_POINTS.rescue_completed, RESCUE_POINTS_PLACEHOLDER);
   });
 
   it("keeps a split rescue at the flat placeholder", () => {
@@ -83,41 +81,31 @@ describe("points rubric", () => {
     assert.throws(() => scoreRelayerJob({ txHash: TX, operatorId: "  " }), rejection("operator_required"));
   });
 
-  it("requires tx hash or repro steps on a bug report", () => {
-    const cases = [
-      { name: "tx only", severity: "low", txHash: TX_MIXED, reproSteps: "  ", points: 100, tx: TX },
-      { name: "steps only", severity: "medium", txHash: null, reproSteps: "open the wallet, then rescue", points: 200 },
-      { name: "both", severity: "high", txHash: TX, reproSteps: "also steps", points: 300, tx: TX },
-      {
-        name: "critical steps",
-        severity: "critical",
-        reproSteps: "repro",
-        reportId: "R-9",
-        points: 500,
-      },
-    ];
-    for (const row of cases) {
-      const scored = scoreBugReport(row);
-      assert.equal(scored.points, row.points, row.name);
-      assert.equal(scored.action, "bug_report", row.name);
-      if (row.tx) assert.equal(scored.txHash, row.tx, row.name);
-      else assert.match(scored.txHash, /^off:[0-9a-f]{64}$/, row.name);
+  it("awards no points for a bug report or security finding", () => {
+    const actions = ["bug_report", "security", "security_finding", "finding"];
+    const severities = ["low", "medium", "high", "critical"];
+    for (const action of actions) {
+      assert.equal(Object.hasOwn(FIXED_POINTS, action), false, action);
+      assert.throws(() => pointsForAction(action), rejection("invalid_action"));
+      for (const severity of severities) {
+        let scored = null;
+        assert.throws(
+          () => {
+            scored = score({
+              action,
+              severity,
+              txHash: TX_MIXED,
+              reproSteps: "open the wallet, then rescue",
+              reportId: "R-9",
+              points: 500,
+            });
+          },
+          rejection("invalid_action"),
+          action + " " + severity,
+        );
+        assert.equal(scored, null, action + " " + severity);
+      }
     }
-
-    const rejected = [
-      { severity: "low", txHash: null, reproSteps: "   ", code: "bug_report_evidence" },
-      { severity: "low", code: "bug_report_evidence" },
-      { severity: "urgent", txHash: TX, code: "invalid_severity" },
-      { severity: "low", txHash: "0xabc", reproSteps: "steps", code: "invalid_tx_hash" },
-    ];
-    for (const row of rejected) {
-      assert.throws(() => score({ action: "bug_report", ...row }), rejection(row.code));
-    }
-
-    const fromSteps = scoreBugReport({ severity: "low", reproSteps: "Same Steps" });
-    const fromStepsAgain = scoreBugReport({ severity: "medium", reproSteps: "same steps" });
-    assert.equal(fromSteps.txHash, fromStepsAgain.txHash);
-    assert.equal(fromSteps.txHash, syntheticTxKey("bug_report", ["same steps"]));
   });
 
   it("caps sessions at one per wallet per ISO week", async () => {

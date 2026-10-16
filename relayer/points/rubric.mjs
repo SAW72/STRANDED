@@ -19,7 +19,7 @@ import { syntheticTxKey } from "./ledgerStore.mjs";
  * - No referral action and no referral points.
  * - Splitting a rescue across wallets does not multiply points. One rescue
  *   transaction produces one award of the flat placeholder.
- * - A bug report needs an on-chain tx hash or reproducible steps.
+ * - Bug reports and security findings are not rubric actions and earn no points.
  */
 
 /** FLAT 100 PLACEHOLDER pending Spencer's decision. Not dollar-based. */
@@ -27,7 +27,7 @@ export const RESCUE_POINTS_PLACEHOLDER = 100;
 
 /**
  * Maximum points stored on one ledger row.
- * This is the top of the bug-report range. schema.sql checks the same bound.
+ * schema.sql checks the same bound.
  */
 export const MAX_POINTS_PER_ROW = 500;
 
@@ -37,14 +37,6 @@ export const FIXED_POINTS = Object.freeze({
   registry_find_posted: 30,
   registry_find_claimed: 50,
   wallet_session: 10,
-});
-
-/** Working map of "100–500 by severity". Critical sits on the row cap. */
-export const BUG_SEVERITY_POINTS = Object.freeze({
-  low: 100,
-  medium: 200,
-  high: 300,
-  critical: 500,
 });
 
 const ADDRESS_RE = /^0x[0-9a-f]{40}$/;
@@ -168,35 +160,6 @@ export function scoreWalletSession(input = {}, now = Date.now) {
   };
 }
 
-function reproText(value) {
-  if (typeof value !== "string") return "";
-  return value.trim();
-}
-
-/**
- * Bug-report points come from BUG_SEVERITY_POINTS.
- * Evidence is an on-chain tx hash or non-empty repro steps. With steps and
- * no tx hash, the row uses a synthetic key so tx_hash stays NOT NULL.
- * @param {object} [input]
- */
-export function scoreBugReport(input = {}) {
-  const severity = String(input.severity ?? "");
-  if (!Object.hasOwn(BUG_SEVERITY_POINTS, severity)) throw fail("invalid_severity");
-  const steps = reproText(input.reproSteps);
-  const rawTx = input.txHash == null ? "" : String(input.txHash).trim();
-  const txOk = ONCHAIN_TX_RE.test(rawTx);
-  if (!txOk && rawTx) throw fail("invalid_tx_hash");
-  if (!txOk && !steps) throw fail("bug_report_evidence");
-  const reportId = String(input.reportId ?? "").trim();
-  const txHash = txOk ? rawTx.toLowerCase() : syntheticTxKey("bug_report", [reportId || steps]);
-  return {
-    action: "bug_report",
-    points: BUG_SEVERITY_POINTS[severity],
-    severity,
-    txHash,
-  };
-}
-
 /** Referrals are not a rubric action. */
 export function scoreReferral() {
   throw fail("referrals_disabled");
@@ -224,8 +187,6 @@ export function score(input, now = Date.now) {
       return scoreRegistryFindClaimed(input);
     case "wallet_session":
       return scoreWalletSession(input, now);
-    case "bug_report":
-      return scoreBugReport(input);
     default:
       throw fail("invalid_action");
   }
