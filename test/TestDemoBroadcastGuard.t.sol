@@ -65,7 +65,7 @@ contract GuardHarness is ForcesBroadcast {
         address sender,
         uint256 chainId,
         string calldata stepId
-    ) external view {
+    ) external {
         _guardBroadcast(sender, chainId, stepId);
     }
 }
@@ -239,9 +239,8 @@ contract RealEnvHarness is TestDemoSteps {
 ///         `test_broadcast_wrongStep_refuses`, `test_broadcast_flagVariants_refuse`,
 ///         `test_broadcast_wrongSender_refuses`, `test_aggregators_neverBroadcast`.
 ///         `test_productionIsBroadcast_falseUnderForgeTest` runs the production
-///         body. It does not prove `ScriptResume`: `forge script --resume`
-///         publishes a saved sequence, and a sequence only exists after a
-///         broadcast that this suite never sends.
+///         body. `forge script --resume` does not run the script, so there is
+///         no `ScriptResume` leg to prove.
 contract TestDemoBroadcastGuardTest is Test {
     uint256 internal constant BASE = 84_532;
     uint256 internal constant ARB = 421_614;
@@ -277,7 +276,8 @@ contract TestDemoBroadcastGuardTest is Test {
     }
 
     /// @dev Calls the production `_isBroadcast` (no override). Under `forge test`
-    ///      both script contexts are false, so the real `||` returns false.
+    ///      `ScriptBroadcast` is false, so the production body returns false.
+    ///      That body does not read `ScriptResume`.
     function test_productionIsBroadcast_falseUnderForgeTest() public {
         ProductionContext live = new ProductionContext();
         assertFalse(live.isBroadcast());
@@ -453,8 +453,8 @@ contract TestDemoBroadcastGuardTest is Test {
         RealEnvHarness live = new RealEnvHarness();
         live.setBroadcast(true);
         vm.chainId(BASE);
-        // Foundry trims env values before envOr, so "1 " arrives as "1".
-        // The raw "1 " refusal is test_broadcast_flagVariants_refuse.
+        // A shell value of `1 ` is a different path from `vm.setEnv`. The raw
+        // `1 ` refusal is test_broadcast_flagVariants_refuse.
         string[3] memory badOk = ["0", "true", ""];
         for (uint256 i = 0; i < badOk.length; i++) {
             vm.setEnv("TEST_DEMO_BROADCAST_OK", badOk[i]);
@@ -474,6 +474,8 @@ contract TestDemoBroadcastGuardTest is Test {
         address router = live.deployBaseRouter(OWNER);
         assertEq(LockedDemoSwapRouter(payable(router)).maxPayout(), 0.0001 ether);
         assertEq(LockedDemoSwapRouter(payable(router)).quote(2 ether), 0.0001 ether);
+        vm.setEnv("TEST_DEMO_BROADCAST_OK", "");
+        vm.setEnv("TEST_DEMO_BROADCAST_STEP", "");
     }
 
     function test_aggregators_neverBroadcast() public {

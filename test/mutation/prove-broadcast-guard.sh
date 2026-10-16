@@ -18,13 +18,14 @@ restore() {
 }
 trap restore EXIT
 
-expect_fail() {
-  local test_name="$1"
-  local label="$2"
+expect_fail_in() {
+  local contract="$1"
+  local test_name="$2"
+  local label="$3"
   local log
   log="$(mktemp)"
   set +e
-  forge test --match-contract TestDemoBroadcastGuardTest --match-test "$test_name" >"$log" 2>&1
+  forge test --match-contract "$contract" --match-test "$test_name" >"$log" 2>&1
   local status=$?
   set -e
   cat "$log"
@@ -41,6 +42,10 @@ expect_fail() {
     exit 1
   fi
   echo "MUTATION CAUGHT ($label): $test_name"
+}
+
+expect_fail() {
+  expect_fail_in TestDemoBroadcastGuardTest "$1" "$2"
 }
 
 strip_between() {
@@ -76,6 +81,8 @@ PY
 
 echo "baseline"
 forge test --match-contract TestDemoBroadcastGuardTest -q
+echo "baseline a2 cap"
+forge test --match-contract TestDemoArbCapTest --match-test "test_a2_" -q
 
 echo "mutation: remove the chain check"
 strip_between \
@@ -114,7 +121,7 @@ cp "$backup" "$script"
 
 echo "mutation: force _isBroadcast() to return false"
 replace_once \
-  "        return vm.isContext(VmSafe.ForgeContext.ScriptBroadcast) || vm.isContext(VmSafe.ForgeContext.ScriptResume);" \
+  "        return vm.isContext(VmSafe.ForgeContext.ScriptBroadcast);" \
   "        return false;"
 proof_log="$(mktemp)"
 set +e
@@ -135,6 +142,38 @@ if ! grep -F "FAIL (broadcast-no-flags): output missing BroadcastRefused" "$proo
   exit 1
 fi
 echo "MUTATION CAUGHT (is-broadcast): prove-real-broadcast-context.sh"
+cp "$backup" "$script"
+
+echo "mutation: remove the eth_chainId check"
+strip_between \
+  "        // RPC_CHAIN_GUARD: \`--chain-id\` spoofs block.chainid. eth_chainId does not."$'\n' \
+  "        if (!_isBroadcast()) return;"$'\n'
+rpc_log="$(mktemp)"
+set +e
+bash test/ci/prove-real-broadcast-context.sh >"$rpc_log" 2>&1
+rpc_status=$?
+set -e
+cat "$rpc_log"
+if grep -F "Compiler run failed" "$rpc_log" >/dev/null; then
+  echo "MUTATION DID NOT COMPILE (rpc-chain)"
+  exit 1
+fi
+if [[ "$rpc_status" -eq 0 ]]; then
+  echo "MUTATION SURVIVED (rpc-chain): prove-real-broadcast-context.sh"
+  exit 1
+fi
+if ! grep -E "FAIL \(chain-spoof-b1\)|FAIL \(chain-spoof-b2\)" "$rpc_log" >/dev/null; then
+  echo "MUTATION NOT CAUGHT CLEANLY (rpc-chain): anvil proof failed for another reason"
+  exit 1
+fi
+echo "MUTATION CAUGHT (rpc-chain): prove-real-broadcast-context.sh"
+cp "$backup" "$script"
+
+echo "mutation: remove the A2 maxPayout cap"
+strip_between \
+  "            // A2_CAP_GUARD: 2 tDEMO pays the live maxPayout until A3 lowers it."$'\n' \
+  "        } else {"$'\n'
+expect_fail_in TestDemoArbCapTest test_a2_refusesHighCap "a2-cap"
 cp "$backup" "$script"
 
 echo "restored"

@@ -56,7 +56,11 @@ jobs:
         run: test -n "$BASE_SEPOLIA_RPC_URL"
 
       - name: Simulate Base B-steps
-        run: forge test --match-path test/fork/TestDemoSupplyFork.t.sol --match-test test_base_simulatesB4ThenDeployAllowlistAndFund -vv
+        run: |
+          set -euo pipefail
+          forge test --match-path test/fork/TestDemoSupplyFork.t.sol --match-test test_base_simulatesB4ThenDeployAllowlistAndFund -vv \
+            2>&1 | tee fork-summary.txt
+          grep -F "1 passed; 0 failed; 0 skipped" fork-summary.txt
 
   fork-arb:
     name: Arb Sepolia fork
@@ -80,7 +84,11 @@ jobs:
         run: test -n "$ARB_SEPOLIA_RPC_URL"
 
       - name: Simulate Arb A-steps
-        run: forge test --match-path test/fork/TestDemoSupplyFork.t.sol --match-test test_arb_simulatesDeployAllowlistAndRecommendedCap -vv
+        run: |
+          set -euo pipefail
+          forge test --match-path test/fork/TestDemoSupplyFork.t.sol --match-test test_arb_simulatesDeployAllowlistAndRecommendedCap -vv \
+            2>&1 | tee fork-summary.txt
+          grep -F "1 passed; 0 failed; 0 skipped" fork-summary.txt
 
   # Base Sepolia fork proof for the delist steps. No key and no broadcast.
   # This workflow never sets BASE_SEPOLIA_RPC_URL. The job always uses the

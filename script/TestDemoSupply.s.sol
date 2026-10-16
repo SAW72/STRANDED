@@ -11,7 +11,7 @@ import {TestDemoToken} from "../src/TestDemoToken.sol";
 /// @notice Shared Base Sepolia and Arb Sepolia addresses for the tDEMO supply
 ///         scripts. Arb Sepolia stays the main demo. These scripts do not
 ///         move or delete SDEMO, the Arb swap, or the Arb locked router.
-///         Dry-run is the default and reads no broadcast env. Spencer
+///         Dry-run is the default and reads no broadcast env. The owner
 ///         (`0x3046…bA9D`) signs. No key in the repo. Agents do not broadcast.
 interface ILiveSwapAdmin {
     function owner() external view returns (address);
@@ -44,7 +44,7 @@ contract TestDemoSteps is Script {
     uint256 public constant BASE_SEPOLIA_CHAIN_ID = 84_532;
     uint256 public constant ARB_SEPOLIA_CHAIN_ID = 421_614;
 
-    /// @dev Spencer. Signs every B and A transaction. Same owner on both swaps.
+    /// @dev The owner. Signs every B and A transaction. Same owner on both swaps.
     address public constant OWNER = 0x30466A210961c0C2C13AF0A9d35dfC6E8858bA9D;
     /// @dev Relayer hot wallet. B5 sends it 0.02 ETH on Base. Not a signer here.
     address public constant RELAYER = 0x8240124dc78a27c80354Ca813Df12aa2888A9AF6;
@@ -76,6 +76,8 @@ contract TestDemoSteps is Script {
     uint256 public constant ARB_RECOMMENDED_MAX_PAYOUT = 0.0001 ether;
 
     error WrongChain(uint256 chainId);
+    /// @dev `eth_chainId` from the script RPC, then the `block.chainid` forge reported.
+    error RpcChainMismatch(uint256 rpcChainId, uint256 reportedChainId);
     error BroadcastRefused();
     error AggregatorNeverBroadcasts();
     error FoundryDefaultSender();
@@ -88,13 +90,22 @@ contract TestDemoSteps is Script {
         if (sender != OWNER) revert SenderNotOwner(sender);
     }
 
-    /// @notice True while `forge script --broadcast` or `forge script --resume`
-    ///         is executing this script. Tests override it. Dry-run and
-    ///         `forge test` are false. `ScriptResume` is included so `--resume`
-    ///         is not a path that skips the broadcast flags.
+    /// @notice True while `forge script --broadcast` is executing this script.
+    ///         Tests override it. Dry-run and `forge test` are false.
+    ///         `forge script --resume` does not run the script, so this function
+    ///         cannot see a resume and does not treat `ScriptResume` as a gate.
     function _isBroadcast() internal view virtual returns (bool) {
-        // IS_BROADCAST: ScriptBroadcast (`--broadcast`) or ScriptResume (`--resume`).
-        return vm.isContext(VmSafe.ForgeContext.ScriptBroadcast) || vm.isContext(VmSafe.ForgeContext.ScriptResume);
+        // IS_BROADCAST: ScriptBroadcast (`--broadcast`) only. `--resume` does not run this script.
+        return vm.isContext(VmSafe.ForgeContext.ScriptBroadcast);
+    }
+
+    /// @dev Raw `eth_chainId` bytes from Foundry 1.8.5 `vm.rpc`: big-endian, no
+    ///      JSON quotes. Chain 1 is `0x01`. Chain 84532 is `0x014a34`.
+    function _ethChainId() internal returns (uint256 id) {
+        bytes memory raw = vm.rpc("eth_chainId", "[]");
+        for (uint256 i = 0; i < raw.length; i++) {
+            id = (id << 8) | uint8(raw[i]);
+        }
     }
 
     /// @dev Exact `TEST_DEMO_BROADCAST_OK` value. Tests override this. `"1"` is the only accept.
@@ -113,7 +124,7 @@ contract TestDemoSteps is Script {
     ///         Broadcast flags are read only in broadcast context. Dry-run needs none.
     ///         Broadcast also needs `TEST_DEMO_BROADCAST_OK` exactly `1` and
     ///         `TEST_DEMO_BROADCAST_STEP` exactly `stepId` (`B4`,`B1`,`B2`,`B3`,`B5`,
-    ///         `A1`,`A2`,`A3`). One step id does not authorize another step.
+    ///         `A1`,`A3`,`A2`). One step id does not authorize another step.
     ///         `stepId` `*` is the aggregator entry: broadcast reverts
     ///         `AggregatorNeverBroadcasts` and dry-run returns. This does not stop
     ///         someone from editing the script and deleting the gate.
@@ -121,7 +132,7 @@ contract TestDemoSteps is Script {
         address sender,
         uint256 intendedChain,
         string memory stepId
-    ) internal view {
+    ) internal {
         // AGGREGATOR_GUARD: this entry never broadcasts, even with a valid step flag.
         if (keccak256(bytes(stepId)) == keccak256(bytes("*"))) {
             if (_isBroadcast()) revert AggregatorNeverBroadcasts();
@@ -137,6 +148,13 @@ contract TestDemoSteps is Script {
             revert WrongChain(intendedChain);
         }
         if (block.chainid != intendedChain) revert WrongChain(block.chainid);
+
+        // RPC_CHAIN_GUARD: `--chain-id` spoofs block.chainid. eth_chainId does not.
+        // forge test is not ScriptGroup and has no script RPC, so this is skipped there.
+        if (vm.isContext(VmSafe.ForgeContext.ScriptGroup)) {
+            uint256 rpcChainId = _ethChainId();
+            if (rpcChainId != block.chainid) revert RpcChainMismatch(rpcChainId, block.chainid);
+        }
 
         if (!_isBroadcast()) return;
 
@@ -275,6 +293,10 @@ contract TestDemoSteps is Script {
             require(LockedDemoSwapRouter(payable(ARB_ROUTER)).rescue() == ARB_SWAP, "A2: router rescue");
             require(swap.allowedRouters(ARB_ROUTER), "A2: Arb router not allowlisted");
             require(swap.allowedTokens(ARB_SDEMO) && swap.eip2612Tokens(ARB_SDEMO), "A2: SDEMO must stay");
+            // A2_CAP_GUARD: 2 tDEMO pays the live maxPayout until A3 lowers it.
+            require(
+                LockedDemoSwapRouter(payable(ARB_ROUTER)).maxPayout() <= ARB_RECOMMENDED_MAX_PAYOUT, "A2: sign A3 first"
+            );
         } else {
             require(router != address(0), "B3: ROUTER_ADDRESS required");
             require(router != BASE_STALE_ROUTER, "B3: refusing stale router 0x94cC");
@@ -360,8 +382,8 @@ contract TestDemoSteps is Script {
         require(RELAYER.balance == relayerBefore + BASE_RELAYER_FUND, "B5: relayer balance");
     }
 
-    /// @notice A3. Arb only. Recommended: lower maxPayout on the existing router.
-    ///         Does not deploy a router and does not move ETH.
+    /// @notice A3. Arb only. Lower maxPayout on the existing router before A2.
+    ///         Does not deploy a router and does not move ETH. A2 reverts until this cap is in place.
     function setArbMaxPayout(
         address sender
     ) public {
@@ -447,7 +469,7 @@ contract B5_FundBaseRouter is TestDemoSteps {
     }
 }
 
-/// @notice A3. Arb only. Recommended owner call on the existing router. Not a new deploy.
+/// @notice A3. Arb only. Required before A2. Owner call on the existing router. Not a new deploy.
 contract A3_SetArbMaxPayout is TestDemoSteps {
     function run() external {
         setArbMaxPayout(_signer());
@@ -456,7 +478,7 @@ contract A3_SetArbMaxPayout is TestDemoSteps {
 
 /// @notice One dry-run of Base order B4, B1, B2, B3, B5.
 ///         `--broadcast` reverts `AggregatorNeverBroadcasts` before any step.
-///         Spencer signs the five contracts above, in that order.
+///         The owner signs the five contracts above, in that order.
 contract SimulateBaseSupply is TestDemoSteps {
     function run() external {
         _guardBroadcast(msg.sender, block.chainid, "*");
@@ -469,14 +491,16 @@ contract SimulateBaseSupply is TestDemoSteps {
     }
 }
 
-/// @notice One dry-run of Arb order A1, A2, then recommended A3.
+/// @notice One dry-run of Arb order A1, then A3, then A2.
+///         A2 reverts until A3 has lowered `maxPayout`. A3 is not optional.
 ///         `--broadcast` reverts `AggregatorNeverBroadcasts` before any step.
+///         `--resume` does not run this contract.
 contract SimulateArbSupply is TestDemoSteps {
     function run() external {
         _guardBroadcast(msg.sender, block.chainid, "*");
         address sender = _signer();
         (, address demo) = deployFaucet(sender);
-        allowlist(sender, demo, ARB_ROUTER);
         setArbMaxPayout(sender);
+        allowlist(sender, demo, ARB_ROUTER);
     }
 }
