@@ -6,18 +6,27 @@ Token name: **Stranded TEST Demo — No Value**. Symbol: **tDEMO**. Decimals: 18
 
 On-chain notice: `Testnet only (Base Sepolia 84532 or Arbitrum Sepolia 421614). No monetary value. Not for sale. Not a reward.`
 
-Scripts: `script/TestDemoSupply.s.sol`. Every step reverts `BroadcastRefused` unless `TEST_DEMO_BROADCAST_OK=1`, and reverts `WrongChain` unless `block.chainid` is that step's chain (`84532` or `421614`). Keystore placeholder on every broadcast Spencer runs himself:
+Scripts: `script/TestDemoSupply.s.sol`. Dry-run is the default and needs no env flag. `forge script` without `--broadcast` does not read `TEST_DEMO_BROADCAST_OK` or `TEST_DEMO_BROADCAST_STEP`.
+
+Every step still checks the sender and the chain on a dry-run. The sender must be `0x30466A210961c0C2C13AF0A9d35dfC6E8858bA9D` (the Foundry default sender `0x1804…1f38` reverts `FoundryDefaultSender`). `block.chainid` must be that step's chain, and that chain must be 84532 or 421614. B4, B2, and B5 revert `WrongChain` on 421614. A3 reverts `WrongChain` on 84532.
+
+`--broadcast` is a different context (`vm.isContext(ScriptBroadcast)`). In that context the same chain and sender checks apply, and both env values must match exactly: `TEST_DEMO_BROADCAST_OK=1` and `TEST_DEMO_BROADCAST_STEP` equal to that one step's id (`B4`, `B1`, `B2`, `B3`, `B5`, `A1`, `A2`, or `A3`). `0`, `true`, and empty are not `1`. The gate also rejects a raw `1 ` (trailing space). Foundry trims environment values before `vm.envOr` reads them, so a shell value of `1 ` is already `1` when the script sees it. A flag for B4 does not broadcast B1. Anything else reverts `BroadcastRefused` before `vm.startBroadcast`.
+
+`SimulateBaseSupply` and `SimulateArbSupply` revert `AggregatorNeverBroadcasts` in a broadcast context before any step, even if the flags would allow the first step. They are dry-run only.
+
+This guard does not stop someone from editing the script, deleting the gate, or broadcasting some other contract. It only binds these entrypoints. Keystore placeholder on every broadcast Spencer runs himself:
 
 ```bash
 TEST_DEMO_BROADCAST_OK=1 \
-forge script script/TestDemoSupply.s.sol:<Contract> \
-  --rpc-url "$RPC" --chain-id <84532|421614> \
+TEST_DEMO_BROADCAST_STEP=B4 \
+forge script script/TestDemoSupply.s.sol:B4_DelistStaleAllowlist \
+  --rpc-url "$BASE_SEPOLIA_RPC_URL" --chain-id 84532 \
   --account <owner-keystore> \
   --sender 0x30466A210961c0C2C13AF0A9d35dfC6E8858bA9D \
   --broadcast --slow
 ```
 
-Simulation keeps `TEST_DEMO_BROADCAST_OK=1`, omits `--broadcast` and `--account`, and passes only `--sender`. Copy addresses from receipts. Do not paste a predicted CREATE address into a later step. Fork tests revert `MissingRpc` when their RPC URL is unset. They do not skip.
+Repeat with `TEST_DEMO_BROADCAST_STEP` set to the one contract being signed (`B1`, `B2`, `B3`, `B5`, `A1`, `A2`, `A3`). Simulation omits `--broadcast`, `--account`, and both env vars, and passes only `--sender`. Copy addresses from receipts. Do not paste a predicted CREATE address into a later step. Fork tests revert `MissingRpc` when their RPC URL is unset. They do not skip.
 
 Gas figures below are the script's `gasleft` deltas around each call (the inner call, not the 21,000 intrinsic). They come from the fork tests calling the same script helpers against a fork of the live chain, with no broadcast. B5's value transfers were measured after the fork dealt the owner up to exactly 0.071 ETH (0.07 ETH of transfers plus 0.001 ETH headroom). His live Base balance (about 0.0583 ETH) is short of that. The live `forge script` of B5 reverts `Underfunded` until that balance is there. A balance of exactly 0.07 ETH also reverts. `setTokenAllowed` after `setEip2612Token(true)` is a skipped branch on this bytecode (`setEip2612Token(true)` already sets `allowedTokens`), so that delta is not a transaction. A2's `setRouterAllowed` delta is the skipped `if (base)` branch.
 

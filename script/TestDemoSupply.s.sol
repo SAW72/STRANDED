@@ -2,6 +2,7 @@
 pragma solidity ^0.8.24;
 
 import {Script, console2} from "forge-std/Script.sol";
+import {VmSafe} from "forge-std/Vm.sol";
 
 import {LockedDemoSwapRouter} from "../src/LockedDemoSwapRouter.sol";
 import {TestDemoFaucet} from "../src/TestDemoFaucet.sol";
@@ -10,8 +11,8 @@ import {TestDemoToken} from "../src/TestDemoToken.sol";
 /// @notice Shared Base Sepolia and Arb Sepolia addresses for the tDEMO supply
 ///         scripts. Arb Sepolia stays the main demo. These scripts do not
 ///         move or delete SDEMO, the Arb swap, or the Arb locked router.
-///         Simulate only. Spencer (`0x3046…bA9D`) signs. No key in the repo.
-///         Do not pass `--broadcast` from an agent.
+///         Dry-run is the default and reads no broadcast env. Spencer
+///         (`0x3046…bA9D`) signs. No key in the repo. Agents do not broadcast.
 interface ILiveSwapAdmin {
     function owner() external view returns (address);
     function setTokenAllowed(
@@ -74,6 +75,7 @@ contract TestDemoSteps is Script {
 
     error WrongChain(uint256 chainId);
     error BroadcastRefused();
+    error AggregatorNeverBroadcasts();
     error FoundryDefaultSender();
     error SenderNotOwner(address sender);
     error Underfunded(uint256 balance);
@@ -84,24 +86,60 @@ contract TestDemoSteps is Script {
         if (sender != OWNER) revert SenderNotOwner(sender);
     }
 
-    function _requireChain(
-        uint256 chainId
-    ) internal view {
-        if (block.chainid != chainId) revert WrongChain(block.chainid);
+    /// @notice True only while `forge script --broadcast` is executing this script.
+    ///         Tests override it. Dry-run and `forge test` are false.
+    function _isBroadcast() internal view virtual returns (bool) {
+        return vm.isContext(VmSafe.ForgeContext.ScriptBroadcast);
     }
 
-    /// @notice Broadcast is refused unless `TEST_DEMO_BROADCAST_OK=1` and `block.chainid`
-    ///         is `intendedChain`, which itself must be 84532 or 421614.
-    function authorizeBroadcast(
-        uint256 intendedChain
-    ) public view {
-        if (keccak256(bytes(vm.envOr("TEST_DEMO_BROADCAST_OK", string("")))) != keccak256(bytes("1"))) {
-            revert BroadcastRefused();
+    /// @dev Exact `TEST_DEMO_BROADCAST_OK` value. Tests override this. `"1"` is the only accept.
+    function _broadcastOkFlag() internal view virtual returns (string memory) {
+        return vm.envOr("TEST_DEMO_BROADCAST_OK", string(""));
+    }
+
+    /// @dev Exact `TEST_DEMO_BROADCAST_STEP` value. Tests override this.
+    function _broadcastStepFlag() internal view virtual returns (string memory) {
+        return vm.envOr("TEST_DEMO_BROADCAST_STEP", string(""));
+    }
+
+    /// @notice Single gate in front of every `vm.startBroadcast`.
+    ///         Chain and sender are checked on dry-run and on broadcast: a simulation
+    ///         that is not on this step's chain, or not from `OWNER`, is not that step.
+    ///         Broadcast flags are read only in broadcast context. Dry-run needs none.
+    ///         Broadcast also needs `TEST_DEMO_BROADCAST_OK` exactly `1` and
+    ///         `TEST_DEMO_BROADCAST_STEP` exactly `stepId` (`B4`,`B1`,`B2`,`B3`,`B5`,
+    ///         `A1`,`A2`,`A3`). One step id does not authorize another step.
+    ///         `stepId` `*` is the aggregator entry: broadcast reverts
+    ///         `AggregatorNeverBroadcasts` and dry-run returns. This does not stop
+    ///         someone from editing the script and deleting the gate.
+    function _guardBroadcast(
+        address sender,
+        uint256 intendedChain,
+        string memory stepId
+    ) internal view {
+        // AGGREGATOR_GUARD: this entry never broadcasts, even with a valid step flag.
+        if (keccak256(bytes(stepId)) == keccak256(bytes("*"))) {
+            if (_isBroadcast()) revert AggregatorNeverBroadcasts();
+            return;
         }
+
+        if (sender == FOUNDRY_DEFAULT_SENDER) revert FoundryDefaultSender();
+        if (sender != OWNER) revert SenderNotOwner(sender);
+
+        // CHAIN_GUARD: intended chain must be 84532 or 421614 and equal block.chainid.
         if (intendedChain != BASE_SEPOLIA_CHAIN_ID && intendedChain != ARB_SEPOLIA_CHAIN_ID) {
             revert WrongChain(intendedChain);
         }
-        _requireChain(intendedChain);
+        if (block.chainid != intendedChain) revert WrongChain(block.chainid);
+
+        if (!_isBroadcast()) return;
+
+        if (keccak256(bytes(_broadcastOkFlag())) != keccak256(bytes("1"))) {
+            revert BroadcastRefused();
+        }
+        // STEP_GUARD: one step id cannot authorize another step.
+        string memory bound = _broadcastStepFlag();
+        if (keccak256(bytes(bound)) != keccak256(bytes(stepId))) revert BroadcastRefused();
     }
 
     function _swap() internal view returns (ILiveSwapAdmin) {
@@ -124,7 +162,7 @@ contract TestDemoSteps is Script {
     function delistBase(
         address sender
     ) public {
-        authorizeBroadcast(BASE_SEPOLIA_CHAIN_ID);
+        _guardBroadcast(sender, BASE_SEPOLIA_CHAIN_ID, "B4");
         ILiveSwapAdmin swap = ILiveSwapAdmin(BASE_SWAP);
         require(swap.owner() == OWNER, "B4: owner is not 0x3046...bA9D");
 
@@ -155,8 +193,8 @@ contract TestDemoSteps is Script {
     function deployFaucet(
         address sender
     ) public returns (address faucet, address demo) {
-        authorizeBroadcast(block.chainid);
         string memory step = block.chainid == BASE_SEPOLIA_CHAIN_ID ? "B1" : "A1";
+        _guardBroadcast(sender, block.chainid, step);
         console2.log(step, "deploy TestDemoFaucet + TestDemoToken");
         console2.log("signer", sender);
         console2.log("chain", block.chainid);
@@ -183,7 +221,7 @@ contract TestDemoSteps is Script {
     function deployBaseRouter(
         address sender
     ) public returns (address router) {
-        authorizeBroadcast(BASE_SEPOLIA_CHAIN_ID);
+        _guardBroadcast(sender, BASE_SEPOLIA_CHAIN_ID, "B2");
         console2.log("B2 deploy LockedDemoSwapRouter");
         console2.log("signer", sender);
         console2.log("rescue", BASE_SWAP);
@@ -214,15 +252,14 @@ contract TestDemoSteps is Script {
         address demo,
         address router
     ) public returns (address used) {
-        authorizeBroadcast(block.chainid);
+        bool base = block.chainid == BASE_SEPOLIA_CHAIN_ID;
+        _guardBroadcast(sender, base ? BASE_SEPOLIA_CHAIN_ID : ARB_SEPOLIA_CHAIN_ID, base ? "B3" : "A2");
         require(demo != address(0), "allowlist: TOKEN_ADDRESS required");
         ILiveSwapAdmin swap = _swap();
         require(swap.owner() == OWNER, "allowlist: owner is not 0x3046...bA9D");
         TestDemoToken token = TestDemoToken(demo);
         require(token.totalSupply() == token.TOTAL_SUPPLY(), "allowlist: supply");
         require(keccak256(bytes(token.symbol())) == keccak256(bytes("tDEMO")), "allowlist: symbol");
-
-        bool base = block.chainid == BASE_SEPOLIA_CHAIN_ID;
         if (!base) {
             require(router == address(0) || router == ARB_ROUTER, "A2: refusing a new Arb router");
             router = ARB_ROUTER;
@@ -279,7 +316,7 @@ contract TestDemoSteps is Script {
         address sender,
         address router
     ) public {
-        authorizeBroadcast(BASE_SEPOLIA_CHAIN_ID);
+        _guardBroadcast(sender, BASE_SEPOLIA_CHAIN_ID, "B5");
         require(router != address(0) && router != BASE_STALE_ROUTER, "B5: router");
         ILiveSwapAdmin swap = ILiveSwapAdmin(BASE_SWAP);
         require(swap.allowedRouters(router), "B5: allowlist the router in B3 before funding");
@@ -319,7 +356,7 @@ contract TestDemoSteps is Script {
     function setArbMaxPayout(
         address sender
     ) public {
-        authorizeBroadcast(ARB_SEPOLIA_CHAIN_ID);
+        _guardBroadcast(sender, ARB_SEPOLIA_CHAIN_ID, "A3");
         LockedDemoSwapRouter router = LockedDemoSwapRouter(payable(ARB_ROUTER));
         require(router.owner() == OWNER, "A3: router owner");
         require(router.rescue() == ARB_SWAP, "A3: router rescue");
@@ -408,10 +445,12 @@ contract A3_SetArbMaxPayout is TestDemoSteps {
     }
 }
 
-/// @notice One simulation of Base order B4, B1, B2, B3, B5. Do not `--broadcast` this
-///         aggregator. Spencer signs the five contracts above, in that order.
+/// @notice One dry-run of Base order B4, B1, B2, B3, B5.
+///         `--broadcast` reverts `AggregatorNeverBroadcasts` before any step.
+///         Spencer signs the five contracts above, in that order.
 contract SimulateBaseSupply is TestDemoSteps {
     function run() external {
+        _guardBroadcast(msg.sender, block.chainid, "*");
         address sender = _signer();
         delistBase(sender);
         (, address demo) = deployFaucet(sender);
@@ -421,10 +460,11 @@ contract SimulateBaseSupply is TestDemoSteps {
     }
 }
 
-/// @notice One simulation of Arb order A1, A2, then recommended A3.
-///         Do not `--broadcast` this aggregator.
+/// @notice One dry-run of Arb order A1, A2, then recommended A3.
+///         `--broadcast` reverts `AggregatorNeverBroadcasts` before any step.
 contract SimulateArbSupply is TestDemoSteps {
     function run() external {
+        _guardBroadcast(msg.sender, block.chainid, "*");
         address sender = _signer();
         (, address demo) = deployFaucet(sender);
         allowlist(sender, demo, ARB_ROUTER);

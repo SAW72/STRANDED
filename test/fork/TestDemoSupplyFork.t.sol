@@ -113,7 +113,6 @@ contract TestDemoSupplyForkTest is Test {
         string memory rpc = vm.envOr(envName, string(""));
         if (bytes(rpc).length == 0) revert MissingRpc(envName);
         vm.createSelectFork(rpc);
-        vm.setEnv("TEST_DEMO_BROADCAST_OK", "1");
         steps = new TestDemoSteps();
     }
 }
