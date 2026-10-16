@@ -53,7 +53,9 @@ contract TestDemoSteps is Script {
     address public constant BASE_SWAP = 0x21A1ADf810e64B5bd1d530D31abA6856b8DEf688;
     /// @dev Stale Base allowlist. Public `mint`. Delist before funding.
     address public constant BASE_GMOCK = 0xE36c35cbF0373D77D00732f7B92dB4fB8fd37166;
-    /// @dev Stale Base router. Unidentified, no payout cap, 0 ETH. Delist. Do not fund.
+    /// @dev Stale Base router: the Uniswap V3 SwapRouter02 on Base Sepolia.
+    ///      B4 delists it so the tDEMO allowlist contains only the locked demo
+    ///      router. It holds 0 ETH and is not the capped router. Do not fund.
     address public constant BASE_STALE_ROUTER = 0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4;
 
     address public constant ARB_SWAP = 0x65e712222745A8FCCbF038A90Fa75caB0867993D;
@@ -86,10 +88,13 @@ contract TestDemoSteps is Script {
         if (sender != OWNER) revert SenderNotOwner(sender);
     }
 
-    /// @notice True only while `forge script --broadcast` is executing this script.
-    ///         Tests override it. Dry-run and `forge test` are false.
+    /// @notice True while `forge script --broadcast` or `forge script --resume`
+    ///         is executing this script. Tests override it. Dry-run and
+    ///         `forge test` are false. `ScriptResume` is included so `--resume`
+    ///         is not a path that skips the broadcast flags.
     function _isBroadcast() internal view virtual returns (bool) {
-        return vm.isContext(VmSafe.ForgeContext.ScriptBroadcast);
+        // IS_BROADCAST: ScriptBroadcast (`--broadcast`) or ScriptResume (`--resume`).
+        return vm.isContext(VmSafe.ForgeContext.ScriptBroadcast) || vm.isContext(VmSafe.ForgeContext.ScriptResume);
     }
 
     /// @dev Exact `TEST_DEMO_BROADCAST_OK` value. Tests override this. `"1"` is the only accept.
@@ -123,6 +128,7 @@ contract TestDemoSteps is Script {
             return;
         }
 
+        // SENDER_GUARD: the Foundry default sender and any non-owner are refused.
         if (sender == FOUNDRY_DEFAULT_SENDER) revert FoundryDefaultSender();
         if (sender != OWNER) revert SenderNotOwner(sender);
 
@@ -134,6 +140,7 @@ contract TestDemoSteps is Script {
 
         if (!_isBroadcast()) return;
 
+        // OK_GUARD: TEST_DEMO_BROADCAST_OK must be exactly "1".
         if (keccak256(bytes(_broadcastOkFlag())) != keccak256(bytes("1"))) {
             revert BroadcastRefused();
         }
@@ -158,7 +165,9 @@ contract TestDemoSteps is Script {
         console2.logBytes(data);
     }
 
-    /// @notice B4. Base only. Remove gMOCK and the unidentified router. Run this first.
+    /// @notice B4. Base only. Remove gMOCK and the Uniswap V3 SwapRouter02
+    ///         `0x94cC…2bc4`. Run this first. The tDEMO allowlist should contain
+    ///         only the locked demo router.
     function delistBase(
         address sender
     ) public {

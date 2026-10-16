@@ -57,6 +57,10 @@ contract GuardHarness is ForcesBroadcast {
         return vm.isContext(VmSafe.ForgeContext.ScriptBroadcast);
     }
 
+    function scriptResumeContext() external view returns (bool) {
+        return vm.isContext(VmSafe.ForgeContext.ScriptResume);
+    }
+
     function guard(
         address sender,
         uint256 chainId,
@@ -208,6 +212,13 @@ contract RunArbAgg is SimulateArbSupply, RunBroadcast {
     }
 }
 
+/// @dev Production `_isBroadcast`. No override, so `forge test` hits the real `||`.
+contract ProductionContext is TestDemoSteps {
+    function isBroadcast() external view returns (bool) {
+        return _isBroadcast();
+    }
+}
+
 /// @dev Uses the real env reads. Only one test may call `vm.setEnv` for these names.
 contract RealEnvHarness is TestDemoSteps {
     bool public forceBroadcast;
@@ -225,7 +236,12 @@ contract RealEnvHarness is TestDemoSteps {
 
 /// @notice Broadcast gate for the tDEMO steps. No RPC. Dry-run needs no env.
 ///         Mutation oracles: `test_broadcast_wrongChain_refuses`,
-///         `test_broadcast_wrongStep_refuses`, `test_aggregators_neverBroadcast`.
+///         `test_broadcast_wrongStep_refuses`, `test_broadcast_flagVariants_refuse`,
+///         `test_broadcast_wrongSender_refuses`, `test_aggregators_neverBroadcast`.
+///         `test_productionIsBroadcast_falseUnderForgeTest` runs the production
+///         body. It does not prove `ScriptResume`: `forge script --resume`
+///         publishes a saved sequence, and a sequence only exists after a
+///         broadcast that this suite never sends.
 contract TestDemoBroadcastGuardTest is Test {
     uint256 internal constant BASE = 84_532;
     uint256 internal constant ARB = 421_614;
@@ -256,7 +272,17 @@ contract TestDemoBroadcastGuardTest is Test {
 
     function test_realContext_isNotBroadcast() public view {
         assertFalse(steps.realBroadcastContext());
+        assertFalse(steps.scriptResumeContext());
         assertFalse(steps.forceBroadcast());
+    }
+
+    /// @dev Calls the production `_isBroadcast` (no override). Under `forge test`
+    ///      both script contexts are false, so the real `||` returns false.
+    function test_productionIsBroadcast_falseUnderForgeTest() public {
+        ProductionContext live = new ProductionContext();
+        assertFalse(live.isBroadcast());
+        assertFalse(vm.isContext(VmSafe.ForgeContext.ScriptBroadcast));
+        assertFalse(vm.isContext(VmSafe.ForgeContext.ScriptResume));
     }
 
     function test_dryRun_needsNoFlag() public {
@@ -440,6 +466,14 @@ contract TestDemoBroadcastGuardTest is Test {
         vm.setEnv("TEST_DEMO_BROADCAST_STEP", "B1");
         vm.expectRevert(TestDemoSteps.BroadcastRefused.selector);
         live.deployBaseRouter(OWNER);
+
+        // Real `vm.envOr` accept path. This is the only test that sets both
+        // flags to a matching pair. `RealEnvHarness` does not override the readers.
+        vm.setEnv("TEST_DEMO_BROADCAST_OK", "1");
+        vm.setEnv("TEST_DEMO_BROADCAST_STEP", "B2");
+        address router = live.deployBaseRouter(OWNER);
+        assertEq(LockedDemoSwapRouter(payable(router)).maxPayout(), 0.0001 ether);
+        assertEq(LockedDemoSwapRouter(payable(router)).quote(2 ether), 0.0001 ether);
     }
 
     function test_aggregators_neverBroadcast() public {

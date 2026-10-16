@@ -9,7 +9,7 @@ import {ILiveSwapAdmin, TestDemoSteps} from "../../script/TestDemoSupply.s.sol";
 import {TestDemoToken} from "../../src/TestDemoToken.sol";
 
 /// @notice Fork simulations of the Base B-steps and the Arb A-steps.
-///         No broadcast. Skips when the chain RPC is unset.
+///         No broadcast. Reverts `MissingRpc` when the chain RPC is unset.
 contract TestDemoSupplyForkTest is Test {
     function test_base_simulatesB4ThenDeployAllowlistAndFund() public {
         TestDemoSteps steps = _fork("BASE_SEPOLIA_RPC_URL");

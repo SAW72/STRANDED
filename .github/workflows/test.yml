@@ -149,3 +149,55 @@ jobs:
 
       - name: Build
         run: npm run build
+
+  # Local anvil only. Proves production _isBroadcast under forge script
+  # --broadcast. No fork, no public RPC, no key.
+  broadcast-context:
+    name: Real broadcast context
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@908c540300062bd5a7e473851cdb4282204cee09 # v1
+        with:
+          version: v1.8.5
+
+      - name: Show forge version
+        run: forge --version && anvil --version
+
+      - name: Prove ScriptBroadcast on local anvil
+        run: bash test/ci/prove-real-broadcast-context.sh
+
+  # Forge and python3, plus anvil from the same Foundry install. The
+  # _isBroadcast mutant is caught by the local anvil proof, not by an override.
+  broadcast-guard-mutation:
+    name: Broadcast guard mutation
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@908c540300062bd5a7e473851cdb4282204cee09 # v1
+        with:
+          version: v1.8.5
+
+      - name: Show forge version
+        run: forge --version && python3 --version
+
+      - name: Mutate the broadcast guard
+        run: bash test/mutation/prove-broadcast-guard.sh

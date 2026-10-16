@@ -10,7 +10,7 @@ Scripts: `script/TestDemoSupply.s.sol`. Dry-run is the default and needs no env 
 
 Every step still checks the sender and the chain on a dry-run. The sender must be `0x30466A210961c0C2C13AF0A9d35dfC6E8858bA9D` (the Foundry default sender `0x1804…1f38` reverts `FoundryDefaultSender`). `block.chainid` must be that step's chain, and that chain must be 84532 or 421614. B4, B2, and B5 revert `WrongChain` on 421614. A3 reverts `WrongChain` on 84532.
 
-`--broadcast` is a different context (`vm.isContext(ScriptBroadcast)`). In that context the same chain and sender checks apply, and both env values must match exactly: `TEST_DEMO_BROADCAST_OK=1` and `TEST_DEMO_BROADCAST_STEP` equal to that one step's id (`B4`, `B1`, `B2`, `B3`, `B5`, `A1`, `A2`, or `A3`). `0`, `true`, and empty are not `1`. The gate also rejects a raw `1 ` (trailing space). Foundry trims environment values before `vm.envOr` reads them, so a shell value of `1 ` is already `1` when the script sees it. A flag for B4 does not broadcast B1. Anything else reverts `BroadcastRefused` before `vm.startBroadcast`.
+`--broadcast` and `--resume` are broadcast contexts (`vm.isContext(ScriptBroadcast)` or `vm.isContext(ScriptResume)`). In either context the same chain and sender checks apply, and both env values must match exactly: `TEST_DEMO_BROADCAST_OK=1` and `TEST_DEMO_BROADCAST_STEP` equal to that one step's id (`B4`, `B1`, `B2`, `B3`, `B5`, `A1`, `A2`, or `A3`). `0`, `true`, and empty are not `1`. The gate also rejects a raw `1 ` (trailing space). Foundry trims environment values before `vm.envOr` reads them, so a shell value of `1 ` is already `1` when the script sees it. A flag for B4 does not broadcast B1. Anything else reverts `BroadcastRefused` before `vm.startBroadcast`. `--resume` publishes a sequence saved by an earlier guarded run; treating `ScriptResume` as broadcast means that republish still needs the same flags. A live `--resume` proof is not in CI: resume has nothing to publish until a broadcast succeeds, and the local anvil proof reverts before any transaction.
 
 `SimulateBaseSupply` and `SimulateArbSupply` revert `AggregatorNeverBroadcasts` in a broadcast context before any step, even if the flags would allow the first step. They are dry-run only.
 
@@ -52,7 +52,7 @@ Run **B4, then B1, then B2, then B3, then B5**. Delist before deploy. Fund last,
 2. `setRouterAllowed(0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4, false)`
    calldata `0x6cc88edb00000000000000000000000094cc0aac535ccdb3c01d6787d6413c739ae12bc40000000000000000000000000000000000000000000000000000000000000000`
 
-gMOCK has public `mint`. Router `0x94cC…2bc4` is Uniswap SwapRouter02, holds 0 ETH, and is not the capped router. Do not fund it. After step 1, `allowedTokens` and `eip2612Tokens` for gMOCK are both false.
+gMOCK has public `mint`. Router `0x94cC…2bc4` is the Uniswap V3 SwapRouter02 on Base Sepolia. B4 delists it so the tDEMO allowlist contains only the locked demo router. It holds 0 ETH and is not the capped router. Do not fund it. After step 1, `allowedTokens` and `eip2612Tokens` for gMOCK are both false.
 
 ```bash
 forge script script/TestDemoSupply.s.sol:B4_DelistStaleAllowlist \
@@ -124,23 +124,31 @@ Same token and faucet. SDEMO `0xE3cb1AC5EDc70D3a85250a8c00cBe3A45AFc616C` stays 
 
 ### A1 — deploy
 
-Same contract as B1, chain 421614.
+Same contract as B1, chain 421614. To simulate, omit `--broadcast`, `--account`, and both env vars.
 
 ```bash
+TEST_DEMO_BROADCAST_OK=1 \
+TEST_DEMO_BROADCAST_STEP=A1 \
 forge script script/TestDemoSupply.s.sol:B1_DeployTestDemoFaucet \
   --rpc-url "$ARB_SEPOLIA_RPC_URL" --chain-id 421614 \
-  --sender 0x30466A210961c0C2C13AF0A9d35dfC6E8858bA9D -vv
+  --account <owner-keystore> \
+  --sender 0x30466A210961c0C2C13AF0A9d35dfC6E8858bA9D \
+  --broadcast --slow
 ```
 
 ### A2 — allowlist tDEMO only
 
-`B3_AllowlistTestDemo` on chain 421614. `ROUTER_ADDRESS` is not used. The script keeps router `0xFE22f32eF7a8f64B6c9E1CCAe31817B54184f7fc` and reverts if a different router is passed.
+`B3_AllowlistTestDemo` on chain 421614. `ROUTER_ADDRESS` is not used. The script keeps router `0xFE22f32eF7a8f64B6c9E1CCAe31817B54184f7fc` and reverts if a different router is passed. To simulate, omit `--broadcast`, `--account`, and both env vars.
 
 ```bash
+TEST_DEMO_BROADCAST_OK=1 \
+TEST_DEMO_BROADCAST_STEP=A2 \
 TOKEN_ADDRESS=<A1 receipt> \
 forge script script/TestDemoSupply.s.sol:B3_AllowlistTestDemo \
   --rpc-url "$ARB_SEPOLIA_RPC_URL" --chain-id 421614 \
-  --sender 0x30466A210961c0C2C13AF0A9d35dfC6E8858bA9D -vv
+  --account <owner-keystore> \
+  --sender 0x30466A210961c0C2C13AF0A9d35dfC6E8858bA9D \
+  --broadcast --slow
 ```
 
 Call: `setEip2612Token(tDEMO, true)` on `0x65e712222745A8FCCbF038A90Fa75caB0867993D`. That sets `allowedTokens` and `eip2612Tokens` on the live bytecode.
@@ -219,3 +227,186 @@ Filled from the fork tests on 2026-10-13 (Base Sepolia and Arb Sepolia public RP
 | B5 | 0.05 ETH to router | 8860 |
 | B5 | 0.02 ETH to relayer | 9550 |
 | A3 | `setMaxPayout(0.0001 ether)` | 5786 |
+
+## Post-checks
+
+Read-only. Run these after Spencer signs a step. They match the `require` lines in `script/TestDemoSupply.s.sol`. Addresses written `<…>` come from that step's receipt. Do not substitute a predicted CREATE address.
+
+### B4
+
+On Base swap `0x21A1ADf810e64B5bd1d530D31abA6856b8DEf688`. Each call returns `false`.
+
+```bash
+cast call 0x21A1ADf810e64B5bd1d530D31abA6856b8DEf688 \
+  "allowedTokens(address)(bool)" 0xE36c35cbF0373D77D00732f7B92dB4fB8fd37166 \
+  --rpc-url "$BASE_SEPOLIA_RPC_URL"
+cast call 0x21A1ADf810e64B5bd1d530D31abA6856b8DEf688 \
+  "eip2612Tokens(address)(bool)" 0xE36c35cbF0373D77D00732f7B92dB4fB8fd37166 \
+  --rpc-url "$BASE_SEPOLIA_RPC_URL"
+cast call 0x21A1ADf810e64B5bd1d530D31abA6856b8DEf688 \
+  "allowedRouters(address)(bool)" 0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4 \
+  --rpc-url "$BASE_SEPOLIA_RPC_URL"
+```
+
+### B1 and A1
+
+On the tDEMO address from the receipt. `faucet()` is the faucet address from the same receipt. `totalSupply()` and `balanceOf(faucet)` are both `1000000000000000000000000000000` (1e12 tDEMO, 18 decimals). `symbol()` is `tDEMO`. Use `$BASE_SEPOLIA_RPC_URL` for B1 and `$ARB_SEPOLIA_RPC_URL` for A1.
+
+```bash
+cast call <tDEMO> "faucet()(address)" --rpc-url "$RPC"
+cast call <tDEMO> "totalSupply()(uint256)" --rpc-url "$RPC"
+cast call <tDEMO> "balanceOf(address)(uint256)" <faucet> --rpc-url "$RPC"
+cast call <tDEMO> "symbol()(string)" --rpc-url "$RPC"
+```
+
+### B2
+
+On the router from the B2 receipt. `rescue()` is `0x21A1ADf810e64B5bd1d530D31abA6856b8DEf688`. `owner()` is `0x30466A210961c0C2C13AF0A9d35dfC6E8858bA9D`. `maxPayout()` and `quote(2 ether)` are both `100000000000000` (0.0001 ETH). Balance is 0.
+
+```bash
+cast call <router> "rescue()(address)" --rpc-url "$BASE_SEPOLIA_RPC_URL"
+cast call <router> "owner()(address)" --rpc-url "$BASE_SEPOLIA_RPC_URL"
+cast call <router> "maxPayout()(uint256)" --rpc-url "$BASE_SEPOLIA_RPC_URL"
+cast call <router> "quote(uint256)(uint256)" 2000000000000000000 \
+  --rpc-url "$BASE_SEPOLIA_RPC_URL"
+cast balance <router> --rpc-url "$BASE_SEPOLIA_RPC_URL"
+```
+
+### B3
+
+On Base swap `0x21A1ADf810e64B5bd1d530D31abA6856b8DEf688`. `allowedTokens(tDEMO)` and `eip2612Tokens(tDEMO)` are true. `allowedRouters(<router>)` is true. `allowedRouters(0x94cC…2bc4)` and `allowedTokens(gMOCK)` stay false.
+
+```bash
+cast call 0x21A1ADf810e64B5bd1d530D31abA6856b8DEf688 \
+  "allowedTokens(address)(bool)" <tDEMO> --rpc-url "$BASE_SEPOLIA_RPC_URL"
+cast call 0x21A1ADf810e64B5bd1d530D31abA6856b8DEf688 \
+  "eip2612Tokens(address)(bool)" <tDEMO> --rpc-url "$BASE_SEPOLIA_RPC_URL"
+cast call 0x21A1ADf810e64B5bd1d530D31abA6856b8DEf688 \
+  "allowedRouters(address)(bool)" <router> --rpc-url "$BASE_SEPOLIA_RPC_URL"
+cast call 0x21A1ADf810e64B5bd1d530D31abA6856b8DEf688 \
+  "allowedRouters(address)(bool)" 0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4 \
+  --rpc-url "$BASE_SEPOLIA_RPC_URL"
+cast call 0x21A1ADf810e64B5bd1d530D31abA6856b8DEf688 \
+  "allowedTokens(address)(bool)" 0xE36c35cbF0373D77D00732f7B92dB4fB8fd37166 \
+  --rpc-url "$BASE_SEPOLIA_RPC_URL"
+```
+
+### A2
+
+On Arb swap `0x65e712222745A8FCCbF038A90Fa75caB0867993D`. tDEMO `allowedTokens` and `eip2612Tokens` are true. `allowedRouters(0xFE22…f7fc)` stays true. SDEMO `allowedTokens` and `eip2612Tokens` stay true.
+
+```bash
+cast call 0x65e712222745A8FCCbF038A90Fa75caB0867993D \
+  "allowedTokens(address)(bool)" <tDEMO> --rpc-url "$ARB_SEPOLIA_RPC_URL"
+cast call 0x65e712222745A8FCCbF038A90Fa75caB0867993D \
+  "eip2612Tokens(address)(bool)" <tDEMO> --rpc-url "$ARB_SEPOLIA_RPC_URL"
+cast call 0x65e712222745A8FCCbF038A90Fa75caB0867993D \
+  "allowedRouters(address)(bool)" 0xFE22f32eF7a8f64B6c9E1CCAe31817B54184f7fc \
+  --rpc-url "$ARB_SEPOLIA_RPC_URL"
+cast call 0x65e712222745A8FCCbF038A90Fa75caB0867993D \
+  "allowedTokens(address)(bool)" 0xE3cb1AC5EDc70D3a85250a8c00cBe3A45AFc616C \
+  --rpc-url "$ARB_SEPOLIA_RPC_URL"
+cast call 0x65e712222745A8FCCbF038A90Fa75caB0867993D \
+  "eip2612Tokens(address)(bool)" 0xE3cb1AC5EDc70D3a85250a8c00cBe3A45AFc616C \
+  --rpc-url "$ARB_SEPOLIA_RPC_URL"
+```
+
+### B5
+
+`cast balance` on the B2 router is 0.05 ETH higher than before B5. `cast balance` on `0x8240124dc78a27c80354Ca813Df12aa2888A9AF6` is 0.02 ETH higher than before B5.
+
+```bash
+cast balance <router> --rpc-url "$BASE_SEPOLIA_RPC_URL"
+cast balance 0x8240124dc78a27c80354Ca813Df12aa2888A9AF6 --rpc-url "$BASE_SEPOLIA_RPC_URL"
+```
+
+### A3
+
+On `0xFE22f32eF7a8f64B6c9E1CCAe31817B54184f7fc`. `maxPayout()` is `100000000000000` (0.0001 ETH). `quote(2 ether)` is the same value. `payAmount()` stays `100000000000000`. The router balance is unchanged.
+
+```bash
+cast call 0xFE22f32eF7a8f64B6c9E1CCAe31817B54184f7fc \
+  "maxPayout()(uint256)" --rpc-url "$ARB_SEPOLIA_RPC_URL"
+cast call 0xFE22f32eF7a8f64B6c9E1CCAe31817B54184f7fc \
+  "quote(uint256)(uint256)" 2000000000000000000 --rpc-url "$ARB_SEPOLIA_RPC_URL"
+cast call 0xFE22f32eF7a8f64B6c9E1CCAe31817B54184f7fc \
+  "payAmount()(uint256)" --rpc-url "$ARB_SEPOLIA_RPC_URL"
+cast balance 0xFE22f32eF7a8f64B6c9E1CCAe31817B54184f7fc --rpc-url "$ARB_SEPOLIA_RPC_URL"
+```
+
+## Rollback
+
+Commands for Spencer to review. They are not run from this repo, from CI, or by an agent. No key is written here. `--account <owner-keystore>` is a placeholder for his keystore.
+
+`setTokenAllowed(token, false)` also sets `eip2612Tokens[token]` to false. `setEip2612Token(token, true)` also sets `allowedTokens[token]` to true. `setEip2612Token(token, false)` does not clear `allowedTokens`.
+
+### B4
+
+Restore gMOCK with one token call (`setEip2612Token(true)` sets both flags), then put the Uniswap V3 SwapRouter02 back on the router allowlist.
+
+```bash
+cast send 0x21A1ADf810e64B5bd1d530D31abA6856b8DEf688 \
+  "setEip2612Token(address,bool)" 0xE36c35cbF0373D77D00732f7B92dB4fB8fd37166 true \
+  --rpc-url "$BASE_SEPOLIA_RPC_URL" --chain 84532 \
+  --account <owner-keystore> --sender 0x30466A210961c0C2C13AF0A9d35dfC6E8858bA9D
+cast send 0x21A1ADf810e64B5bd1d530D31abA6856b8DEf688 \
+  "setRouterAllowed(address,bool)" 0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4 true \
+  --rpc-url "$BASE_SEPOLIA_RPC_URL" --chain 84532 \
+  --account <owner-keystore> --sender 0x30466A210961c0C2C13AF0A9d35dfC6E8858bA9D
+```
+
+### B1 and A1
+
+The faucet and tDEMO are CREATEs. No owner call destroys them.
+
+### B2
+
+The Base router is a CREATE. No owner call destroys it. Its balance is 0 until B5.
+
+### B3
+
+`setTokenAllowed(tDEMO, false)` clears both token flags. Then remove the new router. Do not pass `0x94cC…2bc4`.
+
+```bash
+cast send 0x21A1ADf810e64B5bd1d530D31abA6856b8DEf688 \
+  "setTokenAllowed(address,bool)" <tDEMO> false \
+  --rpc-url "$BASE_SEPOLIA_RPC_URL" --chain 84532 \
+  --account <owner-keystore> --sender 0x30466A210961c0C2C13AF0A9d35dfC6E8858bA9D
+cast send 0x21A1ADf810e64B5bd1d530D31abA6856b8DEf688 \
+  "setRouterAllowed(address,bool)" <router> false \
+  --rpc-url "$BASE_SEPOLIA_RPC_URL" --chain 84532 \
+  --account <owner-keystore> --sender 0x30466A210961c0C2C13AF0A9d35dfC6E8858bA9D
+```
+
+### A2
+
+Clear tDEMO only. This does not call a setter on SDEMO and does not change `allowedRouters(0xFE22…f7fc)`.
+
+```bash
+cast send 0x65e712222745A8FCCbF038A90Fa75caB0867993D \
+  "setTokenAllowed(address,bool)" <tDEMO> false \
+  --rpc-url "$ARB_SEPOLIA_RPC_URL" --chain 421614 \
+  --account <owner-keystore> --sender 0x30466A210961c0C2C13AF0A9d35dfC6E8858bA9D
+```
+
+### B5
+
+`withdrawEth` on the B2 router pulls the 0.05 ETH back to the owner. The 0.02 ETH sent to `0x8240124dc78a27c80354Ca813Df12aa2888A9AF6` has no owner setter on the swap. This section does not include a transfer from the relayer key.
+
+```bash
+cast send <router> \
+  "withdrawEth(address,uint256)" 0x30466A210961c0C2C13AF0A9d35dfC6E8858bA9D 50000000000000000 \
+  --rpc-url "$BASE_SEPOLIA_RPC_URL" --chain 84532 \
+  --account <owner-keystore> --sender 0x30466A210961c0C2C13AF0A9d35dfC6E8858bA9D
+```
+
+### A3
+
+Puts `maxPayout` back to 0.001 ETH. The SDEMO judging freeze still applies: do not sign this while that freeze is in force.
+
+```bash
+cast send 0xFE22f32eF7a8f64B6c9E1CCAe31817B54184f7fc \
+  "setMaxPayout(uint256)" 1000000000000000 \
+  --rpc-url "$ARB_SEPOLIA_RPC_URL" --chain 421614 \
+  --account <owner-keystore> --sender 0x30466A210961c0C2C13AF0A9d35dfC6E8858bA9D
+```
