@@ -4,7 +4,7 @@
 
 Scripted **read-only** checks first, then optional **Spencer-keys-only** sign / broadcast. No agent keys. No `--broadcast` from CI or Cursor. No HackQuest submit. No mainnet. Permit2 stays **off**. Do not treat `StrandedRegistry` as the demo.
 
-**Judged product:** `GasRescueSwap` v1 at [`0x65e712222745A8FCCbF038A90Fa75caB0867993D`](https://sepolia.arbiscan.io/address/0x65e712222745A8FCCbF038A90Fa75caB0867993D) (Arb Sepolia `421614`).
+**Judged product:** `GasRescueSwap` v1 at [`0x65e712222745A8FCCbF038A90Fa75caB0867993D`](https://sepolia.arbiscan.io/address/0x65e712222745A8FCCbF038A90Fa75caB0867993D) (Arb Sepolia `421614`). SDEMO and this runbook stay the Arb demo. tDEMO steps for both testnets are in [TEST_DEMO_SUPPLY.md](TEST_DEMO_SUPPLY.md).
 
 **Relayer:** https://stranded-relayer-arb.onrender.com — **KNOW** healthy (`live`, `stubRpc=false`) as of 2026-09-17.  
 **Relayer hot wallet:** `0x8240124dc78a27c80354Ca813Df12aa2888A9AF6` — **KNOW** **0.214961419621579600 ETH** (`cast balance`, 2026-10-01), above the **~0.10 ETH** live-submit floor. `HackQuestStatus` recommends `live-submit-ok-if-user-funded`. The 2026-09-17 reading was ~0.015 ETH.

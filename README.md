@@ -76,7 +76,7 @@ forge test -vv
 
 `GasRescueSwap` coverage: happy-path mock swap (native + WETH unwrap, both testnets), exact `amountSwap` consume (leftover tokenIn reverts), job-only native credit (donated ETH/WETH not swept), end-of-tx tokenIn/WETH/ETH zeros, Permit2 Order witness binding, slippage, underfunded / path / domain / sig without nonce burn, replay, wrong `chainId` / mainnet blocked, `feeAmount + amountSwap` overflow, FoT, reentrancy (permit / transferFrom / router), non-permit and disabled Permit2 fail-closed, owner ≠ relayer, two-step `Ownable2Step` transfer + disabled `renounceOwnership`, pause.
 
-`GasRescueLens` unit tests cover status / readiness (including `amountIn==0` probe ≠ ready) / order hash / F-1 immutability probes / `hackQuestReport`. `ArbSepoliaDemoPath` covers the live demo-router `pathHash` formula. `test/fork/*` hit live Sepolia and **skip** when `ARB_SEPOLIA_RPC_URL` / `BASE_SEPOLIA_RPC_URL` are unset (CI `forge test` stays offline). Spencer-watchable Arb rescue steps: [docs/QA_ARB_SEPOLIA_RESCUE.md](docs/QA_ARB_SEPOLIA_RESCUE.md).
+`GasRescueLens` unit tests cover status / readiness (including `amountIn==0` probe ≠ ready) / order hash / F-1 immutability probes / `hackQuestReport`. `ArbSepoliaDemoPath` covers the live demo-router `pathHash` formula. Historical `test/fork/*` smokes skip when `ARB_SEPOLIA_RPC_URL` / `BASE_SEPOLIA_RPC_URL` are unset. `test/fork/TestDemoSupplyFork.t.sol` reverts `MissingRpc` instead, so the unit CI job excludes that file. The Base and Arb fork jobs set the public RPCs. Owner-watchable Arb rescue steps: [docs/QA_ARB_SEPOLIA_RESCUE.md](docs/QA_ARB_SEPOLIA_RESCUE.md).
 
 Harness tests in `test/GasRescue.t.sol` stay green.
 
@@ -142,10 +142,13 @@ src/interfaces/IStrandedRegistry.sol
 src/GasRescue.sol                  # fee-skim harness
 src/interfaces/IGasRescue.sol
 src/GatedDemoToken.sol             # H1 fixed-supply SDEMO; no mint, no owner
+src/TestDemoToken.sol              # tDEMO, fixed 1e12, testnet only, no mint, no owner
+src/TestDemoFaucet.sol             # 2 tDEMO / wallet / 24h, no owner
 src/mocks/…
 test/GasRescueSwap.t.sol
 test/GasRescueLens.t.sol
 test/fork/                         # live Sepolia smokes; skip if RPC unset
+test/fork/TestDemoSupplyFork.t.sol # tDEMO B/A sims; revert MissingRpc if RPC unset
 test/GasRescue.t.sol
 test/StrandedRegistry.t.sol
 test/audit/F5F6Audit.t.sol
@@ -155,6 +158,7 @@ script/DeployStrandedRegistry.s.sol  # testnet registry; Spencer --broadcast onl
 script/InspectGasRescueSwap.s.sol  # read-only; no keys
 script/HackQuestStatus.s.sol       # Lens consumer; HackQuest JSON; no keys
 script/MigrateH1GatedDemoToken.s.sol # H1 simulate-only; Spencer signs; no --broadcast here
+script/TestDemoSupply.s.sol        # tDEMO B1–B5 and Arb A1, A3, A2; simulate-only; the owner signs
 script/RescueSwap.s.sol
 script/Deploy.s.sol                # harness
 script/Rescue.s.sol                # harness
@@ -173,7 +177,7 @@ relayer/                           # Arb Sepolia POST /v1/quotes (Render)
 | Chain | GasRescueSwap (judged) | Mock / notes |
 | --- | --- | --- |
 | Arb Sepolia `421614` | [`0x65e712222745A8FCCbF038A90Fa75caB0867993D`](https://sepolia.arbiscan.io/address/0x65e712222745A8FCCbF038A90Fa75caB0867993D) | Demo token **SDEMO** "Stranded Demo Token" [`0xE3cb1AC5EDc70D3a85250a8c00cBe3A45AFc616C`](https://sepolia.arbiscan.io/address/0xE3cb1AC5EDc70D3a85250a8c00cBe3A45AFc616C) (testnet, fixed supply 20, no value); **locked** router [`0xFE22f32eF7a8f64B6c9E1CCAe31817B54184f7fc`](https://sepolia.arbiscan.io/address/0xFE22f32eF7a8f64B6c9E1CCAe31817B54184f7fc) (0.0195 ETH); WETH `0x980B62Da83eFf3D4576C647993b0c1D7faf17c73`. Retired Oct 1, 2026 and no longer usable: GRTT `0x5649…d713`, gMOCK `0x3000…B318`, open router `0x6804…25A8` (0 ETH). |
-| Base Sepolia `84532` | [`0x21A1ADf810e64B5bd1d530D31abA6856b8DEf688`](https://sepolia.basescan.org/address/0x21A1ADf810e64B5bd1d530D31abA6856b8DEf688) | Mock `0xE36c35cbF0373D77D00732f7B92dB4fB8fd37166`; router `0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4`; WETH `0x4200000000000000000000000000000000000006` |
+| Base Sepolia `84532` | [`0x21A1ADf810e64B5bd1d530D31abA6856b8DEf688`](https://sepolia.basescan.org/address/0x21A1ADf810e64B5bd1d530D31abA6856b8DEf688) | Stale allowlist until the owner signs B4: gMOCK `0xE36c35cbF0373D77D00732f7B92dB4fB8fd37166` (public mint) and the Uniswap V3 SwapRouter02 on Base Sepolia `0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4` (0 ETH, not the capped router). B4 delists it so the tDEMO allowlist contains only the locked demo router. Do not fund that router. tDEMO is not deployed yet. WETH `0x4200000000000000000000000000000000000006` |
 
 `GasRescueLens` is **not on-chain** (KNOW). Day-5 `HackQuestStatus` still works without that deploy — it constructs Lens in-script (`lensEphemeral=true`, no broadcast) and prints `hotWalletUnderfunded`, `liveSubmitBlocked`, `recommendedJudgePath`, `judgeNote`, `feePostureNote`, and `liveVsTip`. With the 2026-10-01 hot-wallet balance above 0.10 ETH, the recommended judge path is **`live-submit-ok-if-user-funded`**. Do not list `StrandedRegistry` here (merged Phase-2 scaffold; not judged).
 
@@ -207,6 +211,14 @@ The contract creates 20 SDEMO in the constructor and has no `mint`. Supply stays
 - The Steward wallet transfers 2 SDEMO per named judge or QA wallet, on request only. Those wallets are the demo and hackathon-judge wallets named above.
 - Log every transfer (date, recipient, amount, tx hash) in [docs/SDEMO_DISTRIBUTION_LOG.md](docs/SDEMO_DISTRIBUTION_LOG.md). The migration script does not move balances.
 - Do not change `setRate` or `setMaxPayout` on the router during judging. Do not call `sweepToken` on SDEMO on the router during judging. SDEMO held by the router is never swept and sent out again. The 0.01 ETH ceiling assumes that.
+
+## Stranded TEST Demo (tDEMO)
+
+> **Stranded TEST Demo (tDEMO): testnet demo only. No monetary value.** The token name is "Stranded TEST Demo — No Value". It is not for sale and not a reward. It deploys only on Base Sepolia (84532) or Arbitrum Sepolia (421614). Nothing here is on mainnet, and nothing in this section has been broadcast.
+
+tDEMO has a fixed supply of 1e12 tokens, minted once to a no-owner faucet. The faucet drips 2 tDEMO per wallet per 24 hours and reverts `FaucetEmpty` when it cannot pay that amount. There is no `mint` and no owner. SDEMO above is unchanged.
+
+The owner signs the simulate-only scripts in [docs/TEST_DEMO_SUPPLY.md](docs/TEST_DEMO_SUPPLY.md). On Base the order is delist gMOCK and the Uniswap V3 SwapRouter02 `0x94cC…2bc4`, then deploy, allowlist, then fund. B4 delists that router so the tDEMO allowlist contains only the locked demo router. On Arb the order is A1, then A3, then A2. A3 lowers `maxPayout` on the existing locked router `0xFE22…f7fc` to 0.0001 ETH, and A2 reverts until that cap is in place. If the SDEMO judging freeze blocks A3, do not sign A2: until A3, each 2 tDEMO rescue pays 0.001 ETH from that shared router. The SDEMO section above says not to change `setMaxPayout` during judging, and it says 2 SDEMO can draw up to 0.001 ETH (the full 20 up to 0.01 ETH). A3 makes a 2-token rescue pay 0.0001 ETH. A single 20-SDEMO rescue pays at most 0.0001 ETH; split into 0.2-token rescues the same 20 SDEMO still draw up to 0.01 ETH, bounded only by the relayer limits. The 0.2-token slice does not change. The SDEMO token, its allowlist, and its addresses stay as they are either way. `--resume` does not run the script, so it is NOT gated; it replays whatever is in `broadcast/**/run-latest.json`; delete the dry-run folders before signing with `find broadcast cache -type d -name dry-run -prune -exec rm -rf {} +`; never use `--resume` unless a live `run-latest.json` from a real broadcast of that same step exists. Never pass a `--chain-id` that differs from the RPC. Agents do not broadcast and do not hold keys.
 
 ## Wallet UX
 
