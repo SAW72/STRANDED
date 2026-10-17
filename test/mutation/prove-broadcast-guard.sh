@@ -176,6 +176,13 @@ strip_between \
 expect_fail_in TestDemoArbCapTest test_a2_refusesHighCap "a2-cap"
 cp "$backup" "$script"
 
+echo "mutation: turn the A2 cap compare from <= into <"
+replace_once \
+  "LockedDemoSwapRouter(payable(ARB_ROUTER)).maxPayout() <= ARB_RECOMMENDED_MAX_PAYOUT, \"A2: sign A3 first\"" \
+  "LockedDemoSwapRouter(payable(ARB_ROUTER)).maxPayout() < ARB_RECOMMENDED_MAX_PAYOUT, \"A2: sign A3 first\""
+expect_fail_in TestDemoArbCapTest test_a2_acceptsExact1e14Cap "a2-cap-boundary"
+cp "$backup" "$script"
+
 echo "restored"
 forge test --match-contract TestDemoBroadcastGuardTest -q
 echo "mutation proof passed"

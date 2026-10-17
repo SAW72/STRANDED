@@ -293,8 +293,23 @@ if ! grep -F -- '`--resume` does not run the script, so it is NOT gated' docs/TE
   echo "FAIL (resume-doc): docs/TEST_DEMO_SUPPLY.md missing the resume warning"
   exit 1
 fi
-if ! grep -F -- 'delete `broadcast/**/dry-run` before signing' docs/TEST_DEMO_SUPPLY.md >/dev/null; then
-  echo "FAIL (resume-doc): docs/TEST_DEMO_SUPPLY.md missing the dry-run delete warning"
+delete_cmd='find broadcast cache -type d -name dry-run -prune -exec rm -rf {} +'
+docs_hits="$(grep -F -c -- "$delete_cmd" docs/TEST_DEMO_SUPPLY.md || true)"
+readme_hits="$(grep -F -c -- "$delete_cmd" README.md || true)"
+if [[ "$docs_hits" -ne 3 ]]; then
+  echo "FAIL (resume-doc): docs/TEST_DEMO_SUPPLY.md has $docs_hits dry-run delete commands, expected 3"
+  exit 1
+fi
+if [[ "$readme_hits" -ne 1 ]]; then
+  echo "FAIL (resume-doc): README.md has $readme_hits dry-run delete commands, expected 1"
+  exit 1
+fi
+if ! grep -F -- 'The dry-run folder is per script file and chain, not per step' docs/TEST_DEMO_SUPPLY.md >/dev/null; then
+  echo "FAIL (resume-doc): docs/TEST_DEMO_SUPPLY.md missing the per-chain dry-run sentence"
+  exit 1
+fi
+if grep -F -- 'delete `broadcast/**/dry-run` before signing' docs/TEST_DEMO_SUPPLY.md README.md >/dev/null; then
+  echo "FAIL (resume-doc): the old dry-run glob is still in the docs"
   exit 1
 fi
 if ! grep -F -- '`--resume` does not run the script, so it is NOT gated' README.md >/dev/null; then

@@ -48,6 +48,7 @@ contract TestDemoArbCapTest is Test {
 
     function test_a2_acceptsAfterA3Cap() public {
         TestDemoSteps steps = _plantArb(PRE_A3_MAX_PAYOUT);
+        assertEq(steps.ARB_RECOMMENDED_MAX_PAYOUT(), 0.0001 ether);
         (, address demo) = steps.deployFaucet(OWNER);
         steps.setArbMaxPayout(OWNER);
         assertEq(LockedDemoSwapRouter(payable(ARB_ROUTER)).maxPayout(), steps.ARB_RECOMMENDED_MAX_PAYOUT());
@@ -56,6 +57,23 @@ contract TestDemoArbCapTest is Test {
         assertTrue(ILiveSwapAdmin(ARB_SWAP).allowedTokens(demo));
         assertTrue(ILiveSwapAdmin(ARB_SWAP).eip2612Tokens(demo));
         assertEq(LockedDemoSwapRouter(payable(ARB_ROUTER)).maxPayout(), steps.ARB_RECOMMENDED_MAX_PAYOUT());
+    }
+
+    /// @dev One wei above 1e14 is still the pre-A3 drain. The require is `<=`.
+    function test_a2_refusesCapOneWeiAbove1e14() public {
+        TestDemoSteps steps = _plantArb(1e14 + 1);
+        (, address demo) = steps.deployFaucet(OWNER);
+        vm.expectRevert(bytes("A2: sign A3 first"));
+        steps.allowlist(OWNER, demo, address(0));
+    }
+
+    /// @dev Exactly 1e14 is the post-A3 cap, so A2 proceeds without calling A3 again.
+    function test_a2_acceptsExact1e14Cap() public {
+        TestDemoSteps steps = _plantArb(1e14);
+        (, address demo) = steps.deployFaucet(OWNER);
+        address used = steps.allowlist(OWNER, demo, address(0));
+        assertEq(used, ARB_ROUTER);
+        assertEq(LockedDemoSwapRouter(payable(ARB_ROUTER)).maxPayout(), 1e14);
     }
 
     /// @dev Pre-A3 router params: rate 5e14, maxPayout 0.001 ETH, balance 0.0195 ETH.

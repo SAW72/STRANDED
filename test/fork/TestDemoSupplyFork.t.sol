@@ -95,6 +95,7 @@ contract TestDemoSupplyForkTest is Test {
         assertFalse(strangerOk, "stranger must not set maxPayout");
 
         steps.setArbMaxPayout(owner);
+        assertEq(live.maxPayout(), 0.0001 ether);
         assertEq(live.maxPayout(), steps.ARB_RECOMMENDED_MAX_PAYOUT());
         assertEq(live.quote(2 ether), steps.ARB_RECOMMENDED_MAX_PAYOUT());
         assertEq(live.payAmount(), 0.0001 ether, "0.2-token payout stays 0.0001 ETH");

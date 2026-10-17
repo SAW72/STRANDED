@@ -14,7 +14,7 @@ Never pass a `--chain-id` that differs from the RPC. `forge script --chain-id` c
 
 `--broadcast` is `vm.isContext(ScriptBroadcast)`. In that context the same chain and sender checks apply, and both env values must match exactly: `TEST_DEMO_BROADCAST_OK=1` and `TEST_DEMO_BROADCAST_STEP` equal to that one step's id (`B4`, `B1`, `B2`, `B3`, `B5`, `A1`, `A3`, or `A2`). `0`, `true`, and empty are not `1`. The gate also rejects a raw `1 ` (trailing space) when that value is supplied to the reader directly. On Foundry 1.8.5 a shell value `TEST_DEMO_BROADCAST_OK='1 '` is read by `vm.envOr` as `1` with length 1 (observed with `forge script` against local anvil: the logged length was 1 and the logged value was `1`). A flag for B4 does not broadcast B1. Anything else reverts `BroadcastRefused` before `vm.startBroadcast`.
 
-`--resume` does not run the script, so it is NOT gated; it replays whatever is in `broadcast/**/run-latest.json`; delete `broadcast/**/dry-run` before signing; never use `--resume` unless a live `run-latest.json` from a real broadcast of that same step exists. A dry-run writes `broadcast/TestDemoSupply.s.sol/<chainid>/dry-run/run-latest.json`. `forge script --resume` with no env flags submits that file. No Solidity runs, so `BroadcastRefused` is never evaluated.
+`--resume` does not run the script, so it is NOT gated; it replays whatever is in `broadcast/**/run-latest.json`; delete the dry-run folders before signing with `find broadcast cache -type d -name dry-run -prune -exec rm -rf {} +`; never use `--resume` unless a live `run-latest.json` from a real broadcast of that same step exists. The dry-run folder is per script file and chain, not per step, so `--resume` replays a live `run-latest.json` for any step on that chain. A dry-run writes `broadcast/TestDemoSupply.s.sol/<chainid>/dry-run/run-latest.json`. `forge script --resume` with no env flags submits that file. No Solidity runs, so `BroadcastRefused` is never evaluated.
 
 `SimulateBaseSupply` and `SimulateArbSupply` revert `AggregatorNeverBroadcasts` in a broadcast context before any step, even if the flags would allow the first step. They are dry-run only.
 
@@ -30,7 +30,7 @@ forge script script/TestDemoSupply.s.sol:B4_DelistStaleAllowlist \
   --broadcast --slow
 ```
 
-Repeat with `TEST_DEMO_BROADCAST_STEP` set to the one contract being signed (`B1`, `B2`, `B3`, `B5`, `A1`, `A3`, `A2`). On Arb the order is A1, then A3, then A2. Simulation omits `--broadcast`, `--account`, and both env vars, and passes only `--sender`. The `--chain-id` flag must be the same id the RPC returns. Copy addresses from receipts. Do not paste a predicted CREATE address into a later step. Do not pass `--resume`. `--resume` does not run the script, so it is NOT gated; it replays whatever is in `broadcast/**/run-latest.json`; delete `broadcast/**/dry-run` before signing; never use `--resume` unless a live `run-latest.json` from a real broadcast of that same step exists. Fork tests revert `MissingRpc` when their RPC URL is unset. They do not skip.
+Repeat with `TEST_DEMO_BROADCAST_STEP` set to the one contract being signed (`B1`, `B2`, `B3`, `B5`, `A1`, `A3`, `A2`). On Arb the order is A1, then A3, then A2. Simulation omits `--broadcast`, `--account`, and both env vars, and passes only `--sender`. The `--chain-id` flag must be the same id the RPC returns. Copy addresses from receipts. Do not paste a predicted CREATE address into a later step. Do not pass `--resume`. `--resume` does not run the script, so it is NOT gated; it replays whatever is in `broadcast/**/run-latest.json`; delete the dry-run folders before signing with `find broadcast cache -type d -name dry-run -prune -exec rm -rf {} +`; never use `--resume` unless a live `run-latest.json` from a real broadcast of that same step exists. Fork tests revert `MissingRpc` when their RPC URL is unset. They do not skip.
 
 Gas figures below are the script's `gasleft` deltas around each call (the inner call, not the 21,000 intrinsic). They come from the fork tests calling the same script helpers against a fork of the live chain, with no broadcast. B5's value transfers were measured after the fork dealt the owner up to exactly 0.071 ETH (0.07 ETH of transfers plus 0.001 ETH headroom). His live Base balance (about 0.0583 ETH) is short of that. The live `forge script` of B5 reverts `Underfunded` until that balance is there. A balance of exactly 0.07 ETH also reverts. `setTokenAllowed` after `setEip2612Token(true)` is a skipped branch on this bytecode (`setEip2612Token(true)` already sets `allowedTokens`), so that delta is not a transaction. A2's `setRouterAllowed` delta is the skipped `if (base)` branch.
 
@@ -164,12 +164,12 @@ Checked on a fork of Arb Sepolia before A3:
 Until A3, one faucet drip of 2 tDEMO quotes 0.001 ETH. Nineteen such wallets take 0.019 ETH and leave 0.0005 ETH. That is the shared SDEMO router.
 
 - The call is owner-settable. One transaction. It does not move the 0.0195 ETH.
-- After it, `quote(2 ether)` is 0.0001 ETH, so one faucet drip hits the cap, matching Base.
+- After it, `quote(2 ether)` is 0.0001 ETH, so a single 2-token rescue pays 0.0001 ETH. On Arb the rate is 10x Base, so a drip split into 0.2-token rescues still pays up to 0.001 ETH in total; the relayer limits (1 per wallet and 3 per IP per 4 h) are what bound that, not maxPayout.
 - `payAmount()` stays 0.0001 ETH, because 0.2 token already quotes exactly that.
 - 0.0195 / 0.0001 = **195** rescues on the ETH already in the router.
 - Funding from free faucets instead leaves the 0.001 ETH drain. Reaching 195 rescues that way needs about **0.1755 ETH** more (0.195 total). Funding is a later top-up, not the lever that bounds a drip.
 
-SDEMO caveat: this PR does not change the SDEMO disclaimer. Today it says 2 SDEMO can draw up to 0.001 ETH and the full 20 up to 0.01 ETH, and it says not to change `setMaxPayout` during judging. A3 makes a 2-token rescue pay 0.0001 ETH (full 20 SDEMO would draw at most 0.001 ETH). The 0.2-token slice does not change. If that judging freeze is in force, do not sign A3 and do not sign A2. The SDEMO token, its allowlist, and its addresses stay as they are either way.
+SDEMO caveat: this PR does not change the SDEMO disclaimer. Today it says 2 SDEMO can draw up to 0.001 ETH and the full 20 up to 0.01 ETH, and it says not to change `setMaxPayout` during judging. A3 makes a 2-token rescue pay 0.0001 ETH (a single 20-SDEMO rescue pays at most 0.0001 ETH; split into 0.2-token rescues the same 20 SDEMO still draw up to 0.01 ETH, bounded only by the relayer limits). The 0.2-token slice does not change. If that judging freeze is in force, do not sign A3 and do not sign A2. The SDEMO token, its allowlist, and its addresses stay as they are either way.
 
 ```bash
 TEST_DEMO_BROADCAST_OK=1 \
@@ -346,7 +346,7 @@ cast call 0x65e712222745A8FCCbF038A90Fa75caB0867993D \
 
 ## Rollback
 
-Do not sign unless undoing a step that was already signed. These commands are for the owner to review. They are not run from this repo, from CI, or by an agent. No key is written here. `--account <owner-keystore>` is a placeholder for the owner's keystore. `--resume` does not run the script, so it is NOT gated; it replays whatever is in `broadcast/**/run-latest.json`; delete `broadcast/**/dry-run` before signing; never use `--resume` unless a live `run-latest.json` from a real broadcast of that same step exists.
+Do not sign unless undoing a step that was already signed. These commands are for the owner to review. They are not run from this repo, from CI, or by an agent. No key is written here. `--account <owner-keystore>` is a placeholder for the owner's keystore. `--resume` does not run the script, so it is NOT gated; it replays whatever is in `broadcast/**/run-latest.json`; delete the dry-run folders before signing with `find broadcast cache -type d -name dry-run -prune -exec rm -rf {} +`; never use `--resume` unless a live `run-latest.json` from a real broadcast of that same step exists.
 
 `setTokenAllowed(token, false)` also sets `eip2612Tokens[token]` to false. `setEip2612Token(token, true)` also sets `allowedTokens[token]` to true. `setEip2612Token(token, false)` does not clear `allowedTokens`.
 
@@ -358,11 +358,11 @@ Restore gMOCK with one token call (`setEip2612Token(true)` sets both flags), the
 cast send 0x21A1ADf810e64B5bd1d530D31abA6856b8DEf688 \
   "setEip2612Token(address,bool)" 0xE36c35cbF0373D77D00732f7B92dB4fB8fd37166 true \
   --rpc-url "$BASE_SEPOLIA_RPC_URL" --chain 84532 \
-  --account <owner-keystore> --sender 0x30466A210961c0C2C13AF0A9d35dfC6E8858bA9D
+  --account <owner-keystore> --from 0x30466A210961c0C2C13AF0A9d35dfC6E8858bA9D
 cast send 0x21A1ADf810e64B5bd1d530D31abA6856b8DEf688 \
   "setRouterAllowed(address,bool)" 0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4 true \
   --rpc-url "$BASE_SEPOLIA_RPC_URL" --chain 84532 \
-  --account <owner-keystore> --sender 0x30466A210961c0C2C13AF0A9d35dfC6E8858bA9D
+  --account <owner-keystore> --from 0x30466A210961c0C2C13AF0A9d35dfC6E8858bA9D
 ```
 
 ### B1 and A1
@@ -381,11 +381,11 @@ The Base router is a CREATE. No owner call destroys it. Its balance is 0 until B
 cast send 0x21A1ADf810e64B5bd1d530D31abA6856b8DEf688 \
   "setTokenAllowed(address,bool)" <tDEMO> false \
   --rpc-url "$BASE_SEPOLIA_RPC_URL" --chain 84532 \
-  --account <owner-keystore> --sender 0x30466A210961c0C2C13AF0A9d35dfC6E8858bA9D
+  --account <owner-keystore> --from 0x30466A210961c0C2C13AF0A9d35dfC6E8858bA9D
 cast send 0x21A1ADf810e64B5bd1d530D31abA6856b8DEf688 \
   "setRouterAllowed(address,bool)" <router> false \
   --rpc-url "$BASE_SEPOLIA_RPC_URL" --chain 84532 \
-  --account <owner-keystore> --sender 0x30466A210961c0C2C13AF0A9d35dfC6E8858bA9D
+  --account <owner-keystore> --from 0x30466A210961c0C2C13AF0A9d35dfC6E8858bA9D
 ```
 
 ### A2
@@ -396,7 +396,7 @@ Clear tDEMO only. This does not call a setter on SDEMO and does not change `allo
 cast send 0x65e712222745A8FCCbF038A90Fa75caB0867993D \
   "setTokenAllowed(address,bool)" <tDEMO> false \
   --rpc-url "$ARB_SEPOLIA_RPC_URL" --chain 421614 \
-  --account <owner-keystore> --sender 0x30466A210961c0C2C13AF0A9d35dfC6E8858bA9D
+  --account <owner-keystore> --from 0x30466A210961c0C2C13AF0A9d35dfC6E8858bA9D
 ```
 
 ### B5
@@ -407,7 +407,7 @@ cast send 0x65e712222745A8FCCbF038A90Fa75caB0867993D \
 cast send <router> \
   "withdrawEth(address,uint256)" 0x30466A210961c0C2C13AF0A9d35dfC6E8858bA9D 50000000000000000 \
   --rpc-url "$BASE_SEPOLIA_RPC_URL" --chain 84532 \
-  --account <owner-keystore> --sender 0x30466A210961c0C2C13AF0A9d35dfC6E8858bA9D
+  --account <owner-keystore> --from 0x30466A210961c0C2C13AF0A9d35dfC6E8858bA9D
 ```
 
 ### A3
@@ -418,5 +418,5 @@ Puts `maxPayout` back to 0.001 ETH. Clear tDEMO first (the A2 undo above). Leavi
 cast send 0xFE22f32eF7a8f64B6c9E1CCAe31817B54184f7fc \
   "setMaxPayout(uint256)" 1000000000000000 \
   --rpc-url "$ARB_SEPOLIA_RPC_URL" --chain 421614 \
-  --account <owner-keystore> --sender 0x30466A210961c0C2C13AF0A9d35dfC6E8858bA9D
+  --account <owner-keystore> --from 0x30466A210961c0C2C13AF0A9d35dfC6E8858bA9D
 ```
