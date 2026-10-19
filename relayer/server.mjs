@@ -246,13 +246,15 @@ async function submitRescue(body) {
       attempts,
       ms: Date.now() - started,
     });
-    // Post-confirmation only. The broadcast retry callback above must not call this.
+    // The queued job waits for a mined receipt before it posts.
+    // The broadcast retry callback above must not call this.
     try {
       schedulePointsNotify({
         chainId: CHAIN_ID,
         txHash,
         dataDir: DATA_DIR,
         env: process.env,
+        confirmReceipt: confirmPointsReceipt,
       });
     } catch {
       console.error("points_notify", "error");
@@ -301,9 +303,21 @@ const server = createRelayerApp({
   trustedProxyHops: TRUSTED_PROXY_HOPS,
 });
 
+function confirmPointsReceipt(hash) {
+  return publicClient.waitForTransactionReceipt({
+    hash,
+    confirmations: 1,
+    timeout: 120_000,
+  });
+}
+
 await rescueLimiter.ready;
 try {
-  schedulePointsRetry({ dataDir: DATA_DIR, env: process.env });
+  schedulePointsRetry({
+    dataDir: DATA_DIR,
+    env: process.env,
+    confirmReceipt: confirmPointsReceipt,
+  });
 } catch {
   console.error("points_notify", "error");
 }

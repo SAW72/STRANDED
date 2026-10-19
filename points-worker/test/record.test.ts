@@ -37,11 +37,12 @@ describe.sequential("recorded activity", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("access-control-allow-origin")).toBe("https://strandedtoken.trade");
     expect(await response.json()).toEqual({ ok: true, duplicate: false });
-    expect(rpc.calls()).toBe(1);
+    expect(rpc.calls()).toBe(2);
     expect(await ledgerCount()).toEqual({ n: before.n + 2, s: before.s + 150 });
 
     const wallet = await getPoints(secret, `/points/${USER}`, "https://strandedtoken.trade");
     expect(wallet.headers.get("access-control-allow-origin")).toBe("https://strandedtoken.trade");
+    expect(wallet.headers.get("cache-control")).toBe("public, max-age=30");
     const walletBody = await wallet.json();
     expect(walletBody).toEqual({
       wallet: USER,

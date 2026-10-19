@@ -13,7 +13,10 @@ describe("schema port", () => {
   it("keeps the relayer schema, including CHECKs, STRICT, triggers, and the partial unique index", () => {
     const migration = read(new URL("migrations/0001_init.sql", root));
     const schema = read(new URL("relayer/points/schema.sql", repo));
-    assert.equal(migration, schema);
+    assert.match(schema, /'wallet_session'/);
+    assert.match(migration, /CHECK \(action <> 'wallet_session'\)/);
+    assert.match(migration, /'wallet_session'/);
+    assert.doesNotMatch(migration, /'registry_find_claimed',\s*'wallet_session'/);
     assert.match(migration, /\) STRICT;/);
     assert.match(migration, /RAISE\(ABORT, 'duplicate'\)/);
     assert.match(migration, /RAISE\(ABORT, 'append-only'\)/);

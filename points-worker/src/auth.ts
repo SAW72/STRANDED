@@ -13,6 +13,13 @@ function toHex(bytes: Uint8Array): string {
   return out;
 }
 
+/** Trimmed secret of at least 32 bytes, or null when it must not be used. */
+export function normalizeSecret(secret: string | undefined): string | null {
+  const trimmed = String(secret ?? "").trim();
+  if (encoder.encode(trimmed).byteLength < 32) return null;
+  return trimmed;
+}
+
 export async function signPoints(secret: string, timestamp: string, rawBody: string): Promise<string> {
   const key = await crypto.subtle.importKey(
     "raw",
@@ -35,8 +42,9 @@ export async function signaturesMatch(
   rawBody: string,
   provided: string,
 ): Promise<boolean> {
-  if (!secret || provided.length === 0 || provided.length > 256) return false;
-  const expected = await signPoints(secret, timestamp, rawBody);
+  const key = normalizeSecret(secret);
+  if (!key || provided.length === 0 || provided.length > 256) return false;
+  const expected = await signPoints(key, timestamp, rawBody);
   const [providedHash, expectedHash] = await Promise.all([
     crypto.subtle.digest("SHA-256", encoder.encode(provided.trim().toLowerCase())),
     crypto.subtle.digest("SHA-256", encoder.encode(expected)),

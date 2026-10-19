@@ -111,7 +111,7 @@ describe.sequential("rejected ingest", () => {
     const response = await postIngest(secret, { chainId: 84532, txHash: txHash("c") });
     expect(response.status).toBe(400);
     expect(await response.json()).toEqual({ ok: false, error: "wrong_contract" });
-    expect(rpc.calls()).toBe(1);
+    expect(rpc.calls()).toBe(2);
   });
 
   it("rejects a registry action without calling RPC", async () => {
@@ -150,7 +150,7 @@ describe.sequential("rejected ingest", () => {
     const response = await postIngest(secret, { chainId: 84532, txHash: txHash("m") });
     expect(response.status).toBe(400);
     expect(await response.json()).toEqual({ ok: false, error: "missing_rescued_log" });
-    expect(rpc.calls()).toBe(1);
+    expect(rpc.calls()).toBe(2);
   });
 
   it("does not allow a foreign origin and leaves the ledger empty", async () => {

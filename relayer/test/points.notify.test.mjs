@@ -8,6 +8,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { rescueTxsFromJsonl } from "../scripts/backfill-points.mjs";
 import {
+  clearPointsRetryTimers,
   deliverPointsNotify,
   flushPointsNotify,
   pointsOutboxPath,
@@ -76,6 +77,7 @@ describe("points push", () => {
       POINTS_INGEST_SECRET: secret,
       POINTS_API_URL: "https://points.invalid/",
     };
+    const scheduleDelay = () => {};
     try {
       const first = await deliverPointsNotify({
         chainId: 84532,
@@ -83,6 +85,7 @@ describe("points push", () => {
         dataDir: dir,
         env,
         fetchImpl,
+        scheduleDelay,
       });
       assert.equal(first.sent, 0);
       const midway = await readFile(pointsOutboxPath(dir), "utf8");
@@ -91,7 +94,7 @@ describe("points push", () => {
       assert.equal(midway.includes(secret), false);
 
       fail = false;
-      const second = await retryPointsOutbox({ dataDir: dir, env, fetchImpl });
+      const second = await retryPointsOutbox({ dataDir: dir, env, fetchImpl, scheduleDelay });
       assert.equal(second.sent, 1);
       const done = await readFile(pointsOutboxPath(dir), "utf8");
       assert.ok(done.startsWith(midway));
@@ -107,6 +110,7 @@ describe("points push", () => {
         const timestamp = call.init.headers["x-points-timestamp"];
         const expected = createHmac("sha256", secret).update(`${timestamp}\n${body}`).digest("hex");
         assert.equal(call.init.headers["x-points-signature"], expected);
+        assert.ok(call.init.signal);
       }
     } finally {
       await rm(dir, { recursive: true, force: true });
@@ -153,9 +157,205 @@ describe("points push", () => {
     const consumed = src.indexOf("nonceStore.markConsumed");
     const logged = src.indexOf('event: "rescue_ok"');
     const notify = src.indexOf("schedulePointsNotify({");
+    const wait = src.indexOf("waitForTransactionReceipt");
     assert.ok(broadcast !== -1 && consumed > broadcast && logged > consumed && notify > logged);
+    assert.ok(wait > logged);
     assert.equal(src.slice(broadcast, consumed).includes("schedulePointsNotify"), false);
+    assert.equal(src.slice(broadcast, consumed).includes("waitForTransactionReceipt"), false);
     assert.equal(src.slice(broadcast, consumed).includes("pointsOutbox"), false);
+  });
+
+  it("retries a 404 receipt_not_found instead of dropping it (O5)", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "points-404-"));
+    const secret = runtimeSecret();
+    const hash = tx();
+    let pending = true;
+    const fetchImpl = async () => {
+      if (pending) return new Response("missing", { status: 404 });
+      return new Response("ok", { status: 200 });
+    };
+    const env = { POINTS_INGEST_SECRET: secret, POINTS_API_URL: "https://points.invalid" };
+    const scheduleDelay = () => {};
+    try {
+      const first = await deliverPointsNotify({ chainId: 84532, txHash: hash, dataDir: dir, env, fetchImpl, scheduleDelay });
+      assert.equal(first.sent, 0);
+      const midway = await readFile(pointsOutboxPath(dir), "utf8");
+      assert.match(midway, /"op":"attempt"/);
+      assert.match(midway, /http_404/);
+      assert.equal(midway.includes('"op":"dropped"'), false);
+      pending = false;
+      const second = await retryPointsOutbox({ dataDir: dir, env, fetchImpl, scheduleDelay });
+      assert.equal(second.sent, 1);
+      const done = await readFile(pointsOutboxPath(dir), "utf8");
+      assert.match(done, /"op":"delivered"/);
+      const third = await retryPointsOutbox({ dataDir: dir, env, fetchImpl, scheduleDelay });
+      assert.equal(third.sent, 0);
+    } finally {
+      clearPointsRetryTimers();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps a 401 pending so a later retry can send (O6)", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "points-401-"));
+    const secret = runtimeSecret();
+    const hash = tx();
+    let status = 401;
+    const fetchImpl = async () => new Response("no", { status });
+    const env = { POINTS_INGEST_SECRET: secret, POINTS_API_URL: "https://points.invalid" };
+    const scheduleDelay = () => {};
+    try {
+      const first = await deliverPointsNotify({ chainId: 421614, txHash: hash, dataDir: dir, env, fetchImpl, scheduleDelay });
+      assert.equal(first.sent, 0);
+      const midway = await readFile(pointsOutboxPath(dir), "utf8");
+      assert.match(midway, /http_401/);
+      assert.equal(midway.includes('"op":"dropped"'), false);
+      status = 200;
+      const second = await retryPointsOutbox({ dataDir: dir, env, fetchImpl, scheduleDelay });
+      assert.equal(second.sent, 1);
+    } finally {
+      clearPointsRetryTimers();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("backs off automatic retries, stops at the cap, and compacts the outbox (O4)", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "points-backoff-"));
+    const secret = runtimeSecret();
+    const hash = tx();
+    const delays = [];
+    const queued = [];
+    const fetchImpl = async () => {
+      throw new Error("offline");
+    };
+    const env = { POINTS_INGEST_SECRET: secret, POINTS_API_URL: "https://points.invalid" };
+    const scheduleDelay = (fn, ms) => {
+      delays.push(ms);
+      queued.push(fn);
+    };
+    try {
+      const first = await deliverPointsNotify({
+        chainId: 84532,
+        txHash: hash,
+        dataDir: dir,
+        env,
+        fetchImpl,
+        scheduleDelay,
+      });
+      assert.equal(first.sent, 0);
+      assert.deepEqual(delays, [1000]);
+      for (let i = 0; i < 8 && queued.length > 0; i += 1) {
+        const run = queued.shift();
+        await run();
+        await flushPointsNotify();
+      }
+      assert.ok(delays.length >= 2);
+      assert.ok(delays[1] > delays[0]);
+      assert.ok(delays.length <= 6);
+      const text = await readFile(pointsOutboxPath(dir), "utf8");
+      assert.equal(text.includes('"op":"dropped"'), false);
+      assert.match(text, /"op":"enqueue"/);
+      const lines = text.split("\n").filter((line) => line.trim());
+      assert.ok(lines.length < 6);
+      const pending = JSON.parse(lines[0]);
+      assert.equal(pending.op, "enqueue");
+      assert.ok(pending.attempts >= 1);
+    } finally {
+      clearPointsRetryTimers();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("posts only after a successful receipt and skips a reverted one", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "points-confirm-"));
+    const secret = runtimeSecret();
+    const hash = tx();
+    const calls = [];
+    let mode = "pending";
+    const fetchImpl = async (url) => {
+      calls.push(url);
+      return new Response("ok", { status: 200 });
+    };
+    const env = { POINTS_INGEST_SECRET: secret, POINTS_API_URL: "https://points.invalid" };
+    const confirmReceipt = async () => {
+      if (mode === "pending") throw new Error("not mined");
+      if (mode === "reverted") return { status: "reverted" };
+      return { status: "success" };
+    };
+    try {
+      const waiting = await deliverPointsNotify({
+        chainId: 84532,
+        txHash: hash,
+        dataDir: dir,
+        env,
+        fetchImpl,
+        confirmReceipt,
+        scheduleDelay: () => {},
+      });
+      assert.equal(waiting.sent, 0);
+      assert.deepEqual(calls, []);
+      const parked = await readFile(pointsOutboxPath(dir), "utf8");
+      assert.match(parked, /receipt_pending/);
+      assert.equal(parked.includes('"op":"dropped"'), false);
+
+      mode = "success";
+      const mined = await retryPointsOutbox({ dataDir: dir, env, fetchImpl, confirmReceipt, scheduleDelay: () => {} });
+      assert.equal(mined.sent, 1);
+      assert.equal(calls.length, 1);
+
+      const other = tx();
+      mode = "reverted";
+      const reverted = await deliverPointsNotify({
+        chainId: 84532,
+        txHash: other,
+        dataDir: dir,
+        env,
+        fetchImpl,
+        confirmReceipt,
+        scheduleDelay: () => {},
+      });
+      assert.equal(reverted.sent, 0);
+      assert.equal(calls.length, 1);
+      const done = await readFile(pointsOutboxPath(dir), "utf8");
+      assert.match(done, /status_failed/);
+    } finally {
+      clearPointsRetryTimers();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses an http URL and a short secret", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "points-url-"));
+    const errors = [];
+    const original = console.error;
+    console.error = (...args) => {
+      errors.push(args.join(" "));
+    };
+    try {
+      const httpUrl = schedulePointsNotify({
+        chainId: 84532,
+        txHash: tx(),
+        dataDir: dir,
+        env: { POINTS_INGEST_SECRET: runtimeSecret(), POINTS_API_URL: "http://points.invalid" },
+        fetchImpl: async () => {
+          throw new Error("fetched");
+        },
+      });
+      const short = schedulePointsNotify({
+        chainId: 84532,
+        txHash: tx(),
+        dataDir: dir,
+        env: { POINTS_INGEST_SECRET: "short-secret", POINTS_API_URL: "https://points.invalid" },
+      });
+      assert.deepEqual(httpUrl, { enabled: false });
+      assert.deepEqual(short, { enabled: false });
+      assert.ok(errors.some((line) => line === "points_notify url"));
+      assert.equal(errors.some((line) => line.includes("http://")), false);
+      await assert.rejects(stat(pointsOutboxPath(dir)));
+    } finally {
+      console.error = original;
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });
 

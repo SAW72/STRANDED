@@ -96,13 +96,13 @@ pathHash = keccak256(swapData)
 
 Dry-mock amounts (same as wallet fixtures): `amountIn=1e18`, `amountSwap=0.2e18`, `fee=0.01e18`, remainder `0.79e18`. `pathHash` binds `nativeTo` — compute per quote. Print hashes via `HackQuestStatus` (`HACKQUEST_NATIVE_TO`).
 
-Fixture `nativeTo=0x1111…1111` hashes (read-only `HackQuestStatus` on Arb RPC, **no broadcast**; Lens address in that run is ephemeral):
+Fixture `nativeTo=0x1111…1111` hashes (read-only `HackQuestStatus` on Arb RPC, **no broadcast**; Lens address in that run is ephemeral). **Unverified:** these path hashes have no receipt on either testnet. They are not mined transactions.
 
-| Token | pathHash |
+| Token | pathHash (unverified, no receipt on either testnet) |
 | --- | --- |
-| SDEMO | `0x41bdecd8a9b0f6b3c1034a23ef8efe7d5c5af0018f90f10eae6501567c7188a3` |
-| GRTT (delisted Oct 1, 2026) | `0xf2fa57d446a79240cf3043e9e9f82fd28d8719d264bc89de7d81b8eb167b3c47` |
-| gMOCK (delisted Oct 1, 2026) | `0x8b4de67c75e10145cd31889f5f4bb75938d269e2147e0a00ad9b82bc2c9a8665` |
+| SDEMO | `0x41bdecd8a9b0f6b3c1034a23ef8efe7d5c5af0018f90f10eae6501567c7188a3` (unverified) |
+| GRTT (delisted Oct 1, 2026) | `0xf2fa57d446a79240cf3043e9e9f82fd28d8719d264bc89de7d81b8eb167b3c47` (unverified) |
+| gMOCK (delisted Oct 1, 2026) | `0x8b4de67c75e10145cd31889f5f4bb75938d269e2147e0a00ad9b82bc2c9a8665` (unverified) |
 
 Supported demo token: **SDEMO** `0xE3cb…616C` (testnet, no value). GRTT and gMOCK were delisted Oct 1, 2026. Destination of the swap slice is native/WETH `0x980B…7c73` (router `payAmount`), remainder ERC-20 still goes to signed `to` (move-out).
 

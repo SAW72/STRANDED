@@ -52,13 +52,22 @@ export function nowSeconds(): number {
   return Math.floor(Date.now() / 1000);
 }
 
-export function installReceipt(receipt: unknown): { calls: () => number } {
+export function installReceipt(receipt: unknown, opts: { head?: string } = {}): { calls: () => number } {
   let calls = 0;
-  rpcClient.fetch = async (input) => {
+  const head = opts.head ?? "0x20";
+  rpcClient.fetch = async (input, init) => {
     calls += 1;
     const url = String(input);
     if (!url.startsWith("https://example.invalid/")) throw new Error("offline");
-    return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: receipt }), {
+    let method = "eth_getTransactionReceipt";
+    try {
+      const parsed = JSON.parse(String(init && "body" in init ? init.body : ""));
+      if (parsed && typeof parsed.method === "string") method = parsed.method;
+    } catch {
+      method = "eth_getTransactionReceipt";
+    }
+    const result = method === "eth_blockNumber" ? head : receipt;
+    return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result }), {
       status: 200,
       headers: { "content-type": "application/json" },
     });
@@ -84,9 +93,10 @@ export function rescuedReceipt(opts: {
   user?: string;
   relayer?: string;
   status?: string;
+  blockNumber?: string;
   contract?: string;
   logs?: unknown[] | null;
-}): { status: string; logs: unknown[] } {
+}): { status: string; blockNumber: string; logs: unknown[] } {
   const contract = opts.contract ?? GAS_RESCUE_SWAP[opts.chainId];
   const user = opts.user ?? USER;
   const relayer = opts.relayer ?? RELAYER;
@@ -108,7 +118,7 @@ export function rescuedReceipt(opts: {
             ].join("")}`,
           },
         ];
-  return { status: opts.status ?? "0x1", logs };
+  return { status: opts.status ?? "0x1", blockNumber: opts.blockNumber ?? "0x1", logs };
 }
 
 export async function postIngest(
@@ -121,6 +131,7 @@ export async function postIngest(
   const signature = opts.signature === null ? "" : opts.signature ?? (await mac(secret, timestamp, raw));
   const headers = new Headers({
     "content-type": "application/json",
+    "content-length": String(encoder.encode(raw).byteLength),
     "x-points-timestamp": timestamp,
     "x-points-signature": signature,
   });

@@ -51,10 +51,10 @@ CREATE TABLE IF NOT EXISTS points_ledger (
       'rescue_completed',
       'relayer_job',
       'registry_find_posted',
-      'registry_find_claimed',
-      'wallet_session'
+      'registry_find_claimed'
     )
   ),
+  CHECK (action <> 'wallet_session'),
   CHECK (typeof(points) = 'integer' AND points > 0 AND points <= 500),
   CHECK (
     (
@@ -103,7 +103,7 @@ END;
 DROP TRIGGER IF EXISTS points_ledger_no_excluded_insert;
 CREATE TRIGGER points_ledger_no_excluded_insert
 BEFORE INSERT ON points_ledger
-WHEN NEW.action IN ('bug_report', 'security', 'security_finding', 'finding')
+WHEN NEW.action IN ('bug_report', 'security', 'security_finding', 'finding', 'wallet_session')
 BEGIN
   SELECT RAISE(ABORT, 'excluded_action');
 END;
@@ -111,8 +111,8 @@ END;
 DROP TRIGGER IF EXISTS points_ledger_no_excluded_update;
 CREATE TRIGGER points_ledger_no_excluded_update
 BEFORE UPDATE ON points_ledger
-WHEN NEW.action IN ('bug_report', 'security', 'security_finding', 'finding')
-  OR OLD.action IN ('bug_report', 'security', 'security_finding', 'finding')
+WHEN NEW.action IN ('bug_report', 'security', 'security_finding', 'finding', 'wallet_session')
+  OR OLD.action IN ('bug_report', 'security', 'security_finding', 'finding', 'wallet_session')
 BEGIN
   SELECT RAISE(ABORT, 'excluded_action');
 END;

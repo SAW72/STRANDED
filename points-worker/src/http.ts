@@ -12,10 +12,15 @@ export function corsHeaders(request: Request): Headers {
   return headers;
 }
 
-export function json(request: Request, status: number, body: unknown): Response {
+export function json(
+  request: Request,
+  status: number,
+  body: unknown,
+  cacheControl = "no-store",
+): Response {
   const headers = corsHeaders(request);
   headers.set("content-type", "application/json; charset=utf-8");
-  headers.set("cache-control", "no-store");
+  headers.set("cache-control", cacheControl);
   return new Response(JSON.stringify(body), { status, headers });
 }
 

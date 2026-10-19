@@ -42,29 +42,63 @@ export async function insertActivity(db: D1Database, row: ActivityInsert): Promi
   }
 }
 
+function insertStatement(db: D1Database, row: ActivityInsert): D1PreparedStatement {
+  return db
+    .prepare(
+      `INSERT INTO points_ledger (wallet, action, points, tx_hash, metadata, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    )
+    .bind(row.wallet, row.action, row.points, row.txHash, row.metadata, row.createdAt);
+}
+
 export async function recordRescue(
   db: D1Database,
   input: { user: string; relayer: string; txHash: string; chainId: number },
 ): Promise<{ duplicate: boolean }> {
   const createdAt = new Date().toISOString();
   const metadata = JSON.stringify({ chainId: input.chainId });
-  const rescue = await insertActivity(db, {
-    wallet: input.user,
-    action: "rescue_completed",
-    points: RESCUE_POINTS,
-    txHash: input.txHash,
-    metadata,
-    createdAt,
-  });
-  const job = await insertActivity(db, {
-    wallet: input.relayer,
-    action: "relayer_job",
-    points: RELAYER_JOB_POINTS,
-    txHash: input.txHash,
-    metadata,
-    createdAt,
-  });
-  return { duplicate: rescue === "duplicate" && job === "duplicate" };
+  const rows: ActivityInsert[] = [
+    {
+      wallet: input.user,
+      action: "rescue_completed",
+      points: RESCUE_POINTS,
+      txHash: input.txHash,
+      metadata,
+      createdAt,
+    },
+    {
+      wallet: input.relayer,
+      action: "relayer_job",
+      points: RELAYER_JOB_POINTS,
+      txHash: input.txHash,
+      metadata,
+      createdAt,
+    },
+  ];
+  try {
+    await db.batch([
+      db.prepare("PRAGMA recursive_triggers = ON"),
+      insertStatement(db, rows[0]),
+      insertStatement(db, rows[1]),
+    ]);
+    return { duplicate: false };
+  } catch (err) {
+    const code = ledgerErrorCode(err);
+    if (code === "excluded_action" || code === "append-only") throw new PointsError(409, code);
+    if (code !== "duplicate") throw err;
+    const existing = await db
+      .prepare(
+        `SELECT action FROM points_ledger
+         WHERE tx_hash = ? AND action IN ('rescue_completed', 'relayer_job')`,
+      )
+      .bind(input.txHash)
+      .all<{ action: string }>();
+    const have = new Set((existing.results || []).map((row) => row.action));
+    const missing = rows.filter((row) => !have.has(row.action));
+    if (missing.length === 0) return { duplicate: true };
+    for (const row of missing) await insertActivity(db, row);
+    return { duplicate: false };
+  }
 }
 
 export async function rowsForWallet(db: D1Database, wallet: string): Promise<LedgerRow[]> {

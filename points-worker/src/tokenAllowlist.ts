@@ -1,0 +1,50 @@
+const ADDRESS_RE = /^0x[0-9a-f]{40}$/;
+
+/**
+ * Optional per-chain token check. Unset or blank means no check.
+ * A set value that does not parse allows nothing (fail closed).
+ * There is no default list in this module.
+ */
+export function parseTokenAllowlist(raw: string | undefined): Map<number, Set<string>> | null {
+  const text = String(raw ?? "").trim();
+  if (!text) return null;
+  const map = new Map<number, Set<string>>();
+  if (text.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(text) as unknown;
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return map;
+      for (const [chainText, value] of Object.entries(parsed as Record<string, unknown>)) {
+        const items = Array.isArray(value) ? value : typeof value === "string" ? value.split(",") : [];
+        for (const item of items) {
+          if (typeof item === "string") addToken(map, chainText, item);
+        }
+      }
+    } catch {
+      return map;
+    }
+    return map;
+  }
+  for (const part of text.split(";")) {
+    const piece = part.trim();
+    if (!piece) continue;
+    const colon = piece.indexOf(":");
+    if (colon < 0) continue;
+    const chainText = piece.slice(0, colon).trim();
+    for (const addressText of piece.slice(colon + 1).split(",")) addToken(map, chainText, addressText);
+  }
+  return map;
+}
+
+function addToken(map: Map<number, Set<string>>, chainText: string, addressText: string): void {
+  if (!/^[0-9]+$/.test(chainText)) return;
+  const chainId = Number(chainText);
+  if (!Number.isSafeInteger(chainId) || chainId <= 0) return;
+  const address = addressText.trim().toLowerCase();
+  if (!ADDRESS_RE.test(address)) return;
+  let set = map.get(chainId);
+  if (!set) {
+    set = new Set();
+    map.set(chainId, set);
+  }
+  set.add(address);
+}

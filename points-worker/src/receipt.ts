@@ -17,6 +17,17 @@ export type RescuedParties = {
   relayer: string;
 };
 
+/** Blocks required after the receipt block. Used when POINTS_MIN_CONFIRMATIONS is unset. */
+export const DEFAULT_MIN_CONFIRMATIONS = 2;
+
+export function minConfirmations(raw: string | undefined): number {
+  const text = String(raw ?? "").trim();
+  if (!/^[1-9][0-9]{0,2}$/.test(text)) return DEFAULT_MIN_CONFIRMATIONS;
+  const value = Number(text);
+  if (value < 1 || value > 128) return DEFAULT_MIN_CONFIRMATIONS;
+  return value;
+}
+
 type RpcLog = {
   address?: string;
   topics?: string[];
@@ -26,7 +37,13 @@ type RpcLog = {
 
 type RpcReceipt = {
   status?: string;
+  blockNumber?: string;
   logs?: RpcLog[];
+};
+
+export type ReceiptCheck = {
+  minConfirmations: number;
+  tokenAllowlist: ReadonlyMap<number, ReadonlySet<string>> | null;
 };
 
 export function rpcUrlFor(
@@ -38,7 +55,12 @@ export function rpcUrlFor(
   return url || null;
 }
 
-export async function readRescuedParties(rpcUrl: string, txHash: string, chainId: number): Promise<RescuedParties> {
+export async function readRescuedParties(
+  rpcUrl: string,
+  txHash: string,
+  chainId: number,
+  check: ReceiptCheck,
+): Promise<RescuedParties> {
   const allow = allowlistedSwap(chainId);
   if (!allow) throw new PointsError(400, "wrong_chain");
   const receipt = await fetchReceipt(rpcUrl, txHash);
@@ -46,21 +68,49 @@ export async function readRescuedParties(rpcUrl: string, txHash: string, chainId
   const status = hexQuantity(receipt.status);
   if (status === null) throw new PointsError(502, "invalid_receipt");
   if (status !== 1n) throw new PointsError(400, "status_failed");
-  return partiesFromLogs(receipt.logs || [], allow);
+  await requireDepth(rpcUrl, receipt, check.minConfirmations);
+  const parties = partiesFromLogs(receipt.logs || [], allow);
+  if (check.tokenAllowlist) {
+    const allowed = check.tokenAllowlist.get(chainId);
+    const token = tokenInFromLogs(receipt.logs || [], allow);
+    if (!allowed || allowed.size === 0 || !token || !allowed.has(token)) {
+      throw new PointsError(400, "token_not_allowed");
+    }
+  }
+  return parties;
+}
+
+async function requireDepth(rpcUrl: string, receipt: RpcReceipt, minConfirmations: number): Promise<void> {
+  const txBlock = hexQuantity(receipt.blockNumber);
+  if (txBlock === null) throw new PointsError(502, "invalid_receipt");
+  const headRaw = await rpcResult(rpcUrl, "eth_blockNumber", []);
+  const head = hexQuantity(headRaw);
+  if (head === null) throw new PointsError(502, "invalid_receipt");
+  const depth = head - txBlock + 1n;
+  if (depth < BigInt(minConfirmations)) throw new PointsError(425, "awaiting_confirmations");
+}
+
+function tokenInFromLogs(logs: RpcLog[], allow: string): string | null {
+  const live = logs.filter((log) => log && log.removed !== true);
+  const matched = live.filter((log) => topic0(log) === RESCUED_TOPIC && sameAddress(log.address, allow));
+  if (matched.length !== 1) return null;
+  return addressFromWord((matched[0].topics || [])[2]);
 }
 
 async function fetchReceipt(rpcUrl: string, txHash: string): Promise<RpcReceipt | null> {
+  const result = await rpcResult(rpcUrl, "eth_getTransactionReceipt", [txHash]);
+  if (result === null) return null;
+  if (!result || typeof result !== "object") throw new PointsError(502, "invalid_receipt");
+  return result as RpcReceipt;
+}
+
+async function rpcResult(rpcUrl: string, method: string, params: unknown[]): Promise<unknown> {
   let response: Response;
   try {
     response = await rpcClient.fetch(rpcUrl, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: 1,
-        method: "eth_getTransactionReceipt",
-        params: [txHash],
-      }),
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
       signal: AbortSignal.timeout(10_000),
     });
   } catch {
@@ -76,9 +126,7 @@ async function fetchReceipt(rpcUrl: string, txHash: string): Promise<RpcReceipt 
   if (!payload || typeof payload !== "object") throw new PointsError(502, "rpc_failed");
   const record = payload as { error?: unknown; result?: unknown };
   if (record.error) throw new PointsError(502, "rpc_failed");
-  if (record.result === null) return null;
-  if (!record.result || typeof record.result !== "object") throw new PointsError(502, "invalid_receipt");
-  return record.result as RpcReceipt;
+  return record.result;
 }
 
 function partiesFromLogs(logs: RpcLog[], allow: string): RescuedParties {

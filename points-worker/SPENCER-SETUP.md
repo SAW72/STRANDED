@@ -2,22 +2,26 @@
 
 Agents ran none of these steps. Nothing in this change logged into Cloudflare, deployed a Worker, created a D1 database, or set a secret.
 
-Do these yourself, in order, from `points-worker/` unless a step says otherwise.
+Do these yourself, in order, from `points-worker/` unless a step says otherwise. Use `npx wrangler` (the `wrangler` package is pinned in this directory). Do not install a global binary.
 
-1. Run `wrangler login`.
-2. Run `wrangler d1 create stranded-points`. Paste the printed database id into `database_id` in `wrangler.jsonc`, replacing the placeholder. The id is not a secret.
-3. Set the Worker variables `BASE_SEPOLIA_RPC_URL` (chain 84532) and `ARB_SEPOLIA_RPC_URL` (chain 421614) to the public RPC URLs you already use for those testnets. Do not commit the URLs. Leave `POINTS_INGEST_SECRET` unset until step 6.
-4. Run `wrangler d1 migrations apply stranded-points --remote`.
-5. Run `wrangler deploy`. Keep the Worker origin it prints.
-6. On your Mac, generate a secret (for example `openssl rand -hex 32`) and set that same value in three places. Do not paste it into chat, a file in this repo, or a commit.
-   - `wrangler secret put POINTS_INGEST_SECRET`
-   - the Mac relayer environment: `POINTS_INGEST_SECRET`, and `POINTS_API_URL` set to the Worker origin from step 5 (no path)
-   - the Render dashboard for `stranded-relayer-arb`: `POINTS_INGEST_SECRET` and `POINTS_API_URL` set to that same origin
-7. Restart both relayers: the Mac process, and `stranded-relayer-arb`.
-8. Set `VITE_POINTS_API_URL` on the Render static site `stranded` to the Worker origin from step 5, and rebuild that site.
+1. Run `npx wrangler login`.
+2. Run `npx wrangler d1 create stranded-points`. Paste the printed database id into `database_id` in `wrangler.jsonc`, replacing the placeholder. The id is not a secret.
+3. DECISION FOR SPENCER: either allowlist tokens, or keep the Base relayer points push off until that question is settled. gMOCK on Base Sepolia may still have a public mint. That was not confirmed on-chain. To allowlist, run `npx wrangler secret put TOKEN_IN_ALLOWLIST` and paste a JSON object or `chainId:address,address;chainId:address` list that you choose. When the secret is unset, the Worker does not check the token. Do not put a token list in `wrangler.jsonc`, this repo, or a commit.
+4. Set the RPC URLs with secrets, not dashboard variables and not `wrangler.jsonc`. Run `npx wrangler secret put BASE_SEPOLIA_RPC_URL` for chain 84532 and `npx wrangler secret put ARB_SEPOLIA_RPC_URL` for chain 421614. Use the public RPC URLs you already use for those testnets. Do not commit the URLs. A later `npx wrangler deploy` does not delete secrets.
+5. `POINTS_MIN_CONFIRMATIONS` defaults to 2 when it is unset. The Worker records a rescue only after the receipt is that many blocks deep, counting the receipt block. Until then it returns 425 `awaiting_confirmations`, and the relayer retries. To change the default, run `npx wrangler secret put POINTS_MIN_CONFIRMATIONS` and enter a whole number from 1 to 128. Leave it unset to keep 2.
+6. Run `npx wrangler d1 migrations apply stranded-points --remote`.
+7. Run `npx wrangler deploy`. Keep the Worker origin it prints.
+8. On your Mac, generate a secret (for example `openssl rand -hex 32`) and set that same value in three places. It must be at least 32 bytes after trimming. Do not paste it into chat, a file in this repo, or a commit.
+   - `npx wrangler secret put POINTS_INGEST_SECRET`
+   - the Mac relayer environment: `POINTS_INGEST_SECRET`, and `POINTS_API_URL` set to the Worker origin from step 7 (https, no path)
+   - the Render dashboard for `stranded-relayer-arb`: `POINTS_INGEST_SECRET` and `POINTS_API_URL` set to that same https origin
+9. Restart both relayers: the Mac process, and `stranded-relayer-arb`.
+10. Set `VITE_POINTS_API_URL` on the Render static site `stranded` to the Worker origin from step 7, and rebuild that site.
 
-Until both `POINTS_INGEST_SECRET` and `POINTS_API_URL` are set, the relayer hook does nothing and writes no outbox file. `wallet_session` is not scored. Registry finds stay deferred.
+Until both `POINTS_INGEST_SECRET` and `POINTS_API_URL` are set, the relayer hook does nothing and writes no outbox file. `POINTS_API_URL` must be https. `wallet_session` is not scored. Registry finds stay deferred.
 
-`relayer/scripts/backfill-points.mjs` can replay `txHash` values from `rescues.jsonl` after step 7. Agents did not run it.
+DECISION FOR SPENCER: points are recorded for the relayer hot wallet (`relayer_job`, 50 per rescue) and that wallet is included on the leaderboard. Leave this as it is, or decide later that those rows should be hidden. This setup does not change that behavior.
+
+`relayer/scripts/backfill-points.mjs` can replay `txHash` values from `rescues.jsonl` after step 9. Agents did not run it.
 
 Points are recorded for activity. The points disclaimer in the wallet is unchanged.
