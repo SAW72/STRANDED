@@ -8,15 +8,20 @@
  * - relayer-private-key, admin-secret, secret-env-name: those names in built JS (not source maps).
  * - relayer-env-key: any RELAYER_* name in built JS (not source maps).
  * - forbidden-value, forbidden-encoding, forbidden-split: every secret-like env value,
- *   including base64/base64url and any 16-character slice. Every *_RPC_URL value is compared.
+ *   including base64/base64url and any 16-character slice. An RPC URL is compared only
+ *   when it is key-like, and only as the full value. Exact allowlist values are skipped.
+ *   A 0x plus 40 hex shape is not an exemption.
  * - rpc-url: provider-style http(s) or ws(s) URLs with a key-like path, query, or userinfo.
- * - mnemonic: a 12- or 24-word BIP39 English phrase.
+ *   An exact allowlist entry skips that URL.
+ * - mnemonic: a 12, 15, 18, 21, or 24-word BIP39 English phrase, including newline-joined
+ *   phrases and word arrays.
  * - jwt: a bare three-part JWT.
  * - hex64: a standalone 64-hex value in dist that is not a repeated nibble, not an exact
  *   allowlist entry, and not already present under node_modules.
- * - hex64-literal: the same shape committed under client source or shared/. Unbundled
- *   *.test.ts and *.test.tsx files are skipped. The GITLEAKS_SHA256 assignment in
+ * - hex64-literal: the same shape committed under client source, shared/, or tests.
+ *   Test files use the placeholder allowlist. The GITLEAKS_SHA256 assignment in
  *   .github/workflows/gitleaks.yml is exempt only for that exact value.
+ * - relayer-env-key: any RELAYER_* name in built JS, unless that exact name is allowlisted.
  * - symlink: a link that is broken or points outside the walked root. Links inside the root are followed.
  * - allowlist: the reviewed allowlist has a wildcard or a value with no comment.
  *
@@ -30,12 +35,13 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const CHECKSUM_FILE = path.resolve(scriptDir, "../.github/workflows/gitleaks.yml");
 const ALLOWLIST_FILE = path.join(scriptDir, "secretScanAllowlist.txt");
+const PLACEHOLDER_ALLOWLIST_FILE = path.join(scriptDir, "secretScanPlaceholderAllowlist.txt");
 const WORDLIST_FILE = path.join(scriptDir, "bip39-english.txt");
+const PHRASE_LENGTHS = new Set([12, 15, 18, 21, 24]);
 
 const HEX64 = /(?<![A-Za-z0-9])(?:0x)?([0-9a-fA-F]{64})(?![A-Za-z0-9])/gi;
 const RELAYER_NAME = /(?<![A-Za-z0-9_])RELAYER_[A-Z0-9_]+(?![A-Za-z0-9_])/g;
 const JWT = /(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{8,}(?![A-Za-z0-9_-])/g;
-const MNEMONIC_SHAPE = /(?<![a-z])(?:[a-z]{3,8} ){11,23}[a-z]{3,8}(?![a-z])/g;
 const SECRET_NAME = /(?:SECRET|PRIVATE|(?:^|_)KEY$|(?:^|_)PK$|PASSWD|PASSWORD|CREDENTIAL|API_KEY|APIKEY|MNEMONIC|SEED|PHRASE|TOKEN)/;
 const ALWAYS_NAMES = ["RELAYER_PRIVATE_KEY", "ADMIN_SECRET"];
 const QUERY_KEY = /^(?:api[_-]?key|apikey|key|access[_-]?key|dkey|token)$/i;
@@ -46,10 +52,6 @@ export function isSecretLikeName(name) {
 
 export function isRpcName(name) {
   return name === "RPC_URL" || name.endsWith("_RPC_URL");
-}
-
-export function isPublicAddress(value) {
-  return typeof value === "string" && /^0x[0-9a-fA-F]{40}$/.test(value.trim());
 }
 
 function isDocsSlug(segment) {
@@ -239,17 +241,18 @@ function encodingsOf(value) {
   ).filter((form) => form !== value);
 }
 
-export function secretMaterial(env = {}) {
+export function secretMaterial(env = {}, options = {}) {
   const items = [];
   for (const [name, raw] of Object.entries(env)) {
     if (typeof raw !== "string") continue;
     const value = raw.trim();
     if (value.length < 8) continue;
     if (/^(?:true|false|yes|no|0|1)$/i.test(value)) continue;
+    if (allowlistHas(options, value)) continue;
     const secretName = isSecretLikeName(name);
     const rpcName = isRpcName(name);
-    if (!secretName && !rpcName) continue;
-    if (secretName && !rpcName && isPublicAddress(value)) continue;
+    const keyedRpc = rpcName && isKeyLikeRpc(value);
+    if (!secretName && !keyedRpc) continue;
     const variants = new Set([value]);
     const body = hexBody(value);
     if (body) {
@@ -264,6 +267,7 @@ export function secretMaterial(env = {}) {
       name,
       value,
       hex: Boolean(body),
+      fullOnly: keyedRpc,
       variants: [...variants],
       encodings: encodingsOf(value),
     });
@@ -283,9 +287,9 @@ function ruleForName(name) {
   return "secret-env-name";
 }
 
-function namesToFind(env) {
+function namesToFind(env, options) {
   const names = new Set(ALWAYS_NAMES);
-  for (const item of secretMaterial(env)) names.add(item.name);
+  for (const item of secretMaterial(env, options)) names.add(item.name);
   return [...names];
 }
 
@@ -348,13 +352,29 @@ function bip39Words() {
 
 function mnemonicIndex(text) {
   const words = bip39Words();
-  MNEMONIC_SHAPE.lastIndex = 0;
-  for (const match of text.matchAll(MNEMONIC_SHAPE)) {
-    const parts = match[0].split(" ");
-    if (parts.length !== 12 && parts.length !== 24) continue;
-    if (parts.every((word) => words.has(word))) return match.index;
+  const re = /(?<![a-z])[a-z]{3,8}(?![a-z])/g;
+  const gapOk = /^[\s,\[\]"'`\\]+$/;
+  let parts = [];
+  let start = -1;
+  let end = -1;
+  const finish = () => {
+    if (start < 0 || !PHRASE_LENGTHS.has(parts.length)) return -1;
+    if (!parts.every((word) => words.has(word))) return -1;
+    return start;
+  };
+  for (const match of text.matchAll(re)) {
+    if (end >= 0 && !gapOk.test(text.slice(end, match.index))) {
+      const hit = finish();
+      if (hit >= 0) return hit;
+      parts = [];
+      start = -1;
+    }
+    if (start < 0) start = match.index;
+    parts.push(match[0]);
+    end = match.index + match[0].length;
   }
-  return -1;
+  const hit = finish();
+  return hit >= 0 ? hit : -1;
 }
 
 function contentFindings(file, text, options, secrets) {
@@ -369,6 +389,7 @@ function contentFindings(file, text, options, secrets) {
     }
     RELAYER_NAME.lastIndex = 0;
     for (const match of text.matchAll(RELAYER_NAME)) {
+      if (allowlistHas(options, match[0])) continue;
       pushFinding(findings, seen, at(file, text, match.index, "relayer-env-key"));
     }
   }
@@ -383,6 +404,7 @@ function contentFindings(file, text, options, secrets) {
   for (const match of text.matchAll(urlRe)) {
     const candidate = match[0].replace(/[),.;]+$/, "");
     if (!isKeyLikeRpc(candidate)) continue;
+    if (allowlistHas(options, candidate)) continue;
     pushFinding(findings, seen, at(file, text, match.index, "rpc-url"));
   }
 
@@ -421,8 +443,8 @@ export function scanDist(distDir, options = {}) {
   const findings = [];
   const seen = new Set();
   const env = options.env ?? {};
-  const secrets = secretMaterial(env);
-  const names = namesToFind(env);
+  const secrets = secretMaterial(env, options);
+  const names = namesToFind(env, options);
   const walked = walkFiles(distDir);
   for (const finding of walked.findings) {
     pushFinding(findings, seen, { ...finding, file: relTo(distDir, finding.file) });
@@ -440,6 +462,7 @@ export function scanDist(distDir, options = {}) {
   }
 
   for (const secret of secrets) {
+    if (secret.fullOnly) continue;
     const present = loaded.some((entry) =>
       secret.variants.some((variant) => indexIn(entry.text, variant, secret.hex) >= 0),
     );
@@ -483,10 +506,15 @@ function isUnbundledTest(file) {
   return /\.test\.tsx?$/.test(path.basename(file));
 }
 
+function literalAllowlist(file, options) {
+  if (!isUnbundledTest(file)) return options.allowlist;
+  return options.placeholderAllowlist ?? new Set();
+}
+
 export function scanHexText(file, text, options = {}) {
   const findings = [];
   const seen = new Set();
-  if (isUnbundledTest(file)) return findings;
+  const scoped = { ...options, allowlist: literalAllowlist(file, options) };
   const lines = text.split(/\n/);
   for (let i = 0; i < lines.length; i += 1) {
     const lineText = lines[i];
@@ -494,21 +522,12 @@ export function scanHexText(file, text, options = {}) {
     for (const match of lineText.matchAll(HEX64)) {
       if (checksumMatchExempt(file, lineText, match.index, match[1])) continue;
       if (isRepeatedNibble(match[1])) continue;
-      if (allowlistHas(options, match[0], match[1])) continue;
+      if (allowlistHas(scoped, match[0], match[1])) continue;
       pushFinding(findings, seen, {
         file,
         line: i + 1,
         column: match.index + 1,
         rule: "hex64-literal",
-      });
-    }
-    const phraseAt = mnemonicIndex(lineText);
-    if (phraseAt >= 0) {
-      pushFinding(findings, seen, {
-        file,
-        line: i + 1,
-        column: phraseAt + 1,
-        rule: "mnemonic",
       });
     }
     JWT.lastIndex = 0;
@@ -520,6 +539,10 @@ export function scanHexText(file, text, options = {}) {
         rule: "jwt",
       });
     }
+  }
+  const phraseAt = mnemonicIndex(text);
+  if (phraseAt >= 0) {
+    pushFinding(findings, seen, { ...at(file, text, phraseAt, "mnemonic") });
   }
   return findings;
 }
@@ -555,7 +578,6 @@ export function scanHexLiterals(targets, options = {}) {
     }
   }
   for (const file of files) {
-    if (isUnbundledTest(file)) continue;
     for (const finding of scanHexText(file, readText(file), options)) {
       pushFinding(findings, seen, finding);
     }
@@ -580,14 +602,15 @@ export function parseAllowlist(text, file = "secretScanAllowlist.txt") {
   return { values, errors };
 }
 
-function loadDefaultAllowlist() {
-  if (!fs.existsSync(ALLOWLIST_FILE)) {
+function loadAllowlistFile(file) {
+  const label = path.basename(file);
+  if (!fs.existsSync(file)) {
     return {
       values: new Set(),
-      errors: [{ file: "secretScanAllowlist.txt", line: 1, column: 1, rule: "allowlist" }],
+      errors: [{ file: label, line: 1, column: 1, rule: "allowlist" }],
     };
   }
-  return parseAllowlist(fs.readFileSync(ALLOWLIST_FILE, "utf8"), "secretScanAllowlist.txt");
+  return parseAllowlist(fs.readFileSync(file, "utf8"), label);
 }
 
 export function formatFinding(finding) {
@@ -627,6 +650,13 @@ function parseArgs(argv) {
   return { distDir: positionals[0], roots, sawRoot };
 }
 
+export function registerSigtermGuard() {
+  process.once("SIGTERM", () => {
+    process.stderr.write("bundle secret check interrupted\n");
+    process.exit(143);
+  });
+}
+
 export function main(argv = process.argv.slice(2), env = process.env) {
   const { distDir, roots, sawRoot } = parseArgs(argv);
   if (!distDir) {
@@ -634,14 +664,19 @@ export function main(argv = process.argv.slice(2), env = process.env) {
     return 2;
   }
   const knownRoots = sawRoot ? roots : defaultKnownRoots();
-  const allowlist = loadDefaultAllowlist();
+  const allowlist = loadAllowlistFile(ALLOWLIST_FILE);
+  const placeholder = loadAllowlistFile(PLACEHOLDER_ALLOWLIST_FILE);
   const findings = [];
   const seen = new Set();
   for (const finding of [
     ...allowlist.errors,
+    ...placeholder.errors,
     ...bundleShapeFindings(distDir),
     ...scanDist(distDir, { env, knownRoots, allowlist: allowlist.values }),
-    ...scanHexLiterals(defaultLiteralTargets(), { allowlist: allowlist.values }),
+    ...scanHexLiterals(defaultLiteralTargets(), {
+      allowlist: allowlist.values,
+      placeholderAllowlist: placeholder.values,
+    }),
   ]) {
     pushFinding(findings, seen, finding);
   }
@@ -658,5 +693,6 @@ export function main(argv = process.argv.slice(2), env = process.env) {
 
 const entry = process.argv[1];
 if (entry && import.meta.url === pathToFileURL(path.resolve(entry)).href) {
+  registerSigtermGuard();
   process.exit(main());
 }
