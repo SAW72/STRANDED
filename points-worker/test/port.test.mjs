@@ -150,6 +150,45 @@ describe("action check rebuild", () => {
     assert.equal(twice[0].tx_hash, session);
     db.close();
   });
+
+  it("keeps later ids above the archive and blocks archive edits", () => {
+    const db = new DatabaseSync(":memory:");
+    const wallet = "0x1111111111111111111111111111111111111111";
+    const session = `0x${"cd".repeat(32)}`;
+    db.exec(`
+      CREATE TABLE points_ledger (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        wallet TEXT NOT NULL,
+        action TEXT NOT NULL,
+        points INTEGER NOT NULL,
+        tx_hash TEXT NOT NULL,
+        metadata TEXT,
+        created_at TEXT NOT NULL
+      );
+    `);
+    db.prepare(
+      `INSERT INTO points_ledger (wallet, action, points, tx_hash, metadata, created_at)
+       VALUES (?, 'wallet_session', 10, ?, NULL, '2026-10-19T00:00:00.000Z')`,
+    ).run(wallet, session);
+    db.exec(read(new URL("migrations/0002_rebuild_action_check.sql", root)));
+    const archived = db.prepare("SELECT MAX(id) AS id FROM points_ledger_archive").get();
+    assert.equal(Number(archived.id), 1);
+    const kept = `0x${"ab".repeat(32)}`;
+    const next = db
+      .prepare(
+        `INSERT INTO points_ledger (wallet, action, points, tx_hash, metadata, created_at)
+         VALUES (?, 'relayer_job', 50, ?, NULL, '2026-10-19T00:00:00.000Z')`,
+      )
+      .run(wallet, kept);
+    assert.ok(Number(next.lastInsertRowid) > Number(archived.id));
+    assert.throws(() => db.exec("UPDATE points_ledger_archive SET points = 1"));
+    assert.throws(() => db.exec("DELETE FROM points_ledger_archive"));
+    const still = db.prepare("SELECT id, tx_hash FROM points_ledger_archive").all();
+    assert.equal(still.length, 1);
+    assert.equal(still[0].id, 1);
+    assert.equal(still[0].tx_hash, session);
+    db.close();
+  });
 });
 
 describe("observability config", () => {

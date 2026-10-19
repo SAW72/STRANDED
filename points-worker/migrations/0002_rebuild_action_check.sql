@@ -4,7 +4,7 @@
 -- The rebuilt points_ledger keeps the CHECK. This file does not edit 0001.
 
 CREATE TABLE IF NOT EXISTS points_ledger_archive (
-  id INTEGER PRIMARY KEY,
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
   wallet TEXT NOT NULL,
   action TEXT NOT NULL,
   points INTEGER NOT NULL,
@@ -17,6 +17,29 @@ INSERT OR IGNORE INTO points_ledger_archive (id, wallet, action, points, tx_hash
 SELECT id, wallet, action, points, tx_hash, metadata, created_at
 FROM points_ledger
 WHERE action = 'wallet_session';
+
+INSERT INTO sqlite_sequence (name, seq)
+SELECT 'points_ledger_archive', COALESCE((SELECT MAX(id) FROM points_ledger_archive), 0)
+WHERE NOT EXISTS (SELECT 1 FROM sqlite_sequence WHERE name = 'points_ledger_archive');
+
+UPDATE sqlite_sequence
+SET seq = (SELECT MAX(id) FROM points_ledger_archive)
+WHERE name = 'points_ledger_archive'
+  AND (SELECT MAX(id) FROM points_ledger_archive) > seq;
+
+DROP TRIGGER IF EXISTS points_ledger_archive_no_update;
+CREATE TRIGGER points_ledger_archive_no_update
+BEFORE UPDATE ON points_ledger_archive
+BEGIN
+  SELECT RAISE(ABORT, 'append-only');
+END;
+
+DROP TRIGGER IF EXISTS points_ledger_archive_no_delete;
+CREATE TRIGGER points_ledger_archive_no_delete
+BEFORE DELETE ON points_ledger_archive
+BEGIN
+  SELECT RAISE(ABORT, 'append-only');
+END;
 
 CREATE TABLE points_ledger_next (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -70,6 +93,16 @@ DROP TABLE points_ledger;
 ALTER TABLE points_ledger_next RENAME TO points_ledger;
 
 UPDATE sqlite_sequence SET name = 'points_ledger' WHERE name = 'points_ledger_next';
+
+INSERT INTO sqlite_sequence (name, seq)
+SELECT 'points_ledger', COALESCE((SELECT MAX(id) FROM points_ledger_archive), 0)
+WHERE NOT EXISTS (SELECT 1 FROM sqlite_sequence WHERE name = 'points_ledger')
+  AND COALESCE((SELECT MAX(id) FROM points_ledger_archive), 0) > 0;
+
+UPDATE sqlite_sequence
+SET seq = (SELECT MAX(id) FROM points_ledger_archive)
+WHERE name = 'points_ledger'
+  AND (SELECT MAX(id) FROM points_ledger_archive) > seq;
 
 DROP TRIGGER IF EXISTS points_ledger_no_insert;
 CREATE TRIGGER points_ledger_no_insert

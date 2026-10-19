@@ -132,6 +132,44 @@ describe.sequential("recorded activity", () => {
     expect(await ledgerCount()).toEqual(before);
   });
 
+  it("heals missing rows in one batch call", async () => {
+    const batches: Array<Array<{ sql?: string }>> = [];
+    let failNext = true;
+    const db = {
+      prepare(sql: string) {
+        const stmt = {
+          sql,
+          bind() {
+            return stmt;
+          },
+          async all() {
+            return { results: [] as Array<{ action: string }> };
+          },
+        };
+        return stmt;
+      },
+      async batch(stmts: Array<{ sql?: string }>) {
+        batches.push(stmts);
+        if (failNext) {
+          failNext = false;
+          throw new Error("duplicate");
+        }
+        return [];
+      },
+    };
+    const healed = await recordRescue(db as unknown as D1Database, {
+      user: USER,
+      relayer: RELAYER,
+      txHash: txHash("Z"),
+      chainId: 84532,
+    });
+    expect(healed.duplicate).toBe(false);
+    expect(batches).toHaveLength(2);
+    const inserts = batches[1].map((stmt) => String(stmt.sql || "")).filter((sql) => sql.includes("INSERT INTO points_ledger"));
+    expect(inserts).toHaveLength(2);
+    expect(batches[1].some((stmt) => String(stmt.sql || "").includes("PRAGMA"))).toBe(true);
+  });
+
   it("heals a partial rescue in one batch", async () => {
     const hash = txHash("H");
     await env.DB.prepare(

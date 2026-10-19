@@ -17,7 +17,12 @@ import { createKillSwitch, parseEnvFlag } from "./killSwitch.mjs";
 import { createNonceStore } from "./nonceStore.mjs";
 import { createBuildQuote, encodeSwapData } from "./quote.mjs";
 import { rescueAbi } from "./rescueAbi.mjs";
-import { pointsMinConfirmations, schedulePointsNotify, schedulePointsRetry } from "./points/notify.mjs";
+import {
+  notePointsReceiptReplacement,
+  pointsMinConfirmations,
+  schedulePointsNotify,
+  schedulePointsRetry,
+} from "./points/notify.mjs";
 import { createRescueLog, orderLogSummary } from "./rescueLog.mjs";
 import { createRescueLimiter, parseRescueLimitConfig } from "./rescueLimit.mjs";
 import { DEFAULT_BASE_DELAY_MS, DEFAULT_MAX_ATTEMPTS, withBroadcastRetry } from "./retry.mjs";
@@ -249,13 +254,14 @@ async function submitRescue(body) {
     // The queued job waits for a mined receipt before it posts.
     // The broadcast retry callback above must not call this.
     try {
-      schedulePointsNotify({
+      const queued = schedulePointsNotify({
         chainId: CHAIN_ID,
         txHash,
         dataDir: DATA_DIR,
         env: process.env,
         confirmReceipt: confirmPointsReceipt,
       });
+      if (queued.durable) await queued.durable;
     } catch {
       console.error("points_notify", "error");
     }
@@ -308,6 +314,15 @@ function confirmPointsReceipt(hash) {
     hash,
     confirmations: pointsMinConfirmations(process.env, hash),
     timeout: 20_000,
+    onReplaced(response) {
+      const job = notePointsReceiptReplacement(
+        { chainId: CHAIN_ID, txHash: hash, dataDir: DATA_DIR },
+        response,
+      );
+      void Promise.resolve(job).catch(() => {
+        console.error("points_notify", "error");
+      });
+    },
   });
 }
 

@@ -12,6 +12,7 @@ import {
   deliverPointsNotify,
   flushPointsNotify,
   notePointsCancel,
+  notePointsReceiptReplacement,
   notePointsReplacement,
   pointsMinConfirmations,
   pointsOutboxPath,
@@ -138,7 +139,9 @@ describe("points push", { concurrency: false }, () => {
         env: { POINTS_INGEST_SECRET: secret, POINTS_API_URL: "https://points.invalid" },
         fetchImpl,
       });
-      assert.deepEqual(scheduled, { enabled: true, scheduled: true });
+      assert.equal(scheduled.enabled, true);
+      assert.equal(scheduled.scheduled, true);
+      assert.equal(typeof scheduled.durable.then, "function");
       queueMicrotask(() => {
         settled = true;
       });
@@ -165,7 +168,10 @@ describe("points push", { concurrency: false }, () => {
     assert.ok(wait > logged);
     assert.match(src, /confirmations: pointsMinConfirmations\(process\.env, hash\)/);
     assert.equal(src.includes("confirmations: 1"), false);
+    assert.match(src, /onReplaced/);
+    assert.match(src, /notePointsReceiptReplacement/);
     assert.equal(src.slice(broadcast, consumed).includes("schedulePointsNotify"), false);
+    assert.equal(src.slice(broadcast, consumed).includes("notePointsReceiptReplacement"), false);
     assert.equal(src.slice(broadcast, consumed).includes("waitForTransactionReceipt"), false);
     assert.equal(src.slice(broadcast, consumed).includes("pointsOutbox"), false);
   });
@@ -567,8 +573,8 @@ describe("points push", { concurrency: false }, () => {
       return new Response("ok", { status: 200 });
     };
     const env = { POINTS_INGEST_SECRET: secret, POINTS_API_URL: "https://points.invalid" };
-    const confirmReceipt = async () => {
-      if (mode === "pending") throw new Error("not mined");
+    const confirmReceipt = () => {
+      if (mode === "pending") return new Promise(() => {});
       if (mode === "reverted") return { status: "reverted" };
       return { status: "success" };
     };
@@ -580,6 +586,7 @@ describe("points push", { concurrency: false }, () => {
         env,
         fetchImpl,
         confirmReceipt,
+        confirmWaitMs: 20,
         scheduleDelay: () => {},
       });
       assert.equal(waiting.sent, 0);
@@ -914,6 +921,453 @@ describe("points push", { concurrency: false }, () => {
       });
       assert.equal(result.sent, 6);
       assert.equal(peak, 4);
+    } finally {
+      clearPointsRetryTimers();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps a same-tick replacement across a restart", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "points-same-tick-"));
+    const secret = runtimeSecret();
+    const original = tx();
+    const replacement = tx();
+    const posts = [];
+    const env = { POINTS_INGEST_SECRET: secret, POINTS_API_URL: "https://points.invalid" };
+    try {
+      const queued = schedulePointsNotify({
+        chainId: 84532,
+        txHash: original,
+        dataDir: dir,
+        env,
+        fetchImpl: () => new Promise(() => {}),
+        fetchTimeoutMs: 0,
+      });
+      const linked = notePointsReceiptReplacement(
+        { chainId: 84532, txHash: original, dataDir: dir },
+        { reason: "replaced", transaction: { hash: replacement } },
+      );
+      await Promise.all([queued.durable, linked]);
+      clearPointsRetryTimers();
+      const result = await retryPointsOutbox({
+        dataDir: dir,
+        env,
+        fetchImpl: async (_url, init) => {
+          posts.push(JSON.parse(init.body).txHash);
+          return new Response("ok", { status: 200 });
+        },
+        confirmReceipt: async (hash) => ({ status: "success", transactionHash: hash }),
+        scheduleDelay: () => {},
+      });
+      assert.equal(result.sent, 1);
+      assert.deepEqual(posts, [replacement]);
+    } finally {
+      clearPointsRetryTimers();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("applies a replacement written before the enqueue", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "points-link-first-"));
+    const secret = runtimeSecret();
+    const original = tx();
+    const replacement = tx();
+    const posts = [];
+    const env = { POINTS_INGEST_SECRET: secret, POINTS_API_URL: "https://points.invalid" };
+    try {
+      await notePointsReplacement({
+        chainId: 84532,
+        txHash: original,
+        replacedBy: replacement,
+        dataDir: dir,
+      });
+      const result = await deliverPointsNotify({
+        chainId: 84532,
+        txHash: original,
+        dataDir: dir,
+        env,
+        fetchImpl: async (_url, init) => {
+          posts.push(JSON.parse(init.body).txHash);
+          return new Response("ok", { status: 200 });
+        },
+        confirmReceipt: async (hash) => ({ status: "success", transactionHash: hash }),
+        scheduleDelay: () => {},
+      });
+      assert.equal(result.sent, 1);
+      assert.deepEqual(posts, [replacement]);
+    } finally {
+      clearPointsRetryTimers();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("writes a new rescue while posts are hanging", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "points-lock-"));
+    const secret = runtimeSecret();
+    const hashes = [tx(), tx(), tx()];
+    const fresh = tx();
+    const env = { POINTS_INGEST_SECRET: secret, POINTS_API_URL: "https://points.invalid" };
+    let started = 0;
+    try {
+      const hanging = hashes.map((hash) =>
+        schedulePointsNotify({
+          chainId: 84532,
+          txHash: hash,
+          dataDir: dir,
+          env,
+          fetchImpl: () => {
+            started += 1;
+            return new Promise(() => {});
+          },
+          fetchTimeoutMs: 0,
+        }),
+      );
+      await Promise.all(hanging.map((job) => job.durable));
+      const deadline = Date.now() + 1_000;
+      while (started < 3 && Date.now() < deadline) await new Promise((resolve) => setImmediate(resolve));
+      assert.equal(started, 3);
+      const marked = Date.now();
+      const queued = schedulePointsNotify({
+        chainId: 84532,
+        txHash: fresh,
+        dataDir: dir,
+        env,
+        fetchImpl: async () => new Response("ok", { status: 200 }),
+        scheduleDelay: () => {},
+      });
+      await queued.durable;
+      assert.ok(Date.now() - marked < 1_000);
+      const text = await readFile(pointsOutboxPath(dir), "utf8");
+      assert.match(text, new RegExp(fresh));
+    } finally {
+      clearPointsRetryTimers();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps ten rescues that stop after they are queued", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "points-stop-"));
+    const secret = runtimeSecret();
+    const hashes = Array.from({ length: 10 }, () => tx());
+    const env = { POINTS_INGEST_SECRET: secret, POINTS_API_URL: "https://points.invalid" };
+    const posts = [];
+    const releases = [];
+    try {
+      const jobs = hashes.map((hash) => {
+        let release;
+        const gate = new Promise((resolve) => {
+          release = resolve;
+        });
+        releases.push(release);
+        return deliverPointsNotify({
+          chainId: 84532,
+          txHash: hash,
+          dataDir: dir,
+          env,
+          fetchImpl: () => gate,
+          fetchTimeoutMs: 0,
+        });
+      });
+      const deadline = Date.now() + 1_000;
+      let text = "";
+      while (Date.now() < deadline) {
+        try {
+          text = await readFile(pointsOutboxPath(dir), "utf8");
+        } catch {
+          text = "";
+        }
+        if (hashes.every((hash) => text.includes(hash))) break;
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+      for (const hash of hashes) assert.match(text, new RegExp(hash));
+      for (const release of releases) release(new Response("down", { status: 503 }));
+      await Promise.all(jobs);
+      clearPointsRetryTimers();
+      const result = await retryPointsOutbox({
+        dataDir: dir,
+        env,
+        fetchImpl: async (_url, init) => {
+          posts.push(JSON.parse(init.body).txHash);
+          return new Response("ok", { status: 200 });
+        },
+        confirmReceipt: async (hash) => ({ status: "success", transactionHash: hash }),
+        scheduleDelay: () => {},
+      });
+      assert.equal(result.sent, 10);
+      assert.equal(new Set(posts).size, 10);
+    } finally {
+      clearPointsRetryTimers();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("credits after a long outage and one receipt timeout", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "points-outage-"));
+    const secret = runtimeSecret();
+    const hash = tx();
+    const delays = [];
+    const queued = [];
+    let mode = "outage";
+    let posts = 0;
+    const env = { POINTS_INGEST_SECRET: secret, POINTS_API_URL: "https://points.invalid" };
+    const scheduleDelay = (fn, ms) => {
+      delays.push(ms);
+      queued.push(fn);
+    };
+    const fetchImpl = async () => {
+      if (mode !== "up") throw new Error("connection refused");
+      posts += 1;
+      return new Response("ok", { status: 200 });
+    };
+    const confirmReceipt = () => {
+      if (mode === "timeout") return new Promise(() => {});
+      return { status: "success", transactionHash: hash };
+    };
+    const base = {
+      chainId: 84532,
+      txHash: hash,
+      dataDir: dir,
+      env,
+      fetchImpl,
+      confirmReceipt,
+      scheduleDelay,
+      jitter: () => 0,
+    };
+    try {
+      await deliverPointsNotify(base);
+      let guard = 0;
+      while (delays.reduce((sum, ms) => sum + ms, 0) < 14 * 60 * 1000 && guard < 80) {
+        guard += 1;
+        const batch = queued.splice(0, queued.length);
+        assert.ok(batch.length > 0);
+        for (const fn of batch) await fn();
+      }
+      assert.ok(delays.reduce((sum, ms) => sum + ms, 0) >= 14 * 60 * 1000);
+      assert.ok(guard > 24);
+      clearPointsRetryTimers();
+      const parked = await readFile(pointsOutboxPath(dir), "utf8");
+      assert.equal(parked.includes('"op":"dropped"'), false);
+      mode = "timeout";
+      await retryPointsOutbox({ ...base, confirmWaitMs: 15 });
+      const mid = await readFile(pointsOutboxPath(dir), "utf8");
+      assert.equal(mid.includes('"op":"dropped"'), false);
+      mode = "up";
+      const result = await retryPointsOutbox(base);
+      assert.equal(result.sent, 1);
+      assert.equal(posts, 1);
+    } finally {
+      clearPointsRetryTimers();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not treat an rpc failure as a missing receipt", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "points-rpc-"));
+    const secret = runtimeSecret();
+    const hash = tx();
+    const logs = [];
+    const original = console.error;
+    console.error = (...args) => {
+      logs.push(args.join(" "));
+    };
+    let mode = "rpc";
+    const env = { POINTS_INGEST_SECRET: secret, POINTS_API_URL: "https://points.invalid" };
+    const confirmReceipt = () => {
+      if (mode === "rpc") throw new Error("connection refused");
+      if (mode === "timeout") return new Promise(() => {});
+      return { status: "success", transactionHash: hash };
+    };
+    const fetchImpl = async () => new Response("ok", { status: 200 });
+    try {
+      await deliverPointsNotify({
+        chainId: 84532,
+        txHash: hash,
+        dataDir: dir,
+        env,
+        fetchImpl,
+        confirmReceipt,
+        scheduleDelay: () => {},
+      });
+      for (let i = 0; i < 30; i += 1) {
+        await retryPointsOutbox({
+          dataDir: dir,
+          env,
+          fetchImpl,
+          confirmReceipt,
+          scheduleDelay: () => {},
+        });
+      }
+      const parked = await readFile(pointsOutboxPath(dir), "utf8");
+      assert.equal(parked.includes('"op":"dropped"'), false);
+      assert.equal(parked.includes("receipt_not_found"), false);
+      assert.equal(logs.some((line) => line.includes("not_mined")), false);
+      mode = "timeout";
+      await retryPointsOutbox({
+        dataDir: dir,
+        env,
+        fetchImpl,
+        confirmReceipt,
+        confirmWaitMs: 15,
+        scheduleDelay: () => {},
+      });
+      const mid = await readFile(pointsOutboxPath(dir), "utf8");
+      assert.equal(mid.includes('"op":"dropped"'), false);
+      mode = "up";
+      const result = await retryPointsOutbox({
+        dataDir: dir,
+        env,
+        fetchImpl,
+        confirmReceipt,
+        scheduleDelay: () => {},
+      });
+      assert.equal(result.sent, 1);
+    } finally {
+      console.error = original;
+      clearPointsRetryTimers();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps a config 400 and a 403 pending", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "points-config-"));
+    const secret = runtimeSecret();
+    const env = { POINTS_INGEST_SECRET: secret, POINTS_API_URL: "https://points.invalid" };
+    const logs = [];
+    const original = console.error;
+    console.error = (...args) => {
+      logs.push(args.join(" "));
+    };
+    try {
+      const samples = [
+        { status: 400, body: JSON.stringify({ ok: false, error: "token_not_allowed" }) },
+        { status: 403, body: "no" },
+      ];
+      for (const sample of samples) {
+        const hash = tx();
+        let open = true;
+        const fetchImpl = async () => new Response(open ? sample.body : "ok", { status: open ? sample.status : 200 });
+        await deliverPointsNotify({
+          chainId: 84532,
+          txHash: hash,
+          dataDir: dir,
+          env,
+          fetchImpl,
+          scheduleDelay: () => {},
+        });
+        for (let i = 0; i < 30; i += 1) {
+          await retryPointsOutbox({ dataDir: dir, env, fetchImpl, scheduleDelay: () => {} });
+        }
+        const parked = await readFile(pointsOutboxPath(dir), "utf8");
+        const rows = parked
+          .split("\n")
+          .filter((line) => line.includes(hash))
+          .map((line) => JSON.parse(line));
+        assert.equal(rows.some((row) => row.op === "dropped"), false);
+        assert.ok(logs.some((line) => line.includes("points_notify alert") && line.includes(hash)));
+        open = false;
+        const result = await retryPointsOutbox({ dataDir: dir, env, fetchImpl, scheduleDelay: () => {} });
+        assert.equal(result.sent, 1);
+      }
+    } finally {
+      console.error = original;
+      clearPointsRetryTimers();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("drops an explicit rejection and keeps the record", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "points-reject-"));
+    const secret = runtimeSecret();
+    const hash = tx();
+    const logs = [];
+    const original = console.error;
+    console.error = (...args) => {
+      logs.push(args.join(" "));
+    };
+    const env = { POINTS_INGEST_SECRET: secret, POINTS_API_URL: "https://points.invalid" };
+    try {
+      const result = await deliverPointsNotify({
+        chainId: 84532,
+        txHash: hash,
+        dataDir: dir,
+        env,
+        fetchImpl: async () => new Response(JSON.stringify({ ok: false, error: "status_failed" }), { status: 400 }),
+        scheduleDelay: () => {},
+      });
+      assert.equal(result.sent, 0);
+      const text = await readFile(pointsOutboxPath(dir), "utf8");
+      assert.match(text, /"op":"dropped"/);
+      assert.match(text, /status_failed/);
+      assert.ok(logs.some((line) => line.includes("points_notify dropped") && line.includes(hash)));
+      const again = await retryPointsOutbox({
+        dataDir: dir,
+        env,
+        fetchImpl: async () => new Response("ok", { status: 200 }),
+        scheduleDelay: () => {},
+      });
+      assert.equal(again.sent, 0);
+    } finally {
+      console.error = original;
+      clearPointsRetryTimers();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("logs retries with the status and attempt number", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "points-retry-log-"));
+    const secret = runtimeSecret();
+    const logs = [];
+    const original = console.error;
+    console.error = (...args) => {
+      logs.push(args.join(" "));
+    };
+    const env = { POINTS_INGEST_SECRET: secret, POINTS_API_URL: "https://points.invalid" };
+    try {
+      for (const status of [401, 429, 503]) {
+        const hash = tx();
+        await deliverPointsNotify({
+          chainId: 84532,
+          txHash: hash,
+          dataDir: dir,
+          env,
+          fetchImpl: async () => new Response("later", { status }),
+          scheduleDelay: () => {},
+        });
+        assert.ok(logs.some((line) => line.startsWith(`points_notify retry ${status} 1 `) && line.includes(hash)));
+      }
+    } finally {
+      console.error = original;
+      clearPointsRetryTimers();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("starts the next item while one receipt is still waiting", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "points-slot-"));
+    const secret = runtimeSecret();
+    const hashes = [tx(), tx(), tx(), tx(), tx()];
+    const slow = hashes[0];
+    const env = { POINTS_INGEST_SECRET: secret, POINTS_API_URL: "https://points.invalid" };
+    const file = pointsOutboxPath(dir);
+    await mkdirPending(dir, file, hashes);
+    const seen = new Map();
+    const waitMs = 250;
+    const started = Date.now();
+    try {
+      const result = await retryPointsOutbox({
+        dataDir: dir,
+        env,
+        fetchImpl: async () => new Response("ok", { status: 200 }),
+        confirmReceipt: (hash) => {
+          seen.set(hash, Date.now() - started);
+          if (hash === slow) return new Promise(() => {});
+          return { status: "success", transactionHash: hash };
+        },
+        confirmWaitMs: waitMs,
+        scheduleDelay: () => {},
+      });
+      assert.equal(result.sent, 4);
+      assert.ok(seen.get(hashes[4]) < waitMs);
     } finally {
       clearPointsRetryTimers();
       await rm(dir, { recursive: true, force: true });

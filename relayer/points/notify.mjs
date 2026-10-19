@@ -9,9 +9,25 @@ const FETCH_TIMEOUT_MS = 10_000;
 const RETRY_BASE_MS = 1_000;
 const RETRY_MAX_DELAY_MS = 60_000;
 const MAX_FAST_ATTEMPTS = 6;
+/** Give up after this many worker receipt_not_found results. Outages do not count. */
 const NOT_FOUND_ATTEMPTS = 8;
+/** Give up after this many real not-mined receipt waits. Outages do not count. */
 const MAX_MINE_ATTEMPTS = 24;
 const MAX_PARALLEL = 4;
+const PERMANENT_REJECTIONS = new Set([
+  "status_failed",
+  "wrong_chain",
+  "wrong_contract",
+  "missing_rescued_log",
+  "invalid_body",
+  "invalid_address",
+  "invalid_receipt",
+  "wallet_session_disabled",
+  "registry_deferred",
+  "duplicate",
+  "excluded_action",
+  "append-only",
+]);
 const CONFIRM_WAIT_MS = 20_000;
 const COMPACT_AFTER_LINES = 6;
 const DEFAULT_MIN_CONFIRMATIONS = 2;
@@ -123,11 +139,11 @@ export function schedulePointsNotify(opts) {
     noteUrl(env);
     return { enabled: false };
   }
-  const settled = launchDelivery({ ...opts, env });
-  void settled.catch(() => {
+  const launched = launchDelivery({ ...opts, env });
+  void launched.settled.catch(() => {
     console.error("points_notify", "error");
   });
-  return { enabled: true, scheduled: true };
+  return { enabled: true, scheduled: true, durable: launched.durable };
 }
 
 /** Startup and explicit retry. No-op when the hook is disabled. */
@@ -150,7 +166,7 @@ export function deliverPointsNotify(opts) {
     noteUrl(env);
     return Promise.resolve({ enabled: false });
   }
-  return launchDelivery({ ...opts, env });
+  return launchDelivery({ ...opts, env }).settled;
 }
 
 export function retryPointsOutbox(opts = {}) {
@@ -188,6 +204,19 @@ export function notePointsReplacement(opts) {
   });
 }
 
+/**
+ * Product hook for a receipt wait that sees a replacement.
+ * A cancel drops the hash. Any other replacement stores old hash to new hash.
+ */
+export function notePointsReceiptReplacement(opts, response) {
+  const reason = response && response.reason;
+  if (reason === "cancelled") return notePointsCancel(opts);
+  const tx = response && response.transaction;
+  const receipt = response && response.transactionReceipt;
+  const replacedBy = tx && tx.hash ? tx.hash : receipt && receipt.transactionHash;
+  return notePointsReplacement({ ...opts, replacedBy });
+}
+
 /** Drops a pending hash. A later restart posts nothing for it. */
 export function notePointsCancel(opts) {
   const item = normalizeItem(opts.chainId, opts.txHash);
@@ -201,23 +230,25 @@ export function notePointsCancel(opts) {
 
 function launchDelivery(opts) {
   let jobs = [];
-  const prepared = enqueueWork(async () => {
+  const durable = enqueueWork(async () => {
     jobs = await startDelivery(opts);
   });
-  const settled = prepared.then(() => Promise.all(jobs)).then((counts) => ({
+  const settled = durable.then(() => Promise.all(jobs)).then((counts) => ({
     enabled: true,
     sent: counts.reduce((sum, n) => sum + n, 0),
   }));
   track(settled);
-  return settled;
+  return { durable, settled };
 }
 
 function launchRetry(opts) {
   let job = Promise.resolve({ enabled: true, sent: 0 });
   const prepared = enqueueWork(async () => {
     const file = pointsOutboxPath(opts.dataDir);
-    await sweepTemps(file);
-    const items = await enqueueIo(async () => [...(await readState(file)).values()]);
+    const items = await enqueueIo(async () => {
+      await sweepTemps(file);
+      return [...(await readState(file)).values()];
+    });
     job = runPool(file, opts, items);
   });
   const settled = prepared.then(() => job);
@@ -229,8 +260,8 @@ async function startDelivery(opts) {
   const item = normalizeItem(opts.chainId, opts.txHash);
   const file = pointsOutboxPath(opts.dataDir);
   await mkdir(dirname(file), { recursive: true, mode: 0o700 });
-  await sweepTemps(file);
   const items = await enqueueIo(async () => {
+    await sweepTemps(file);
     const pending = await readState(file);
     if (!pending.has(item.txHash)) {
       await writeRecord(file, {
@@ -239,6 +270,7 @@ async function startDelivery(opts) {
         txHash: item.txHash,
         at: stamp(opts),
         attempts: 0,
+        mineAttempts: 0,
         notFound: 0,
       });
     }
@@ -247,18 +279,66 @@ async function startDelivery(opts) {
     for (const row of state.values()) {
       if (row.txHash === item.txHash || !scheduledRetries.has(row.txHash)) picked.push(row);
     }
-    return picked;
+    const fresh = picked.find((row) => row.txHash === item.txHash);
+    const rest = picked.filter((row) => row !== fresh);
+    return fresh ? [fresh, ...rest] : picked;
   });
-  return items.map((row) => claim(file, opts, row));
+  return launchCapped(file, opts, items);
+}
+
+function launchCapped(file, opts, items) {
+  const width = poolWidth(opts);
+  if (items.length === 0) return [];
+  let cursor = 0;
+  let active = 0;
+  const boxes = items.map(() => {
+    let resolve;
+    let reject;
+    const promise = new Promise((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    return { promise, resolve, reject };
+  });
+  const pump = () => {
+    while (cursor < items.length && active < width) {
+      const index = cursor;
+      cursor += 1;
+      active += 1;
+      Promise.resolve()
+        .then(() => claim(file, opts, items[index]))
+        .then(
+          (count) => {
+            active -= 1;
+            boxes[index].resolve(count);
+            pump();
+          },
+          (err) => {
+            active -= 1;
+            boxes[index].reject(err);
+            pump();
+          },
+        );
+    }
+  };
+  pump();
+  return boxes.map((box) => box.promise);
 }
 
 async function runPool(file, opts, items) {
   const width = poolWidth(opts);
+  if (items.length === 0) return { enabled: true, sent: 0 };
   let sent = 0;
-  for (let i = 0; i < items.length; i += width) {
-    const counts = await Promise.all(items.slice(i, i + width).map((item) => claim(file, opts, item)));
-    sent += counts.reduce((sum, n) => sum + n, 0);
-  }
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(width, items.length) }, async () => {
+    while (cursor < items.length) {
+      const index = cursor;
+      cursor += 1;
+      const count = await claim(file, opts, items[index]);
+      sent += count;
+    }
+  });
+  await Promise.all(workers);
   return { enabled: true, sent };
 }
 
@@ -285,7 +365,11 @@ async function sendOne(opts, txHash) {
 
 async function settleItem(file, opts, item) {
   const outcome = await confirmIfNeeded(opts, item);
-  return enqueueIo(() => applyOutcome(file, opts, outcome));
+  if (outcome.gate !== "ready") return enqueueIo(() => applyOutcome(file, opts, outcome));
+  const ready = await enqueueIo(() => takeReady(file, opts, outcome));
+  if (!ready) return 0;
+  const result = await postIngest(opts, ready);
+  return enqueueIo(() => recordPost(file, opts, ready, result));
 }
 
 async function confirmIfNeeded(opts, item) {
@@ -294,8 +378,11 @@ async function confirmIfNeeded(opts, item) {
   let receipt;
   try {
     receipt = await withTimeout(Promise.resolve().then(() => opts.confirmReceipt(item.txHash)), waitMs);
-  } catch {
-    return { gate: "pending", item, error: "receipt_pending" };
+  } catch (err) {
+    if (err && err.message === "confirm_timeout") {
+      return { gate: "pending", item, error: "receipt_pending", kind: "mine" };
+    }
+    return { gate: "pending", item, error: "rpc_error", kind: "outage", alert: true };
   }
   if (!receiptAccepted(receipt)) return { gate: "rejected", item };
   const next = itemForReceipt(item, receipt);
@@ -338,26 +425,35 @@ function itemForReceipt(item, receipt) {
   const hash = String(raw).trim().toLowerCase();
   if (hash === item.txHash) return item;
   if (!TX_RE.test(hash)) return null;
-  return { chainId: item.chainId, txHash: hash, attempts: 0, notFound: 0 };
+  return {
+    chainId: item.chainId,
+    txHash: hash,
+    attempts: 0,
+    mineAttempts: 0,
+    notFound: 0,
+  };
 }
 
 async function applyOutcome(file, opts, outcome) {
   const item = outcome.item;
-  if (outcome.gate === "pending") {
-    const error = outcome.error || "receipt_pending";
-    const attempts = await noteAttempt(file, opts, item, error);
-    if (error === "receipt_pending" && attempts >= MAX_MINE_ATTEMPTS) {
-      await writeRecord(file, { op: "dropped", txHash: item.txHash, at: stamp(opts), error: "not_mined" });
-      console.error("points_notify", "not_mined", item.txHash);
-      return 0;
-    }
-    scheduleBackoff(opts, item.txHash, attempts);
-    return 0;
-  }
   if (outcome.gate === "rejected") {
-    await writeRecord(file, { op: "dropped", txHash: item.txHash, at: stamp(opts), error: "status_failed" });
+    await persistDrop(file, opts, item.txHash, "status_failed");
     return 0;
   }
+  const error = outcome.error || "receipt_pending";
+  const kind = outcome.kind || (error === "receipt_pending" ? "mine" : "outage");
+  if (outcome.alert) console.error("points_notify", "alert", error, item.txHash);
+  const counts = await noteAttempt(file, opts, item, error, kind);
+  if (kind === "mine" && counts.mineAttempts >= MAX_MINE_ATTEMPTS) {
+    await persistDrop(file, opts, item.txHash, "not_mined");
+    return 0;
+  }
+  scheduleBackoff(opts, item.txHash, counts.attempts);
+  return 0;
+}
+
+async function takeReady(file, opts, outcome) {
+  const item = outcome.item;
   if (outcome.replaces) {
     await writeRecord(file, { op: "dropped", txHash: outcome.replaces, at: stamp(opts), error: "replaced" });
     const pending = await readState(file);
@@ -367,36 +463,41 @@ async function applyOutcome(file, opts, outcome) {
         chainId: item.chainId,
         txHash: item.txHash,
         at: stamp(opts),
-        attempts: 0,
-        notFound: 0,
+        attempts: item.attempts || 0,
+        mineAttempts: item.mineAttempts || 0,
+        notFound: item.notFound || 0,
       });
     }
   }
-  const result = await postIngest(opts, item);
+  const pending = await readState(file);
+  if (!pending.has(item.txHash)) return null;
+  return item;
+}
+
+async function recordPost(file, opts, item, result) {
   if (result.ok) {
     await writeRecord(file, { op: "delivered", txHash: item.txHash, at: stamp(opts) });
     return 1;
   }
-  if (result.alert) {
-    console.error("points_notify", "alert", result.error, item.txHash);
-    const attempts = await noteAttempt(file, opts, item, result.error);
-    scheduleBackoff(opts, item.txHash, attempts);
-    return 0;
-  }
   if (result.permanent) {
-    await writeRecord(file, { op: "dropped", txHash: item.txHash, at: stamp(opts), error: result.error });
+    await persistDrop(file, opts, item.txHash, result.error);
     return 0;
   }
-  const attempts = await noteAttempt(file, opts, item, result.error);
-  const pending = await readState(file);
-  const notFound = pending.get(item.txHash)?.notFound || 0;
-  if (result.error === "http_404" && notFound >= NOT_FOUND_ATTEMPTS) {
-    await writeRecord(file, { op: "dropped", txHash: item.txHash, at: stamp(opts), error: "http_404" });
-    console.error("points_notify", "not_found", item.txHash);
+  if (result.alert) console.error("points_notify", "alert", result.error, item.txHash);
+  const counts = await noteAttempt(file, opts, item, result.error, result.kind || "outage");
+  if (result.retryLog) console.error("points_notify", "retry", result.status, counts.attempts, item.txHash);
+  if (result.kind === "missing" && counts.notFound >= NOT_FOUND_ATTEMPTS) {
+    await persistDrop(file, opts, item.txHash, "http_404");
     return 0;
   }
-  scheduleBackoff(opts, item.txHash, attempts);
+  scheduleBackoff(opts, item.txHash, counts.attempts);
   return 0;
+}
+
+async function persistDrop(file, opts, txHash, error) {
+  const event = error === "not_mined" ? "not_mined" : error === "http_404" ? "not_found" : "dropped";
+  console.error("points_notify", event, error === "http_404" || error === "not_mined" ? txHash : error, txHash);
+  await writeRecord(file, { op: "dropped", txHash, at: stamp(opts), error });
 }
 
 function receiptAccepted(receipt) {
@@ -405,11 +506,22 @@ function receiptAccepted(receipt) {
   return status === "success" || status === "0x1" || status === 1;
 }
 
-async function noteAttempt(file, opts, item, error) {
+async function noteAttempt(file, opts, item, error, kind) {
   const pending = await readState(file);
-  const attempts = (pending.get(item.txHash)?.attempts || 0) + 1;
-  await writeRecord(file, { op: "attempt", txHash: item.txHash, at: stamp(opts), error, attempts });
-  return attempts;
+  const current = pending.get(item.txHash);
+  const attempts = (current?.attempts || 0) + 1;
+  const mineAttempts = (current?.mineAttempts || 0) + (kind === "mine" ? 1 : 0);
+  const notFound = (current?.notFound || 0) + (kind === "missing" ? 1 : 0);
+  await writeRecord(file, {
+    op: "attempt",
+    txHash: item.txHash,
+    at: stamp(opts),
+    error,
+    attempts,
+    mineAttempts,
+    notFound,
+  });
+  return { attempts, mineAttempts, notFound };
 }
 
 function scheduleBackoff(opts, txHash, attempts) {
@@ -472,32 +584,64 @@ async function postIngest(opts, item) {
         "x-points-signature": signature,
       },
       body,
-      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+      signal: fetchTimeoutMs(opts) > 0 ? AbortSignal.timeout(fetchTimeoutMs(opts)) : undefined,
     });
   } catch {
     return { ok: false, error: "network", alert: true };
   }
   if (response.status >= 200 && response.status < 300) return { ok: true };
+  const code = await readErrorCode(response);
   if (response.status === 404) {
-    let text = "";
-    try {
-      text = await response.text();
-    } catch {
-      text = "";
-    }
-    if (text.includes("receipt_not_found")) return { ok: false, error: "http_404" };
-    return { ok: false, error: "unreachable", alert: true };
+    if (code === "receipt_not_found") return { ok: false, error: "http_404", kind: "missing" };
+    return { ok: false, error: "unreachable", alert: true, kind: "outage" };
   }
-  if (
+  if (PERMANENT_REJECTIONS.has(code)) return { ok: false, error: code, permanent: true };
+  const outage =
+    response.status === 400 ||
     response.status === 401 ||
+    response.status === 403 ||
     response.status === 408 ||
     response.status === 425 ||
     response.status === 429 ||
-    response.status >= 500
-  ) {
-    return { ok: false, error: `http_${response.status}` };
+    response.status >= 500;
+  if (outage) {
+    const retryLog = response.status === 401 || response.status === 429 || response.status >= 500;
+    return {
+      ok: false,
+      error: `http_${response.status}`,
+      kind: "outage",
+      alert: response.status === 400 || response.status === 403,
+      retryLog,
+      status: response.status,
+    };
   }
-  return { ok: false, error: `http_${response.status}`, permanent: true };
+  return { ok: false, error: `http_${response.status}`, alert: true, kind: "outage" };
+}
+
+async function readErrorCode(response) {
+  let text = "";
+  try {
+    text = await response.text();
+  } catch {
+    text = "";
+  }
+  if (text.includes("receipt_not_found")) return "receipt_not_found";
+  try {
+    const parsed = JSON.parse(text);
+    if (parsed && typeof parsed.error === "string" && /^[a-z0-9_-]{1,64}$/.test(parsed.error)) return parsed.error;
+  } catch {
+    return "";
+  }
+  return "";
+}
+
+function fetchTimeoutMs(opts) {
+  if (opts.fetchTimeoutMs === undefined || opts.fetchTimeoutMs === null || opts.fetchTimeoutMs === "") {
+    return FETCH_TIMEOUT_MS;
+  }
+  const value = Number(opts.fetchTimeoutMs);
+  if (!Number.isFinite(value) || value < 0) return FETCH_TIMEOUT_MS;
+  return value;
 }
 
 function normalizeItem(chainId, txHash) {
@@ -525,6 +669,10 @@ function stampMs(opts) {
 }
 
 async function writeRecord(file, record) {
+  if (record.op === "enqueue" || record.op === "dropped" || record.op === "delivered") {
+    await appendDurable(file, record);
+    return;
+  }
   await appendFile(file, `${JSON.stringify(record)}\n`, { mode: 0o600 });
   await maybeCompact(file);
 }
@@ -550,19 +698,28 @@ async function maybeCompact(file) {
   }
   const lines = text.split("\n").filter((line) => line.trim());
   if (lines.length < COMPACT_AFTER_LINES) return;
-  const pending = await readState(file);
-  const next = [...pending.values()]
-    .map((item) =>
-      JSON.stringify({
-        op: "enqueue",
-        chainId: item.chainId,
-        txHash: item.txHash,
-        at: new Date().toISOString(),
-        attempts: item.attempts,
-        notFound: item.notFound || 0,
-      }),
-    )
-    .join("\n");
+  const folded = foldText(text);
+  const kept = [];
+  for (const [from, to] of folded.links) {
+    if (!folded.pending.has(folded.follow(from))) {
+      kept.push({ op: "replace", txHash: from, replacedBy: to, at: new Date().toISOString() });
+    }
+  }
+  for (const hash of folded.cancelled) {
+    if (!folded.pending.has(hash)) kept.push({ op: "cancel", txHash: hash, at: new Date().toISOString() });
+  }
+  for (const item of folded.pending.values()) {
+    kept.push({
+      op: "enqueue",
+      chainId: item.chainId,
+      txHash: item.txHash,
+      at: new Date().toISOString(),
+      attempts: item.attempts,
+      mineAttempts: item.mineAttempts || 0,
+      notFound: item.notFound || 0,
+    });
+  }
+  const next = kept.map((row) => JSON.stringify(row)).join("\n");
   const tmp = `${file}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`;
   const fh = await open(tmp, "w", 0o600);
   try {
@@ -604,7 +761,22 @@ async function readState(file) {
     if (err && err.code === "ENOENT") return new Map();
     throw err;
   }
+  return foldText(text).pending;
+}
+
+function foldText(text) {
   const pending = new Map();
+  const links = new Map();
+  const cancelled = new Set();
+  const follow = (hash) => {
+    const seen = new Set();
+    let current = hash;
+    while (links.has(current) && !seen.has(current)) {
+      seen.add(current);
+      current = links.get(current);
+    }
+    return current;
+  };
   for (const line of text.split("\n")) {
     if (!line.trim()) continue;
     let row;
@@ -615,38 +787,44 @@ async function readState(file) {
     }
     if (!row || typeof row.txHash !== "string") continue;
     if (row.op === "enqueue") {
-      if (!pending.has(row.txHash)) {
-        pending.set(row.txHash, {
+      const dest = follow(row.txHash);
+      if (cancelled.has(row.txHash) || cancelled.has(dest)) continue;
+      if (!pending.has(dest)) {
+        pending.set(dest, {
           chainId: Number(row.chainId),
-          txHash: row.txHash,
+          txHash: dest,
           attempts: Number(row.attempts) || 0,
+          mineAttempts: Number(row.mineAttempts) || 0,
           notFound: Number(row.notFound) || 0,
         });
       }
     } else if (row.op === "attempt") {
-      const current = pending.get(row.txHash);
+      const current = pending.get(row.txHash) || pending.get(follow(row.txHash));
       if (current) {
         current.attempts += 1;
+        if (row.error === "receipt_pending") current.mineAttempts += 1;
         if (row.error === "http_404") current.notFound += 1;
       }
     } else if (row.op === "replace") {
       const next = String(row.replacedBy || "").trim().toLowerCase();
-      const current = pending.get(row.txHash);
-      if (!current || !TX_RE.test(next)) continue;
-      pending.delete(row.txHash);
-      if (!pending.has(next)) {
-        pending.set(next, {
-          chainId: current.chainId,
-          txHash: next,
-          attempts: current.attempts,
-          notFound: current.notFound || 0,
-        });
+      if (!TX_RE.test(next) || next === row.txHash) continue;
+      links.set(row.txHash, next);
+      for (const [key, value] of [...pending.entries()]) {
+        const moved = follow(key);
+        if (moved === key || cancelled.has(moved)) continue;
+        pending.delete(key);
+        if (!pending.has(moved)) pending.set(moved, { ...value, txHash: moved });
       }
     } else if (row.op === "cancel") {
+      cancelled.add(row.txHash);
+      const dest = follow(row.txHash);
+      cancelled.add(dest);
       pending.delete(row.txHash);
+      pending.delete(dest);
     } else if (row.op === "delivered" || row.op === "dropped") {
       pending.delete(row.txHash);
+      pending.delete(follow(row.txHash));
     }
   }
-  return pending;
+  return { pending, links, cancelled, follow };
 }
