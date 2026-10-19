@@ -418,7 +418,8 @@ describe("banned-word scanner", () => {
   });
 
   it("passes a checkout path that contains rewards", () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), "rewards-checkout-"));
+    // os.tmpdir() is /tmp when TMPDIR is unset, and a bare /tmp path is flagged.
+    const root = fs.mkdtempSync(path.join(process.cwd(), "rewards-checkout-"));
     try {
       const file = path.join(root, "wallet", "src", "App.tsx");
       fs.mkdirSync(path.dirname(file), { recursive: true });
