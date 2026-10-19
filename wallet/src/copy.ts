@@ -99,7 +99,7 @@ export const CONNECT_LABEL = "Connect wallet";
 export const CONNECTING_LABEL = "Connecting…";
 export const PICK_WALLET_TITLE = "Choose a wallet";
 export const PICK_WALLET_HELP =
-  "Pick the wallet you want to use. Every wallet installed in this browser is listed.";
+  "Pick the wallet you want to use. Every wallet installed in this browser is shown.";
 export const BROWSER_WALLET_LABEL = "Browser wallet";
 export const NO_WALLET_FOUND =
   "No browser wallet found. Install MetaMask, Phantom, or another wallet, then refresh.";

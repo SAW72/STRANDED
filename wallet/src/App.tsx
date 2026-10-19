@@ -387,7 +387,7 @@ function RescueApp() {
   }, [reviewVisible]);
 
   const reviewDecimals = quote?.tokenDecimals ?? displayDecimals;
-  const reviewSymbol = useFixture ? DEMO_FALLBACK_TICKER : quote?.tokenSymbol;
+  const reviewSymbol = quote?.tokenSymbol;
 
   const orderNonceHint = quote?.nonce;
   const { data: nonceUsed, refetch: refetchNonceUsed } = useReadContract({

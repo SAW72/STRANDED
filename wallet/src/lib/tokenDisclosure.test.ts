@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { bannedWordsIn } from "./bannedWords";
+import { bannedWordsIn, hitsInAppCode } from "./bannedWords";
 import { ARB_SEPOLIA_CHAIN_ID, BASE_SEPOLIA_CHAIN_ID } from "./chains";
 import appSource from "../App.tsx?raw";
 import pointsSource from "../Points.tsx?raw";
@@ -76,7 +76,7 @@ function isUserCopy(text: string): boolean {
   const trimmed = text.trim();
   if (!trimmed) return false;
   if (trimmed.includes(" ")) return true;
-  return /^[A-Za-z][A-Za-z'’?!]{0,40}$/.test(trimmed);
+  return /^[A-Za-z][A-Za-z'’?!:]{0,40}$/.test(trimmed);
 }
 
 describe("token disclosure", () => {
@@ -138,6 +138,24 @@ describe("banned words in user-visible copy", () => {
     expect(bannedWordsIn(["re", "wards"].join(""))).toEqual(["reward"]);
     expect(bannedWordsIn(["air", "drop", "ped"].join(""))).toEqual(["airdrop"]);
     expect(bannedWordsIn(["earn", "ed"].join(""))).toEqual(["earn"]);
+    expect(bannedWordsIn(["earn", "ings"].join(""))).toEqual(["earn"]);
+    expect(bannedWordsIn(["in", "vestment"].join(""))).toEqual(["invest"]);
+    expect(bannedWordsIn(["in", "vestors"].join(""))).toEqual(["invest"]);
+    expect(bannedWordsIn(["trad", "er"].join(""))).toEqual(["trade"]);
+    expect(bannedWordsIn(["trad", "able"].join(""))).toEqual(["trade"]);
+    expect(bannedWordsIn(["valu", "able"].join(""))).toEqual(["value"]);
+    expect(bannedWordsIn(["profit", "able"].join(""))).toEqual(["profit"]);
+    expect(bannedWordsIn(["list", "ed"].join(""))).toEqual(["listing"]);
+    expect(bannedWordsIn("pre-sale")).toEqual(["presale"]);
+    expect(bannedWordsIn("pre sale")).toEqual(["presale"]);
+    expect(bannedWordsIn("learn yearn earnest unearned valuation tradeoff")).toEqual([]);
+    expect(isUserCopy(["Pri", "ce", ":"].join(""))).toBe(true);
+    expect(isUserCopy(["Re", "wards", "!"].join(""))).toBe(true);
+    expect(isUserCopy(["AP", "Y", ":"].join(""))).toBe(true);
+    expect(bannedWordsIn(["Pri", "ce", ":"].join(""))).toEqual(["price"]);
+    expect(bannedWordsIn(["Re", "wards", "!"].join(""))).toEqual(["reward"]);
+    expect(bannedWordsIn(["AP", "Y", ":"].join(""))).toEqual(["apy"]);
+    expect(bannedWordsIn(`(${["ea", "rn"].join("")})`)).toEqual(["earn"]);
   });
 
   it("finds none of the banned words in the disclosure, banner, copy module, or UI text", () => {
@@ -145,6 +163,8 @@ describe("banned words in user-visible copy", () => {
       bannedWordsIn(text).map((word) => `${word}: ${text}`),
     );
     expect(hits).toEqual([]);
+    const literalHits = COPY_SOURCES.flatMap((source, index) => hitsInAppCode(source, `copy-source-${index}`));
+    expect(literalHits, literalHits.map((hit) => `${hit.file}: "${hit.excerpt}"`).join("\n")).toEqual([]);
     const jsx = COPY_SOURCES.flatMap((source) => jsxText(source));
     expect(jsx.some((line) => line.includes("What happens to your tokens"))).toBe(true);
     for (const line of jsx) expect(line).not.toMatch(/\bearn/i);

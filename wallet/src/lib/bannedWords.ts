@@ -47,8 +47,30 @@ for (const stem of BANNED_STEMS) {
   }
 }
 
+// earn* is the stem plus these suffixes only. earnest, learn, yearn, and unearned stay clean.
+addForm("earn", "earnings");
+addForm("invest", "investment");
+addForm("invest", "investments");
+addForm("invest", "investor");
+addForm("invest", "investors");
+addForm("trade", "trader");
+addForm("trade", "traders");
+addForm("trade", "tradable");
+addForm("value", "valuable");
+addForm("profit", "profitable");
+addForm("listing", "listed");
+
 const FORMS_LONGEST_FIRST = [...FORM_TO_STEM.keys()].sort((a, b) => b.length - a.length);
-const BANNED_PATTERN = new RegExp(`\\b(?:${FORMS_LONGEST_FIRST.map(escapeRegExp).join("|")})\\b`, "gi");
+// Hyphen joins identifier parts, so a class such as review-value is one token.
+const BANNED_PATTERN = new RegExp(
+  `(?<![A-Za-z0-9-])(?:${FORMS_LONGEST_FIRST.map(escapeRegExp).join("|")})(?![A-Za-z0-9-])`,
+  "gi",
+);
+
+/** True when the whole literal is a banned form, with no punctuation stripped. */
+export function isWholeBannedForm(text: string): boolean {
+  return FORM_TO_STEM.has(text.trim().toLowerCase());
+}
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -60,19 +82,27 @@ export function formatBannedHits(hits: BannedHit[]): string {
     .join("\n");
 }
 
-function exemptCopy(text: string): string {
-  return text.replace(/\bno cash value\b/gi, " ").replace(/\bno value\b/gi, " ");
+/** Same-length rewrite so match indexes still point at the original text. */
+function prepareCopy(text: string): string {
+  return text
+    .replace(/\bno cash value\b/gi, (match) => " ".repeat(match.length))
+    .replace(/\bno value\b/gi, (match) => " ".repeat(match.length))
+    .replace(/\bpre-sales\b/gi, "presales ")
+    .replace(/\bpre sales\b/gi, "presales ")
+    .replace(/\bpre-sale\b/gi, "presale  ")
+    .replace(/\bpre sale\b/gi, "presale ")
+    .replace(/[^A-Za-z0-9\s'-]/g, " ");
 }
 
 export function bannedHitsInText(text: string, file: string): BannedHit[] {
-  const stripped = exemptCopy(text);
+  const prepared = prepareCopy(text);
   const hits: BannedHit[] = [];
-  for (const match of stripped.matchAll(BANNED_PATTERN)) {
+  for (const match of prepared.matchAll(BANNED_PATTERN)) {
     const word = match[0];
     const stem = FORM_TO_STEM.get(word.toLowerCase()) ?? word.toLowerCase();
     const index = match.index ?? 0;
-    const excerpt = stripped
-      .slice(Math.max(0, index - 48), Math.min(stripped.length, index + word.length + 48))
+    const excerpt = text
+      .slice(Math.max(0, index - 48), Math.min(text.length, index + word.length + 48))
       .replace(/\s+/g, " ")
       .trim();
     hits.push({ stem, match: word, excerpt, file });
@@ -149,8 +179,9 @@ export function extractStringLiterals(code: string): CodeLiteral[] {
 }
 
 /**
- * Scan user-facing literals in one chunk.
- * A bare "value" next to the permit `uint256` field is the EIP-712 type name, not copy.
+ * Scan every string literal, including one-word labels and JSX {"..."} expressions.
+ * Punctuation is split off before matching. A bare "value" next to the permit
+ * `uint256` field is the EIP-712 type name, not copy.
  */
 export function hitsInAppCode(code: string, file: string): BannedHit[] {
   const folded = foldConcatenatedStrings(code);
@@ -158,14 +189,22 @@ export function hitsInAppCode(code: string, file: string): BannedHit[] {
   for (const literal of extractStringLiterals(folded)) {
     const trimmed = literal.text.trim();
     if (!trimmed) continue;
-    const phrase = /\s/.test(trimmed);
-    const exact = FORM_TO_STEM.has(trimmed.toLowerCase());
-    if (!phrase && !exact) continue;
-    if (exact && trimmed.toLowerCase() === "value") {
+    if (trimmed.toLowerCase() === "value") {
       const around = folded.slice(Math.max(0, literal.index - 48), Math.min(folded.length, literal.index + 48));
       if (/uint256/.test(around)) continue;
     }
     hits.push(...bannedHitsInText(trimmed, file));
+  }
+  return hits;
+}
+
+/** CSS `content:` values. `justify-content` is not the content property. */
+export function cssContentHits(css: string, file: string): BannedHit[] {
+  const hits: BannedHit[] = [];
+  const pattern = /(?<![\w-])content\s*:\s*(?:"((?:\\.|[^"\\])*)"|'((?:\\.|[^'\\])*)')/g;
+  for (const match of css.matchAll(pattern)) {
+    const text = (match[1] ?? match[2] ?? "").replace(/\\(["'])/g, "$1");
+    if (text) hits.push(...bannedHitsInText(text, file));
   }
   return hits;
 }

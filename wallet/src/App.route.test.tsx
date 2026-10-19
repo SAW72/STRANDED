@@ -210,6 +210,39 @@ describe("App routes", () => {
     await gmock.unmount();
   });
 
+  it("shows SDEMO on the token row when a token is configured", async () => {
+    vi.stubEnv("VITE_TOKEN_ADDRESS_ARB_SEPOLIA", WALLET);
+    accountState.address = WALLET;
+    accountState.isConnected = true;
+    accountState.chainId = ARB_SEPOLIA_CHAIN_ID;
+
+    function tokenRow(container: HTMLElement): string {
+      const dt = [...container.querySelectorAll("dt")].find((node) => node.textContent === "Token");
+      const dd = dt?.nextElementSibling;
+      if (!(dd instanceof HTMLElement)) throw new Error("missing token row");
+      return dd.textContent ?? "";
+    }
+
+    readState.symbol = "GRTT";
+    const grtt = await renderAt("/", <App />);
+    const grttToken = tokenRow(grtt.container);
+    expect(grttToken).toMatch(/SDEMO/);
+    expect(grttToken).not.toMatch(/\bGRTT\b/);
+    expect(grttToken).not.toBe("not configured");
+    expect(grtt.container.querySelector("[data-testid='sample-banner']")?.textContent).toContain(SAMPLE_BADGE);
+    expect(grtt.container.querySelector("[data-testid='rescue-quote-fields']")?.textContent).toMatch(/SDEMO/);
+    await grtt.unmount();
+
+    readState.symbol = "";
+    const empty = await renderAt("/", <App />);
+    const emptyToken = tokenRow(empty.container);
+    expect(emptyToken).toMatch(/SDEMO/);
+    expect(emptyToken).not.toMatch(/\bToken\b/);
+    expect(emptyToken).not.toBe("not configured");
+    expect(empty.container.querySelector("[data-testid='sample-banner']")?.textContent).toContain(SAMPLE_BADGE);
+    await empty.unmount();
+  });
+
   it("names Base Sepolia in the disclosure when that network is selected", async () => {
     const view = await renderAt("/", <App />);
     const disclosure = () => view.container.querySelector("[data-testid='token-disclosure']")?.textContent ?? "";

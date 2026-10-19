@@ -2,15 +2,26 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 import { publishPointsShell } from "./spaFallback";
 import { pointsShellPlugin } from "./vite.config";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const tempDirs: string[] = [];
+
+afterAll(() => {
+  for (const dir of tempDirs) fs.rmSync(dir, { recursive: true, force: true });
+});
+
+function tempDir(prefix: string): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  tempDirs.push(dir);
+  return dir;
+}
 
 describe("publishPointsShell", () => {
   it("copies the SPA shell to points/index.html", () => {
-    const dist = fs.mkdtempSync(path.join(os.tmpdir(), "stranded-dist-"));
+    const dist = tempDir("stranded-dist-");
     const shell = '<div id="root"></div>\n<script type="module" src="/assets/index.js"></script>\n';
     fs.writeFileSync(path.join(dist, "index.html"), shell);
     publishPointsShell(dist);
@@ -18,14 +29,14 @@ describe("publishPointsShell", () => {
   });
 
   it("throws when the SPA shell is missing", () => {
-    const dist = fs.mkdtempSync(path.join(os.tmpdir(), "stranded-dist-"));
+    const dist = tempDir("stranded-dist-");
     expect(() => publishPointsShell(dist)).toThrow(
       `SPA shell is missing at ${path.join(dist, "index.html")}`,
     );
   });
 
   it("publishes into path.resolve(root, build.outDir)", () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), "stranded-root-"));
+    const root = tempDir("stranded-root-");
     const shell = "<html></html>\n";
     const dest = path.resolve(root, "custom-out");
     fs.mkdirSync(dest);
