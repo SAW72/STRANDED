@@ -140,6 +140,9 @@ describe("App routes", () => {
     const rows = [...view.container.querySelectorAll(".review-row")];
     expect(rows.length).toBeGreaterThan(0);
     expect(view.container.querySelector("[data-testid='rescue-quote-collapsed']")).toBeNull();
+    const values = rows.map((row) => row.querySelector(".review-value")?.textContent ?? "").join("\n");
+    expect(values).toMatch(/SDEMO/);
+    expect(values).not.toMatch(/\bGRTT\b/);
     for (const row of rows) {
       expect(row.querySelector(".review-value")?.textContent).not.toBe("—");
     }

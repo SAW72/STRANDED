@@ -24,18 +24,19 @@ describe("publishPointsShell", () => {
     );
   });
 
-  it("publishes into Vite's resolved build.outDir", () => {
-    const dist = fs.mkdtempSync(path.join(os.tmpdir(), "stranded-outdir-"));
+  it("publishes into path.resolve(root, build.outDir)", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "stranded-root-"));
     const shell = "<html></html>\n";
-    fs.writeFileSync(path.join(dist, "index.html"), shell);
+    const dest = path.resolve(root, "custom-out");
+    fs.mkdirSync(dest);
+    fs.writeFileSync(path.join(dest, "index.html"), shell);
     const plugin = pointsShellPlugin();
     if (typeof plugin.configResolved !== "function" || typeof plugin.closeBundle !== "function") {
       throw new Error("points shell plugin is missing its build hooks");
     }
-    plugin.configResolved.call({} as never, { build: { outDir: dist } } as never);
+    plugin.configResolved.call({} as never, { root, build: { outDir: "custom-out" } } as never);
     plugin.closeBundle.call({} as never);
-    expect(fs.readFileSync(path.join(dist, "points", "index.html"), "utf8")).toBe(shell);
-    expect(dist.endsWith(`${path.sep}dist`)).toBe(false);
+    expect(fs.readFileSync(path.join(dest, "points", "index.html"), "utf8")).toBe(shell);
   });
 });
 

@@ -88,6 +88,19 @@ export function Points({ client }: { client?: PointsClient }) {
     document.title = "Stranded · " + POINTS_TITLE;
   }, []);
 
+  useEffect(() => {
+    if (window.location.hash !== "#how-points-are-recorded") return;
+    const node = document.getElementById("how-points-are-recorded");
+    if (!node) return;
+    let reduce = false;
+    try {
+      reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    } catch {
+      reduce = false;
+    }
+    node.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
+  }, []);
+
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const wallet = normaliseWalletAddress(input);

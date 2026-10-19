@@ -77,6 +77,17 @@ function stringLiterals(source: string): string[] {
   return found;
 }
 
+/** Text nodes in JSX, separate from quoted source strings. */
+function jsxText(source: string): string[] {
+  const withoutComments = source.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:])\/\/.*$/gm, "$1");
+  const found: string[] = [];
+  for (const match of withoutComments.matchAll(/>([^<>{}]+)</g)) {
+    const text = (match[1] ?? "").replace(/\s+/g, " ").trim();
+    if (text) found.push(text);
+  }
+  return found;
+}
+
 /** Sentences and short labels. Skips class names, paths, and other non-copy literals. */
 function isUserCopy(text: string): boolean {
   const trimmed = text.trim();
@@ -118,6 +129,7 @@ describe("banned words in user-visible copy", () => {
     demoBannerText("GRTT"),
     demoBannerText(null),
     ...COPY_SOURCES.flatMap((source) => stringLiterals(source).filter(isUserCopy)),
+    ...COPY_SOURCES.flatMap((source) => jsxText(source).filter(isUserCopy)),
   ];
 
   it("allows the phrase no value and rejects the banned list", () => {
@@ -137,6 +149,9 @@ describe("banned words in user-visible copy", () => {
       bannedWordsIn(text).map((word) => `${word}: ${text}`),
     );
     expect(hits).toEqual([]);
+    const jsx = COPY_SOURCES.flatMap((source) => jsxText(source));
+    expect(jsx.some((line) => line.includes("What happens to your tokens"))).toBe(true);
+    for (const line of jsx) expect(line).not.toMatch(/\bearn/i);
   });
 
   it("error mappers never return Relayer POST, HTTP status, snake_case codes, viem@, or Details:", async () => {

@@ -330,7 +330,7 @@ function RescueApp() {
       chainId: selectedChainId,
       user: address,
       tokenIn: token ?? undefined,
-      tokenSymbol: typeof tokenSymbol === "string" ? tokenSymbol : undefined,
+      tokenSymbol: typeof tokenSymbol === "string" ? tokenSymbol : DEMO_FALLBACK_TICKER,
     });
   }, [useFixture, selectedChainId, address, token, tokenSymbol]);
 
@@ -355,8 +355,8 @@ function RescueApp() {
   });
 
   const chainTicker = typeof tokenSymbol === "string" ? tokenSymbol : null;
-  // A sample fixture still names the delisted ticker. The banner uses the
-  // on-chain symbol, or SDEMO when that read has not succeeded.
+  // A sample fixture still names the delisted ticker. The rows and the banner
+  // use the on-chain symbol, or SDEMO when that read has not succeeded.
   const demoSymbol = useFixture
     ? (chainTicker ?? DEMO_FALLBACK_TICKER)
     : (chainTicker ?? quote?.tokenSymbol ?? receipt?.tokenSymbol ?? null);

@@ -418,6 +418,62 @@ describe("Points page", () => {
     await view.unmount();
   });
 
+  it("scrolls to the how section when that hash is opened", async () => {
+    const calls: Array<ScrollIntoViewOptions | boolean | undefined> = [];
+    const previous = HTMLElement.prototype.scrollIntoView;
+    HTMLElement.prototype.scrollIntoView = function scrollIntoView(arg) {
+      if (this.id === "how-points-are-recorded") calls.push(arg);
+    };
+    const previousMedia = window.matchMedia;
+    window.matchMedia = ((query: string) => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addEventListener() {},
+      removeEventListener() {},
+      addListener() {},
+      removeListener() {},
+      dispatchEvent() {
+        return false;
+      },
+    })) as typeof window.matchMedia;
+    window.location.hash = "#how-points-are-recorded";
+    const view = await render(<Points />);
+    expect(calls).toEqual([{ behavior: "smooth", block: "start" }]);
+    await view.unmount();
+    HTMLElement.prototype.scrollIntoView = previous;
+    window.matchMedia = previousMedia;
+    window.location.hash = "";
+  });
+
+  it("scrolls to the how section without motion when reduced motion is set", async () => {
+    const calls: Array<ScrollIntoViewOptions | boolean | undefined> = [];
+    const previous = HTMLElement.prototype.scrollIntoView;
+    HTMLElement.prototype.scrollIntoView = function scrollIntoView(arg) {
+      if (this.id === "how-points-are-recorded") calls.push(arg);
+    };
+    const previousMedia = window.matchMedia;
+    window.matchMedia = ((query: string) => ({
+      matches: query.includes("prefers-reduced-motion"),
+      media: query,
+      onchange: null,
+      addEventListener() {},
+      removeEventListener() {},
+      addListener() {},
+      removeListener() {},
+      dispatchEvent() {
+        return false;
+      },
+    })) as typeof window.matchMedia;
+    window.location.hash = "#how-points-are-recorded";
+    const view = await render(<Points />);
+    expect(calls).toEqual([{ behavior: "auto", block: "start" }]);
+    await view.unmount();
+    HTMLElement.prototype.scrollIntoView = previous;
+    window.matchMedia = previousMedia;
+    window.location.hash = "";
+  });
+
   it("uses the example client from the page default without a baked URL", async () => {
     expect(createPointsClient().source).toBe("example");
     const view = await render(<Points />);

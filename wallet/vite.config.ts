@@ -12,7 +12,7 @@ export function pointsShellPlugin(): Plugin {
     name: "stranded-points-shell",
     apply: "build",
     configResolved(resolved) {
-      outDir = resolved.build.outDir;
+      outDir = path.resolve(resolved.root, resolved.build.outDir);
     },
     closeBundle() {
       if (!outDir) {
