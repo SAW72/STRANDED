@@ -56,8 +56,17 @@ function rendered(findings) {
   return findings.map((finding) => formatFinding(finding)).join("\n");
 }
 
+let cachedWords;
+
+function wordList() {
+  if (!cachedWords) {
+    cachedWords = fs.readFileSync(path.join(here, "bip39-english.txt"), "utf8").trim().split(/\s+/);
+  }
+  return cachedWords;
+}
+
 function bip39Phrase(count) {
-  const words = fs.readFileSync(path.join(here, "bip39-english.txt"), "utf8").trim().split(/\s+/);
+  const words = wordList();
   const checksumBits = count / 3;
   const entropy = randomBytes((count * 11 - checksumBits) / 8);
   const hash = createHash("sha256").update(entropy).digest();
@@ -70,6 +79,52 @@ function bip39Phrase(count) {
     phrase.push(words[Number.parseInt(bits.slice(i * 11, i * 11 + 11), 2)]);
   }
   return phrase;
+}
+
+function checksumDistance(words) {
+  const list = wordList();
+  const indexes = words.map((word) => list.indexOf(word));
+  const checksumBits = indexes.length / 3;
+  let bits = "";
+  for (const index of indexes) bits += index.toString(2).padStart(11, "0");
+  const entropyBits = bits.slice(0, bits.length - checksumBits);
+  const checksum = bits.slice(bits.length - checksumBits);
+  const entropy = Buffer.alloc(entropyBits.length / 8);
+  for (let i = 0; i < entropy.length; i += 1) {
+    entropy[i] = Number.parseInt(entropyBits.slice(i * 8, i * 8 + 8), 2);
+  }
+  const hash = createHash("sha256").update(entropy).digest();
+  let hashBits = "";
+  for (const byte of hash) hashBits += byte.toString(2).padStart(8, "0");
+  let distance = 0;
+  for (let i = 0; i < checksum.length; i += 1) {
+    if (checksum[i] !== hashBits[i]) distance += 1;
+  }
+  return distance;
+}
+
+function windowValid(words, size) {
+  if (words.length < size) return false;
+  for (let i = 0; i + size <= words.length; i += 1) {
+    if (checksumDistance(words.slice(i, i + size)) === 0) return true;
+  }
+  return false;
+}
+
+function isolatedPhrase(count) {
+  const shorter = [12, 15, 18, 21, 24].filter((size) => size < count);
+  for (let attempt = 0; attempt < 80; attempt += 1) {
+    const words = bip39Phrase(count);
+    if (shorter.every((size) => !windowValid(words, size))) return words;
+  }
+  throw new Error(`no isolated ${count}-word phrase`);
+}
+
+function flipChecksumBit(words, which) {
+  const list = wordList();
+  const index = list.indexOf(words[words.length - 1]);
+  const bit = which === "last" ? 1 : 1 << (words.length / 3 - 1);
+  return [...words.slice(0, -1), list[index ^ bit]];
 }
 
 function exampleValue(name) {
@@ -686,6 +741,184 @@ test("allowlist covers a public query key and an explorer tx link", () => {
   assert.equal(listed.some((finding) => finding.rule === "rpc-url"), false);
   assert.equal(rendered(listed).includes("hero-banner-2026"), false);
   assert.equal(rendered(listed).includes(txHash), false);
+});
+
+test("an allowlisted secret value still fails as raw text, base64, and two halves", () => {
+  for (const name of ["RELAYER_PRIVATE_KEY", "ADMIN_SECRET", "VITE_API_SECRET"]) {
+    const value = hex64();
+    const encoded = Buffer.from(value, "utf8").toString("base64");
+    const mid = value.length / 2;
+    const allowlist = new Set([value]);
+    const env = { [name]: value };
+    const raw = writeDist({ "assets/app.js": `${JSON.stringify(value)}\n` });
+    const rawHits = scanDist(raw, { knownRoots: [], env, allowlist });
+    assert.ok(rules(rawHits).includes("forbidden-value"), name);
+    assert.equal(rendered(rawHits).includes(value), false);
+    const encodedDir = writeDist({ "assets/app.js": `${JSON.stringify(encoded)}\n` });
+    const encodedHits = scanDist(encodedDir, { knownRoots: [], env, allowlist });
+    assert.ok(rules(encodedHits).includes("forbidden-encoding"), name);
+    assert.equal(rendered(encodedHits).includes(value), false);
+    assert.equal(rendered(encodedHits).includes(encoded), false);
+    const halves = writeDist({
+      "assets/a.js": `${JSON.stringify(value.slice(0, mid))}\n`,
+      "assets/b.js": `${JSON.stringify(value.slice(mid))}\n`,
+    });
+    const halfHits = scanDist(halves, { knownRoots: [], env, allowlist });
+    assert.ok(rules(halfHits).includes("forbidden-split"), name);
+    assert.equal(rendered(halfHits).includes(value), false);
+    assert.equal(rendered(halfHits).includes(value.slice(0, mid)), false);
+    assert.equal(rendered(halfHits).includes(value.slice(mid)), false);
+  }
+});
+
+test("an allowlist prefix does not skip a longer public value", () => {
+  const symbol = "demo-symbol-value";
+  const dir = writeDist({ "assets/app.js": `${JSON.stringify(symbol)}\n` });
+  const env = { FOO_TOKEN_V2: symbol };
+  const byPrefix = scanDist(dir, {
+    knownRoots: [],
+    env,
+    allowlist: new Set([symbol.slice(0, 8)]),
+  });
+  assert.ok(rules(byPrefix).includes("forbidden-value"));
+  const byLonger = scanDist(dir, {
+    knownRoots: [],
+    env,
+    allowlist: new Set([`${symbol}-extra`]),
+  });
+  assert.ok(rules(byLonger).includes("forbidden-value"));
+  assert.deepEqual(
+    scanDist(dir, { knownRoots: [], env, allowlist: new Set([symbol]) }),
+    [],
+  );
+  assert.equal(rendered(byPrefix).includes(symbol), false);
+  assert.equal(rendered(byLonger).includes(symbol), false);
+});
+
+test("flags a keyed rpc key alone, beside its host, and as a 16 character slice", () => {
+  const host = "https://rpc.example.invalid";
+  const key = randomBytes(16).toString("hex");
+  const keyed = `${host}/v2/${key}`;
+  const keyOnly = writeDist({ "assets/app.js": `${JSON.stringify(key)}\n` });
+  const keyHits = scanDist(keyOnly, { knownRoots: [], env: { VITE_BASE_SEPOLIA_RPC_URL: keyed } });
+  assert.ok(rules(keyHits).includes("forbidden-value"));
+  assert.equal(rendered(keyHits).includes(key), false);
+  const split = writeDist({
+    "assets/a.js": `${JSON.stringify(`${host}/v2/`)}\n`,
+    "assets/b.js": `${JSON.stringify(key)}\n`,
+  });
+  const splitHits = scanDist(split, { knownRoots: [], env: { RPC_URL: keyed } });
+  assert.ok(rules(splitHits).includes("forbidden-value"));
+  assert.equal(rendered(splitHits).includes(key), false);
+  const hostOnly = writeDist({ "assets/app.js": `${JSON.stringify(`${host}/v2/`)}\n` });
+  assert.deepEqual(scanDist(hostOnly, { knownRoots: [], env: { RPC_URL: keyed } }), []);
+  const slice = key.slice(4, 20);
+  const sliceDir = writeDist({ "assets/app.js": `${JSON.stringify(slice)}\n` });
+  const sliceHits = scanDist(sliceDir, { knownRoots: [], env: { VITE_ARB_SEPOLIA_RPC_URL: keyed } });
+  assert.ok(rules(sliceHits).includes("forbidden-split"));
+  assert.equal(rules(sliceHits).includes("forbidden-value"), false);
+  assert.equal(rendered(sliceHits).includes(key), false);
+  assert.equal(rendered(sliceHits).includes(slice), false);
+  let mixed = `k${randomBytes(8).toString("hex")}Z`;
+  if (!/[0-9]/.test(mixed)) mixed = `k9${mixed.slice(2)}`;
+  const mixedUrl = `${host}/v2/${mixed}`;
+  assert.equal(isKeyLikeRpc(mixedUrl), true);
+  const mixedDir = writeDist({ "assets/app.js": `${JSON.stringify(mixed)}\n` });
+  const mixedHits = scanDist(mixedDir, { knownRoots: [], env: { RPC_URL: mixedUrl } });
+  assert.ok(rules(mixedHits).includes("forbidden-value"));
+  assert.equal(rendered(mixedHits).includes(mixed), false);
+});
+
+test("matches an upper-case scheme and a scheme-less userinfo url", () => {
+  const user = randomBytes(6).toString("hex");
+  const upper = `HTTPS://${user}@rpc.example.invalid/rpc`;
+  const relative = `//${user}@rpc.example.invalid/rpc`;
+  assert.equal(isKeyLikeRpc(upper), true);
+  assert.equal(isKeyLikeRpc(relative), true);
+  const dir = writeDist({
+    "assets/app.js": `${JSON.stringify(upper)}\n${JSON.stringify(relative)}\n`,
+  });
+  const findings = scanDist(dir, { knownRoots: [], env: {} });
+  assert.equal(findings.filter((finding) => finding.rule === "rpc-url").length, 2);
+  assert.equal(rendered(findings).includes(user), false);
+});
+
+test("pins ankr host, length, digit, and label boundaries", () => {
+  let key = randomBytes(5).toString("hex");
+  if (!/[0-9]/.test(key)) key = `a1${key.slice(2)}`;
+  assert.equal(isKeyLikeRpc(`https://rpc.example.invalid/eth/${key}`), false);
+  assert.equal(isKeyLikeRpc(`https://notankrhost.example.invalid/eth/${key}`), false);
+  assert.equal(isKeyLikeRpc("https://rpc.ankr.example.invalid/eth/ab12"), false);
+  assert.equal(isKeyLikeRpc("https://rpc.ankr.example.invalid/eth/abc1234"), false);
+  assert.equal(isKeyLikeRpc("https://rpc.ankr.example.invalid/eth/abcdefgh"), false);
+  assert.equal(isKeyLikeRpc(`https://rpc.ankr.example.invalid/eth/${key}`), true);
+});
+
+test("pins fragment key names, path segments, and short query values", () => {
+  const named = randomBytes(16).toString("hex");
+  const segment = randomBytes(16).toString("hex");
+  const query = randomBytes(6).toString("hex");
+  assert.equal(isKeyLikeRpc(`https://rpc.example.invalid/eth#${named}=x`), true);
+  assert.equal(isKeyLikeRpc(`https://rpc.example.invalid/eth#/v2/${segment}`), true);
+  assert.equal(isKeyLikeRpc(`https://rpc.example.invalid/eth#dkey=${query}`), true);
+  assert.equal(isKeyLikeRpc(`https://rpc.example.invalid/eth#dkey=${query.slice(0, 11)}`), false);
+});
+
+test("flags a single-quoted jwt join in the bundle and in source", () => {
+  const header = Buffer.from('{"alg":"none"}').toString("base64url");
+  const payload = Buffer.from('{"sub":"demo"}').toString("base64url");
+  const sig = Buffer.from("not-a-real-signature").toString("base64url");
+  const joined = `'${header}' + '.' + '${payload}' + '.' + '${sig}'`;
+  const dir = writeDist({ "assets/app.js": `const value = ${joined};\n` });
+  const findings = scanDist(dir, { knownRoots: [], env: {} });
+  assert.ok(rules(findings).includes("jwt"));
+  const source = scanHexText("plant.ts", `${joined}\n`);
+  assert.ok(source.some((finding) => finding.rule === "jwt"));
+  const text = `${rendered(findings)}\n${source.map((finding) => formatFinding(finding)).join("\n")}`;
+  assert.equal(text.includes(header), false);
+  assert.equal(text.includes(payload), false);
+  assert.equal(text.includes(sig), false);
+});
+
+test("rejects a phrase that misses one checksum bit", () => {
+  const words = bip39Phrase(12);
+  assert.equal(checksumDistance(words), 0);
+  for (const which of ["first", "last"]) {
+    const flipped = flipChecksumBit(words, which);
+    assert.equal(checksumDistance(flipped), 1);
+    const dir = writeDist({ "assets/app.js": `${flipped.join(" ")}\n` });
+    assert.equal(
+      scanDist(dir, { knownRoots: [], env: {} }).some((finding) => finding.rule === "mnemonic"),
+      false,
+    );
+  }
+  assertMnemonic(words.join(" "));
+});
+
+test("flags 15, 18, 21, and 24 word phrases with no shorter valid window", () => {
+  for (const count of [15, 18, 21, 24]) {
+    const words = isolatedPhrase(count);
+    assert.equal(checksumDistance(words), 0);
+    assertMnemonic(words.join(" "));
+  }
+});
+
+test("a word outside the list breaks a mnemonic run", () => {
+  assert.equal(wordList().includes("qqqq"), false);
+  const words = bip39Phrase(12);
+  const broken = [...words.slice(0, 6), "qqqq", ...words.slice(6)].join(" ");
+  const dir = writeDist({ "assets/app.js": `${broken}\n` });
+  assert.equal(
+    scanDist(dir, { knownRoots: [], env: {} }).some((finding) => finding.rule === "mnemonic"),
+    false,
+  );
+});
+
+test("treats escaped newlines and tabs as mnemonic separators", () => {
+  const words = bip39Phrase(12);
+  assertMnemonic(words.join("\\n"));
+  assertMnemonic(words.join("\\t"));
+  assertMnemonic(words.join("\\r"));
 });
 
 test("SIGTERM guard exits without reporting a pass", async () => {

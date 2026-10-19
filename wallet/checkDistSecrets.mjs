@@ -6,16 +6,18 @@
  * Rules:
  * - missing-dist, empty-dist: dist must exist and contain index.html plus a .js file.
  * - relayer-private-key, admin-secret, secret-env-name: those names in built JS (not source maps).
- * - relayer-env-key: any RELAYER_* name in built JS (not source maps).
  * - forbidden-value, forbidden-encoding, forbidden-split: every secret-like env value,
  *   including base64/base64url and any 16-character slice. An RPC URL is compared only
- *   when it is key-like, and only as the full value. Exact allowlist values are skipped.
- *   A 0x plus 40 hex shape is not an exemption.
- * - rpc-url: provider-style http(s) or ws(s) URLs with a key-like path, query, or userinfo.
- *   An exact allowlist entry skips that URL.
+ *   when it is key-like: the full value, and the key part of that URL. Exact allowlist
+ *   values are skipped only after the name gate, and never for RELAYER_PRIVATE_KEY,
+ *   ADMIN_SECRET, or a name containing PRIVATE, SECRET, MNEMONIC, SEED, or PASSWORD.
+ * - rpc-url: provider-style http(s) or ws(s) URLs with a key-like path, query, userinfo,
+ *   or fragment. The scheme match is case-insensitive, and a scheme-less //user@host
+ *   URL counts. An exact allowlist entry skips that URL.
  * - mnemonic: a 12, 15, 18, 21, or 24-word BIP39 English phrase with a valid checksum,
  *   including a sliding window inside a longer run. Newlines, repeated spaces, title case,
- *   and quoted arrays count. Approved separators are whitespace, quotes, commas, and brackets.
+ *   quoted arrays, and the escape text \n, \t, and \r count. Approved separators are
+ *   whitespace, quotes, commas, and brackets.
  * - jwt: a bare three-part JWT, including parts joined by a dot in source.
  * - hex64: a standalone 64-hex value in dist that is not a repeated nibble, not an exact
  *   allowlist entry, and not already present under node_modules.
@@ -71,39 +73,19 @@ function isKeySegment(segment) {
   return false;
 }
 
-export function isKeyLikeRpc(value) {
-  let url;
-  try {
-    url = new URL(value);
-  } catch {
-    return false;
-  }
-  if (!/^(?:https?|wss?):$/.test(url.protocol)) return false;
-  if (url.password) return true;
-  if (url.username.length >= 8) return true;
-  for (const [key, val] of url.searchParams) {
-    if (QUERY_KEY.test(key) && String(val).length >= 12) return true;
-  }
-  const ankrHost = url.hostname.split(".").includes("ankr");
-  for (const segment of url.pathname.split("/")) {
-    if (!segment) continue;
-    if (isKeySegment(segment)) return true;
-    if (ankrHost && isShortAnkrKey(segment)) return true;
-  }
-  return fragmentHasKey(url.hash);
-}
-
 function isShortAnkrKey(segment) {
   return segment.length >= 8 && segment.length < 16 && /[0-9]/.test(segment) && /^[A-Za-z0-9]+$/.test(segment);
 }
 
-function fragmentHasKey(hash) {
+function fragmentKeyParts(hash) {
   const body = hash.startsWith("#") ? hash.slice(1) : hash;
-  if (!body) return false;
+  if (!body) return [];
+  const found = [];
   const params = new URLSearchParams(body);
   for (const [key, val] of params) {
-    if (QUERY_KEY.test(key) && String(val).length >= 12) return true;
-    if (isKeySegment(val) || isKeySegment(key)) return true;
+    if (QUERY_KEY.test(key) && String(val).length >= 12) found.push(String(val));
+    if (isKeySegment(val)) found.push(String(val));
+    if (isKeySegment(key)) found.push(key);
   }
   for (const segment of body.split(/[/?&]/)) {
     const bare = segment.includes("=") ? segment.slice(segment.indexOf("=") + 1) : segment;
@@ -113,9 +95,55 @@ function fragmentHasKey(hash) {
     } catch {
       decoded = bare;
     }
-    if (isKeySegment(decoded)) return true;
+    if (isKeySegment(decoded)) found.push(decoded);
   }
-  return false;
+  return found;
+}
+
+function inspectRpc(value) {
+  let raw = String(value).trim();
+  if (raw.startsWith("//")) raw = `https:${raw}`;
+  let url;
+  try {
+    url = new URL(raw);
+  } catch {
+    return { keyLike: false, parts: [] };
+  }
+  if (!/^(?:https?|wss?):$/.test(url.protocol)) return { keyLike: false, parts: [] };
+  const parts = [];
+  let keyLike = false;
+  if (url.password) {
+    keyLike = true;
+    if (url.password.length >= 8) parts.push(url.password);
+  }
+  if (url.username.length >= 8) {
+    keyLike = true;
+    parts.push(url.username);
+  }
+  for (const [key, val] of url.searchParams) {
+    if (QUERY_KEY.test(key) && String(val).length >= 12) {
+      keyLike = true;
+      parts.push(String(val));
+    }
+  }
+  const ankrHost = url.hostname.split(".").includes("ankr");
+  for (const segment of url.pathname.split("/")) {
+    if (!segment) continue;
+    if (isKeySegment(segment) || (ankrHost && isShortAnkrKey(segment))) {
+      keyLike = true;
+      parts.push(segment);
+    }
+  }
+  const fragmentParts = fragmentKeyParts(url.hash);
+  if (fragmentParts.length > 0) {
+    keyLike = true;
+    parts.push(...fragmentParts);
+  }
+  return { keyLike, parts: [...new Set(parts.filter((part) => part.length >= 8))] };
+}
+
+export function isKeyLikeRpc(value) {
+  return inspectRpc(value).keyLike;
 }
 
 function isRepeatedNibble(body) {
@@ -273,6 +301,24 @@ function encodingsOf(value) {
   ).filter((form) => form !== value);
 }
 
+function addValueVariants(variants, text) {
+  variants.add(text);
+  const body = hexBody(text);
+  if (!body) return;
+  variants.add(body);
+  variants.add(body.toLowerCase());
+  variants.add(body.toUpperCase());
+  variants.add(`0x${body}`);
+  variants.add(`0x${body.toLowerCase()}`);
+  variants.add(`0X${body.toUpperCase()}`);
+}
+
+function valueAllowlisted(name, value, options) {
+  if (ALWAYS_NAMES.includes(name)) return false;
+  if (/PRIVATE|SECRET|MNEMONIC|SEED|PASSWORD/i.test(name)) return false;
+  return allowlistHas(options, value);
+}
+
 export function secretMaterial(env = {}, options = {}) {
   const items = [];
   for (const [name, raw] of Object.entries(env)) {
@@ -280,26 +326,22 @@ export function secretMaterial(env = {}, options = {}) {
     const value = raw.trim();
     if (value.length < 8) continue;
     if (/^(?:true|false|yes|no|0|1)$/i.test(value)) continue;
-    if (allowlistHas(options, value)) continue;
     const secretName = isSecretLikeName(name);
     const rpcName = isRpcName(name);
-    const keyedRpc = rpcName && isKeyLikeRpc(value);
+    const inspected = rpcName ? inspectRpc(value) : { keyLike: false, parts: [] };
+    const keyedRpc = inspected.keyLike;
     if (!secretName && !keyedRpc) continue;
-    const variants = new Set([value]);
+    if (valueAllowlisted(name, value, options)) continue;
+    const variants = new Set();
+    addValueVariants(variants, value);
+    for (const part of inspected.parts) addValueVariants(variants, part);
     const body = hexBody(value);
-    if (body) {
-      variants.add(body);
-      variants.add(body.toLowerCase());
-      variants.add(body.toUpperCase());
-      variants.add(`0x${body}`);
-      variants.add(`0x${body.toLowerCase()}`);
-      variants.add(`0X${body.toUpperCase()}`);
-    }
     items.push({
       name,
       value,
       hex: Boolean(body),
       fullOnly: keyedRpc,
+      keyParts: inspected.parts.filter((part) => part.length >= 16),
       variants: [...variants],
       encodings: encodingsOf(value),
     });
@@ -412,7 +454,24 @@ function mnemonicWindow(parts) {
   return -1;
 }
 
+function mnemonicSource(text) {
+  let out = "";
+  const map = [];
+  for (let i = 0; i < text.length; i += 1) {
+    if (text.charCodeAt(i) === 92 && i + 1 < text.length && "ntr".includes(text[i + 1])) {
+      out += " ";
+      map.push(i);
+      i += 1;
+      continue;
+    }
+    out += text[i];
+    map.push(i);
+  }
+  return { text: out, map };
+}
+
 function mnemonicIndex(text) {
+  const source = mnemonicSource(text);
   const indexes = bip39Indexes();
   const re = /(?<![A-Za-z])[A-Za-z]{3,8}(?![A-Za-z])/g;
   const gapOk = /^[\s,\[\]"'`\\]+$/;
@@ -423,22 +482,22 @@ function mnemonicIndex(text) {
     parts.length = 0;
     return hit;
   };
-  for (const match of text.matchAll(re)) {
-    if (end >= 0 && !gapOk.test(text.slice(end, match.index))) {
+  for (const match of source.text.matchAll(re)) {
+    if (end >= 0 && !gapOk.test(source.text.slice(end, match.index))) {
       const hit = flush();
-      if (hit >= 0) return hit;
+      if (hit >= 0) return source.map[hit];
     }
     end = match.index + match[0].length;
     const wordIndex = indexes.get(match[0].toLowerCase());
     if (wordIndex === undefined) {
       const hit = flush();
-      if (hit >= 0) return hit;
+      if (hit >= 0) return source.map[hit];
       continue;
     }
     parts.push({ wordIndex, at: match.index });
   }
   const hit = flush();
-  return hit >= 0 ? hit : -1;
+  return hit >= 0 ? source.map[hit] : -1;
 }
 
 function contentFindings(file, text, options, secrets) {
@@ -464,7 +523,7 @@ function contentFindings(file, text, options, secrets) {
     pushFinding(findings, seen, at(file, text, match.index, "hex64"));
   }
 
-  const urlRe = /(?:https?|wss?):\/\/[^\s"'<>]+/g;
+  const urlRe = /(?:(?:https?|wss?):)?\/\/[^\s"'<>]+/gi;
   for (const match of text.matchAll(urlRe)) {
     const candidate = match[0].replace(/[),.;]+$/, "");
     if (!isKeyLikeRpc(candidate)) continue;
@@ -528,16 +587,18 @@ export function scanDist(distDir, options = {}) {
   }
 
   for (const secret of secrets) {
-    if (secret.fullOnly) continue;
+    const windows = secret.fullOnly ? secret.keyParts : secret.variants;
+    if (windows.length === 0) continue;
     const present = loaded.some((entry) =>
       secret.variants.some((variant) => indexIn(entry.text, variant, secret.hex) >= 0),
     );
     if (present) continue;
     let hit = null;
     for (const entry of loaded) {
-      for (const variant of secret.variants) {
-        const value = secret.hex ? variant.replace(/^0x/i, "") : variant;
-        const index = findWindow(entry.text, value, secret.hex);
+      for (const variant of windows) {
+        const asHex = secret.fullOnly ? /^[0-9a-fA-F]+$/.test(variant) : secret.hex;
+        const value = asHex ? variant.replace(/^0x/i, "") : variant;
+        const index = findWindow(entry.text, value, asHex);
         if (index < 0) continue;
         hit = { entry, index };
         break;
