@@ -88,16 +88,12 @@ describe("points copy", () => {
 
   it("fails if points copy contains $, reward, or token value", () => {
     expect(pointsCopy.length).toBeGreaterThan(0);
-    for (const [key, line] of pointsCopy) {
+    for (const [, line] of pointsCopy) {
       if (typeof line !== "string") continue;
       expect(line).not.toMatch(/\$/);
       expect(line.toLowerCase()).not.toContain("reward");
       expect(line.toLowerCase()).not.toContain("token value");
       expect(line.toLowerCase()).not.toContain("airdrop");
-      if (key === "POINTS_HOW_HEADING") {
-        expect(line).toBe("How to earn points");
-        continue;
-      }
       expect(line.toLowerCase()).not.toMatch(/\bearn\b/);
     }
   });
@@ -113,13 +109,13 @@ describe("points copy", () => {
   });
 
   it("describes how points are recorded without a final rescue number", () => {
-    expect(copy.POINTS_HOW_BODY).toMatch(/completed rescues/i);
-    expect(copy.POINTS_HOW_BODY).toMatch(/relayer jobs/i);
-    expect(copy.POINTS_HOW_BODY).toMatch(/registry finds posted or claimed/i);
-    expect(copy.POINTS_HOW_BODY).toMatch(/10 per week/);
+    expect(copy.POINTS_HOW_HEADING).toBe("How points are recorded");
+    expect(copy.POINTS_HOW_BODY).toBe(
+      "Points are recorded for completed rescues, relayer jobs, and registry finds posted or claimed, plus 10 per week for an active wallet session.",
+    );
     expect(copy.POINTS_HOW_BODY).not.toMatch(/\b100\b/);
     expect(copy.POINTS_HOW_STATUS).toBe(
-      "Points are off-chain, have no value, are not a token, and are not transferable.",
+      "Points are an off-chain activity record. They have no value, are not a token, and can't be transferred.",
     );
     expect(copy.POINTS_BACK_LABEL).toBe("Back to home");
   });

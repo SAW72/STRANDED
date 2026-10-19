@@ -44,7 +44,7 @@ describe("App routes", () => {
     const view = await renderAt("/points", <App />);
     expect(view.container.querySelector("[data-testid='points-address']")).not.toBeNull();
     expect(view.container.querySelector("[data-testid='points-how']")?.textContent).toMatch(
-      /How to earn points/,
+      /How points are recorded/,
     );
     expect(view.container.querySelector("[data-testid='points-home']")?.getAttribute("href")).toBe("/");
     expect(view.container.querySelector("[data-testid='rescue-quote-fields']")).toBeNull();

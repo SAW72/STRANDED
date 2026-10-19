@@ -63,10 +63,7 @@ const COPY_SOURCES = [
 ];
 
 function bannedWordsIn(text: string): string[] {
-  const stripped = text
-    .replace(/\bno value\b/gi, " ")
-    .replace(/\bno cash value\b/gi, " ")
-    .replace(/\bHow to earn points\b/g, " ");
+  const stripped = text.replace(/\bno value\b/gi, " ").replace(/\bno cash value\b/gi, " ");
   return BANNED.filter((word) => new RegExp(`\\b${word}\\b`, "i").test(stripped));
 }
 

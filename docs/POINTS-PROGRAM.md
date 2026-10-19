@@ -4,6 +4,20 @@
 
 Points are an off-chain record of activity only. They are not a token, have no cash value, can't be sold, transferred or redeemed, may be adjusted or cancelled at any time, and do not convert to anything. No token, airdrop, conversion, snapshot or claim is planned.
 
+## Counsel review
+
+**Do not publish until reviewed by counsel.** The public points announcement needs Lawyer review before it goes out. No public points announcement goes out until all of the following are done:
+
+(a) Lawyer reviews the exact final text for every channel, plus a screenshot of the live /points page.
+
+(b) The full POINTS_DISCLAIMER, or a link to it, sits next to any points mention.
+
+(c) Banned words and phrases: airdrop; token (except 'not a token'); reward/earn; value; early/early-adopter; 'points may matter later'; conversion; snapshot; eligibility; leaderboard-for-prizes; and any hint of a future distribution.
+
+(d) Spencer gives an explicit GO after Lawyer's sign-off.
+
+The strandedtoken.trade domain must never be paired with points wording in announcements.
+
 ## Purpose
 
 Record genuine testnet activity as an off-chain score. Points measure usage. They are not a payment and they are not transferable.
