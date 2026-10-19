@@ -157,13 +157,14 @@ describe.sequential("rejected ingest", () => {
     const response = await getPoints(secret, `/points/${EMPTY}`, "https://example.invalid");
     expect(response.status).toBe(200);
     expect(response.headers.get("access-control-allow-origin")).toBeNull();
-    expect(await response.json()).toEqual({
+    const body = await response.json();
+    expect(body).toEqual({
       wallet: EMPTY,
       total: 0,
-      rank: null,
       categories: [],
       entries: [],
     });
+    expect(body).not.toHaveProperty("rank");
     expect(await ledgerCount()).toEqual({ n: 0, s: 0 });
   });
 });

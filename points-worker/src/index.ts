@@ -65,12 +65,9 @@ async function walletPoints(request: Request, env: PointsBindings, path: string)
   const wallet = raw.toLowerCase();
   const rows = await rowsForWallet(env.DB, wallet);
   const projected = projectRows(rows);
-  const board = await leaderboardTotals(env.DB);
-  const index = board.findIndex((row) => row.wallet === wallet);
   return json(request, 200, {
     wallet,
     total: projected.total,
-    rank: index < 0 ? null : index + 1,
     categories: projected.categories,
     entries: projected.entries,
   });
@@ -79,7 +76,7 @@ async function walletPoints(request: Request, env: PointsBindings, path: string)
 async function leaderboard(request: Request, env: PointsBindings): Promise<Response> {
   const board = await leaderboardTotals(env.DB);
   return json(request, 200, {
-    rows: board.map((row, index) => ({ rank: index + 1, wallet: row.wallet, total: row.total })),
+    rows: board.map((row) => ({ wallet: row.wallet, total: row.total })),
   });
 }
 

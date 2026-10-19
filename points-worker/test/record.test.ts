@@ -42,30 +42,34 @@ describe.sequential("recorded activity", () => {
 
     const wallet = await getPoints(secret, `/points/${USER}`, "https://strandedtoken.trade");
     expect(wallet.headers.get("access-control-allow-origin")).toBe("https://strandedtoken.trade");
-    expect(await wallet.json()).toEqual({
+    const walletBody = await wallet.json();
+    expect(walletBody).toEqual({
       wallet: USER,
       total: 100,
-      rank: 1,
       categories: [{ action: "rescue", points: 100, count: 1 }],
       entries: [{ action: "rescue", points: 100, txHash: firstTx, chainId: 84532 }],
     });
+    expect(walletBody).not.toHaveProperty("rank");
 
     const relayer = await getPoints(secret, `/points/${RELAYER.toUpperCase()}`);
-    expect(await relayer.json()).toEqual({
+    const relayerBody = await relayer.json();
+    expect(relayerBody).toEqual({
       wallet: RELAYER,
       total: 50,
-      rank: 2,
       categories: [{ action: "relayer_job", points: 50, count: 1 }],
       entries: [{ action: "relayer_job", points: 50, txHash: firstTx, chainId: 84532 }],
     });
+    expect(relayerBody).not.toHaveProperty("rank");
 
     const board = await getPoints(secret, "/points/leaderboard", "https://strandedtoken.trade");
-    expect(await board.json()).toEqual({
+    const boardBody = await board.json();
+    expect(boardBody).toEqual({
       rows: [
-        { rank: 1, wallet: USER, total: 100 },
-        { rank: 2, wallet: RELAYER, total: 50 },
+        { wallet: USER, total: 100 },
+        { wallet: RELAYER, total: 50 },
       ],
     });
+    expect(JSON.stringify(boardBody)).not.toContain('"rank"');
   });
 
   it("does not double count a duplicate ingest", async () => {
@@ -76,7 +80,9 @@ describe.sequential("recorded activity", () => {
     expect(await response.json()).toEqual({ ok: true, duplicate: true });
     expect(await ledgerCount()).toEqual(before);
     const wallet = await getPoints(secret, `/points/${USER}`);
-    expect(await wallet.json()).toMatchObject({ total: 100, rank: 1 });
+    const walletBody = await wallet.json();
+    expect(walletBody).toMatchObject({ total: 100 });
+    expect(walletBody).not.toHaveProperty("rank");
   });
 
   it("accepts a timestamp 300 seconds off and still rejects 301", async () => {

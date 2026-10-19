@@ -31,13 +31,11 @@ export type PointsEntry = {
 export type WalletPoints = {
   wallet: string;
   total: number;
-  rank: number | null;
   categories: PointsCategory[];
   entries: PointsEntry[];
 };
 
 export type LeaderboardRow = {
-  rank: number;
   wallet: string;
   total: number;
 };
@@ -55,7 +53,7 @@ export type PointsFetch = (input: string, init?: RequestInit) => Promise<Respons
  */
 export const EXAMPLE_POINTS_ADDRESS = "0x1111111111111111111111111111111111111111";
 
-/** Second example address, ranked above EXAMPLE_POINTS_ADDRESS. Also example data. */
+/** Second example address. Its total is higher than EXAMPLE_POINTS_ADDRESS. Also example data. */
 export const EXAMPLE_POINTS_HIGHER_ADDRESS = "0x2222222222222222222222222222222222222222";
 
 const EXAMPLE_RESCUE_TX = `0x${"ab".repeat(32)}`;
@@ -66,7 +64,6 @@ const EXAMPLE_WALLETS: Record<string, WalletPoints> = {
   [EXAMPLE_POINTS_ADDRESS]: {
     wallet: EXAMPLE_POINTS_ADDRESS,
     total: 140,
-    rank: 2,
     categories: [
       { action: "rescue", points: 100, count: 1 },
       { action: "registry_find", points: 30, count: 1 },
@@ -91,7 +88,6 @@ const EXAMPLE_WALLETS: Record<string, WalletPoints> = {
   [EXAMPLE_POINTS_HIGHER_ADDRESS]: {
     wallet: EXAMPLE_POINTS_HIGHER_ADDRESS,
     total: 200,
-    rank: 1,
     categories: [
       { action: "rescue", points: 100, count: 1 },
       { action: "relayer_job", points: 50, count: 1 },
@@ -122,8 +118,8 @@ const EXAMPLE_WALLETS: Record<string, WalletPoints> = {
 
 const EXAMPLE_LEADERBOARD: PointsLeaderboard = {
   rows: [
-    { rank: 1, wallet: EXAMPLE_POINTS_HIGHER_ADDRESS, total: 200 },
-    { rank: 2, wallet: EXAMPLE_POINTS_ADDRESS, total: 140 },
+    { wallet: EXAMPLE_POINTS_HIGHER_ADDRESS, total: 200 },
+    { wallet: EXAMPLE_POINTS_ADDRESS, total: 140 },
   ],
 };
 
@@ -138,7 +134,7 @@ export function normaliseWalletAddress(raw: string): string | null {
 }
 
 export function emptyWalletPoints(wallet: string): WalletPoints {
-  return { wallet, total: 0, rank: null, categories: [], entries: [] };
+  return { wallet, total: 0, categories: [], entries: [] };
 }
 
 export function pointsWalletPath(wallet: string): string {
@@ -179,12 +175,6 @@ function readChainId(value: unknown): number | null {
   return value;
 }
 
-function readRank(value: unknown): number | null {
-  if (value == null) return null;
-  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1) throw invalidBody();
-  return value;
-}
-
 function readWallet(value: unknown, expected: string): string {
   if (typeof value !== "string") throw invalidBody();
   const normalised = normaliseWalletAddress(value);
@@ -198,7 +188,6 @@ export function parseWalletPoints(value: unknown, expectedWallet: string): Walle
   return {
     wallet: readWallet(value.wallet, expectedWallet),
     total: readPoints(value.total),
-    rank: readRank(value.rank),
     categories: value.categories.map((item) => {
       if (!isRecord(item)) throw invalidBody();
       return {
@@ -226,9 +215,7 @@ export function parseLeaderboard(value: unknown): PointsLeaderboard {
       if (!isRecord(item)) throw invalidBody();
       const wallet = normaliseWalletAddress(typeof item.wallet === "string" ? item.wallet : "");
       if (!wallet) throw invalidBody();
-      const rank = readRank(item.rank);
-      if (rank == null) throw invalidBody();
-      return { rank, wallet, total: readPoints(item.total) };
+      return { wallet, total: readPoints(item.total) };
     }),
   };
 }
