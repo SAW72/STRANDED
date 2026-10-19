@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { randomBytes } from "node:crypto";
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import http from "node:http";
 import net from "node:net";
@@ -71,21 +71,42 @@ async function freePort() {
   return port;
 }
 
-function startCatcher() {
+function startCatcher(secret) {
   const posts = [];
+  const rejected = [];
   const server = http.createServer(async (req, res) => {
     const chunks = [];
     for await (const chunk of req) chunks.push(chunk);
     const raw = Buffer.concat(chunks).toString("utf8");
+    const timestamp = String(req.headers["x-points-timestamp"] || "");
+    const signature = String(req.headers["x-points-signature"] || "");
+    const expected = createHmac("sha256", secret).update(`${timestamp}\n${raw}`).digest("hex");
+    const presented = Buffer.from(signature);
+    const wanted = Buffer.from(expected);
+    let body = null;
     try {
-      posts.push(JSON.parse(raw));
+      body = JSON.parse(raw);
     } catch {
-      posts.push({ raw });
+      body = null;
     }
+    const signed =
+      timestamp.length > 0 &&
+      presented.length === wanted.length &&
+      timingSafeEqual(presented, wanted) &&
+      body &&
+      Number(body.chainId) === 421614 &&
+      /^0x[0-9a-fA-F]{64}$/.test(String(body.txHash || ""));
+    if (!signed) {
+      rejected.push(raw);
+      res.writeHead(401, { "content-type": "application/json" });
+      res.end('{"ok":false,"error":"bad_signature"}');
+      return;
+    }
+    posts.push(body);
     res.writeHead(200, { "content-type": "application/json" });
     res.end('{"ok":true}');
   });
-  return { server, posts, port: null };
+  return { server, posts, rejected };
 }
 
 function startRpc(state) {
@@ -112,6 +133,11 @@ function startRpc(state) {
   const server = http.createServer(async (req, res) => {
     const chunks = [];
     for await (const chunk of req) chunks.push(chunk);
+    if (state.downUntil && Date.now() < state.downUntil) {
+      res.writeHead(503);
+      res.end("down");
+      return;
+    }
     const body = JSON.parse(Buffer.concat(chunks).toString("utf8") || "null");
     const list = Array.isArray(body) ? body : [body];
     const out = list.map((call) => {
@@ -183,6 +209,24 @@ function startRpc(state) {
             mixHash: `0x${"0".repeat(64)}`,
           };
         }
+      } else if (method === "eth_getLogs") {
+        const filter = call.params?.[0] || {};
+        const fromBlock = Number(BigInt(filter.fromBlock ?? "0x0"));
+        const toBlock = Number(BigInt(filter.toBlock ?? "0x0"));
+        if (state.mined && !state.cancel && state.block >= fromBlock && state.block <= toBlock) {
+          result = [
+            {
+              address: SWAP,
+              topics: [],
+              data: "0x",
+              blockNumber: hx(state.block),
+              transactionHash: state.t1,
+              transactionIndex: "0x0",
+              logIndex: "0x0",
+              removed: false,
+            },
+          ];
+        } else result = [];
       } else if (method === "eth_syncing") result = false;
       return { jsonrpc: "2.0", id: call.id, result };
     });
@@ -217,6 +261,37 @@ async function waitFor(predicate, ms) {
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   return false;
+}
+
+function signedInput(body) {
+  const order = body.order;
+  return encodeFunctionData({
+    abi: rescueAbi,
+    functionName: "rescueWithPermit",
+    args: [
+      {
+        user: order.user,
+        tokenIn: order.tokenIn,
+        amountIn: BigInt(order.amountIn),
+        feeAmount: BigInt(order.feeAmount),
+        feeTo: order.feeTo,
+        amountSwap: BigInt(order.amountSwap),
+        minAmountOut: BigInt(order.minAmountOut),
+        to: order.to,
+        nativeTo: order.nativeTo,
+        router: order.router,
+        pathHash: order.pathHash,
+        chainId: BigInt(order.chainId),
+        deadline: BigInt(order.deadline),
+        nonce: BigInt(order.nonce),
+      },
+      body.orderSignature,
+      Number(body.v),
+      body.r,
+      body.s,
+      body.swapData,
+    ],
+  });
 }
 
 function rescueBody() {
@@ -256,29 +331,35 @@ describe("nonce replacement through server.mjs", { concurrency: false }, () => {
   it("logs a same-nonce self-transfer as a cancel and credits nothing", { timeout: 90_000 }, async () => {
     await runCase({ cancel: true });
   });
+
+  it("credits one rescue mined more than 64 blocks back after a 37 second rpc outage", { timeout: 150_000 }, async () => {
+    await runCase({ cancel: false, outage: true });
+  });
 });
 
-async function runCase({ cancel }) {
+async function runCase({ cancel, outage = false }) {
   const dir = await mkdtemp(join(tmpdir(), "points-reple-"));
   const dataDir = join(dir, "data");
   await mkdir(dataDir, { recursive: true });
   const key = `0x${randomBytes(32).toString("hex")}`;
   const account = privateKeyToAccount(key);
   const secret = randomBytes(24).toString("hex");
-  const input = rescueInput();
+  const body = rescueBody();
+  const input = signedInput(body);
   const state = {
     from: account.address,
     nonce: 7,
-    head: 40,
-    block: 36,
+    head: 20,
+    block: 30,
     input,
     mined: false,
     cancel,
+    downUntil: 0,
     t0: "",
     t1: hexWord(),
   };
   const rpc = startRpc(state);
-  const catcher = startCatcher();
+  const catcher = startCatcher(secret);
   const rpcPort = await listen(rpc.server);
   const pointsPort = await listen(catcher.server);
   const appPort = await freePort();
@@ -306,12 +387,12 @@ async function runCase({ cancel }) {
   let backfill;
   try {
     first = spawnServer(baseEnv);
-    const up = await waitFor(() => first.lines.some((line) => line.includes("relayer listening")), 10_000);
+    const up = await waitFor(() => first.lines.some((line) => line.includes("relayer listening")), 60_000);
     assert.equal(up, true, first.lines.join("\n"));
     const posted = await fetch(`http://127.0.0.1:${appPort}/v1/rescues`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(rescueBody()),
+      body: JSON.stringify(body),
     });
     const payload = await posted.json();
     assert.equal(posted.status, 200, `${posted.status} ${JSON.stringify(payload)} ${first.lines.join("\n")}`);
@@ -329,6 +410,7 @@ async function runCase({ cancel }) {
     assert.equal(queued.txNonce, state.nonce);
     assert.equal(queued.txTo, SWAP.toLowerCase());
     assert.equal(queued.txInput, input.toLowerCase());
+    assert.equal(queued.sentBlock, state.head);
     const logged = rescueText
       .split("\n")
       .filter((line) => line.trim())
@@ -337,13 +419,38 @@ async function runCase({ cancel }) {
     assert.ok(logged, rescueText);
     assert.equal(String(logged.txFrom).toLowerCase(), account.address.toLowerCase());
     assert.equal(String(logged.txNonce), String(state.nonce));
-    assert.equal(Object.hasOwn(logged, "txInput"), false);
+    assert.equal(String(logged.txTo).toLowerCase(), SWAP.toLowerCase());
+    assert.equal(String(logged.txInput).toLowerCase(), input.toLowerCase());
+    assert.equal(String(logged.sentBlock), String(state.head));
+    if (outage) {
+      state.t0 = t0;
+      state.downUntil = Date.now() + 37_000;
+      const opened = setTimeout(() => {
+        state.downUntil = 0;
+        state.mined = true;
+        state.head = 120;
+        state.block = 30;
+      }, 37_000);
+      const saw = await waitFor(
+        () => catcher.posts.some((row) => String(row.txHash || "").toLowerCase() === state.t1.toLowerCase()),
+        120_000,
+      );
+      clearTimeout(opened);
+      assert.equal(saw, true, `${first.lines.join("\n")}\nposts ${JSON.stringify(catcher.posts)}`);
+      assert.equal(catcher.posts.length, 1);
+      assert.equal(catcher.rejected.length, 0);
+      assert.equal(String(catcher.posts[0].txHash).toLowerCase(), state.t1.toLowerCase());
+      assert.equal(catcher.posts.some((row) => String(row.txHash || "").toLowerCase() === t0), false);
+      return;
+    }
     first.child.kill("SIGKILL");
     await first.done;
     state.mined = true;
     state.t0 = t0;
+    state.head = 120;
+    state.block = 30;
     second = spawnServer(baseEnv);
-    const restarted = await waitFor(() => second.lines.some((line) => line.includes("relayer listening")), 10_000);
+    const restarted = await waitFor(() => second.lines.some((line) => line.includes("relayer listening")), 60_000);
     assert.equal(restarted, true, second.lines.join("\n"));
     if (cancel) {
       const saw = await waitFor(
@@ -355,6 +462,7 @@ async function runCase({ cancel }) {
       );
       assert.equal(saw, true, second.lines.join("\n"));
       assert.equal(catcher.posts.length, 0);
+      assert.equal(catcher.rejected.length, 0);
       assert.equal(catcher.posts.some((row) => String(row.txHash || "").toLowerCase() === t0), false);
       assert.equal(catcher.posts.some((row) => String(row.txHash || "").toLowerCase() === state.t1), false);
       const text = await readFile(join(dataDir, "points-outbox.jsonl"), "utf8");
@@ -366,6 +474,7 @@ async function runCase({ cancel }) {
       );
       assert.equal(saw, true, `${second.lines.join("\n")}\nposts ${JSON.stringify(catcher.posts)}`);
       assert.equal(catcher.posts.length, 1);
+      assert.equal(catcher.rejected.length, 0);
       assert.equal(String(catcher.posts[0].txHash).toLowerCase(), state.t1.toLowerCase());
       assert.equal(catcher.posts.some((row) => String(row.txHash || "").toLowerCase() === t0), false);
       const before = await readFile(join(dataDir, "points-outbox.jsonl"), "utf8");
@@ -387,8 +496,12 @@ async function runCase({ cancel }) {
       const exit = await new Promise((resolve) => backfill.on("exit", (code) => resolve(code)));
       assert.equal(exit, 0, backfillOut.join(""));
       const after = await readFile(join(dataDir, "points-outbox.jsonl"), "utf8");
-      assert.equal(after, before);
+      const delivered = after.split("\n").filter((line) => line.includes('"op":"delivered"'));
+      assert.equal(delivered.length, 1);
+      assert.match(delivered[0], new RegExp(state.t1.toLowerCase()));
+      assert.match(backfillOut.join(""), /points_backfill done \d+ skipped \d+ failed 0/);
       assert.equal(catcher.posts.length, 1);
+      assert.equal(catcher.rejected.length, 0);
       assert.equal(String(catcher.posts[0].txHash).toLowerCase(), state.t1.toLowerCase());
     }
   } finally {

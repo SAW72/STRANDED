@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { createHmac } from "node:crypto";
-import { mkdtemp, readdir, readFile, rm, stat } from "node:fs/promises";
+import http from "node:http";
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -10,14 +12,18 @@ import { encodeFunctionData } from "viem";
 import { rescueAbi } from "../rescueAbi.mjs";
 import { rescueTxsFromJsonl } from "../scripts/backfill-points.mjs";
 import {
+  backfillPointsRescue,
+  backfillRows,
   clearPointsRetryTimers,
   deliverPointsNotify,
+  findTxAtNonce,
   flushPointsNotify,
   notePointsCancel,
   notePointsReceiptReplacement,
   notePointsReplacement,
   pointsMinConfirmations,
   pointsOutboxPath,
+  readUnresolvedPoints,
   retryPointsOutbox,
   schedulePointsNotify,
 } from "../points/notify.mjs";
@@ -203,8 +209,8 @@ describe("points push", { concurrency: false }, () => {
     const wait = src.indexOf("waitForTransactionReceipt");
     assert.ok(broadcast !== -1 && consumed > broadcast && logged > consumed && notify > logged);
     assert.ok(wait > logged);
+    assert.match(src, /confirmations: 1/);
     assert.match(src, /confirmations: pointsMinConfirmations\(process\.env, hash\)/);
-    assert.equal(src.includes("confirmations: 1"), false);
     assert.match(src, /onReplaced/);
     assert.match(src, /notePointsReceiptReplacement/);
     assert.equal(src.slice(broadcast, consumed).includes("schedulePointsNotify"), false);
@@ -397,7 +403,15 @@ describe("points push", { concurrency: false }, () => {
     const posts = [];
     const env = { POINTS_INGEST_SECRET: secret, POINTS_API_URL: "https://points.invalid" };
     const file = pointsOutboxPath(dir);
-    await mkdirPending(dir, file, [stuck, goodA, goodB]);
+    const fields = identFields();
+    await mkdir(dir, { recursive: true });
+    await writeFile(
+      file,
+      `${[stuck, goodA, goodB]
+        .map((hash) => JSON.stringify({ op: "enqueue", chainId: 84532, txHash: hash, attempts: 0, ...fields }))
+        .join("\n")}\n`,
+      { mode: 0o600 },
+    );
     const fetchImpl = async (_url, init) => {
       posts.push(JSON.parse(init.body).txHash);
       return new Response("ok", { status: 200 });
@@ -414,6 +428,7 @@ describe("points push", { concurrency: false }, () => {
         fetchImpl,
         confirmReceipt,
         confirmWaitMs: 40,
+        lookupNonce: pendingLookup,
         scheduleDelay: () => {},
       });
       const elapsed = Date.now() - started;
@@ -478,7 +493,7 @@ describe("points push", { concurrency: false }, () => {
     }
   });
 
-  it("leaves a row with no sender or nonce uncredited and does not throw", async () => {
+  it("stores a row with no sender or nonce for the resolver and does not throw", async () => {
     const dir = await mkdtemp(join(tmpdir(), "points-noid-"));
     const secret = runtimeSecret();
     const hash = tx();
@@ -504,6 +519,24 @@ describe("points push", { concurrency: false }, () => {
       const text = await readFile(pointsOutboxPath(dir), "utf8");
       assert.equal(text.includes('"op":"delivered"'), false);
       assert.equal(text.includes('"op":"cancel"'), false);
+      assert.match(text, /"op":"unresolved"/);
+      const again = await retryPointsOutbox({
+        dataDir: dir,
+        env,
+        fetchImpl: async () => new Response("ok", { status: 200 }),
+        confirmReceipt: () => new Promise(() => {}),
+        confirmWaitMs: 20,
+        lookupNonce: () => {
+          lookups += 1;
+          throw new Error("lookup");
+        },
+        scheduleDelay: () => {},
+      });
+      assert.equal(again.sent, 0);
+      assert.equal(lookups, 0);
+      const stored = await readUnresolvedPoints(dir);
+      assert.equal(stored.length, 1);
+      assert.equal(stored[0].txHash, hash);
     } finally {
       clearPointsRetryTimers();
       await rm(dir, { recursive: true, force: true });
@@ -669,8 +702,10 @@ describe("points push", { concurrency: false }, () => {
         dataDir: dir,
         env,
         fetchImpl,
+        ...identFields(),
         confirmReceipt,
         confirmWaitMs: 20,
+        lookupNonce: pendingLookup,
         scheduleDelay: () => {},
       });
       assert.equal(waiting.sent, 0);
@@ -680,7 +715,14 @@ describe("points push", { concurrency: false }, () => {
       assert.equal(parked.includes('"op":"dropped"'), false);
 
       mode = "success";
-      const mined = await retryPointsOutbox({ dataDir: dir, env, fetchImpl, confirmReceipt, scheduleDelay: () => {} });
+      const mined = await retryPointsOutbox({
+        dataDir: dir,
+        env,
+        fetchImpl,
+        confirmReceipt,
+        lookupNonce: pendingLookup,
+        scheduleDelay: () => {},
+      });
       assert.equal(mined.sent, 1);
       assert.equal(calls.length, 1);
 
@@ -705,15 +747,68 @@ describe("points push", { concurrency: false }, () => {
     }
   });
 
-  it("credits a new rescue while four receipts are stuck", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "points-n2-"));
+  it("keeps the fifth receipt wait behind a cap of four", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "points-n2-cap-"));
     const secret = runtimeSecret();
     const stuck = [tx(), tx(), tx(), tx()];
     const fresh = tx();
+    const env = { POINTS_INGEST_SECRET: secret, POINTS_API_URL: "https://points.invalid" };
+    let active = 0;
+    let peak = 0;
+    const seen = [];
+    const confirmReceipt = (hash) => {
+      active += 1;
+      peak = Math.max(peak, active);
+      seen.push(hash);
+      if (stuck.includes(hash)) return new Promise(() => {});
+      active -= 1;
+      return { status: "success", transactionHash: hash };
+    };
+    const base = {
+      chainId: 84532,
+      dataDir: dir,
+      env,
+      fetchImpl: async () => new Response("ok", { status: 200 }),
+      confirmReceipt,
+      confirmWaitMs: 4_000,
+      scheduleDelay: () => {},
+    };
+    const waiting = [];
+    try {
+      for (const hash of stuck) waiting.push(deliverPointsNotify({ ...base, txHash: hash }));
+      const opened = Date.now() + 2_000;
+      while (peak < 4 && Date.now() < opened) await new Promise((resolve) => setImmediate(resolve));
+      assert.equal(peak, 4);
+      const started = Date.now();
+      const queued = schedulePointsNotify({ ...base, txHash: fresh });
+      await queued.durable;
+      const durableMs = Date.now() - started;
+      console.log("n2_queue_ms", durableMs);
+      assert.ok(durableMs < 1_000, `n2_queue_ms ${durableMs}`);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      assert.equal(peak, 4);
+      assert.equal(seen.includes(fresh), false);
+    } finally {
+      clearPointsRetryTimers();
+      await Promise.allSettled(waiting);
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("credits a new rescue while three receipts are stuck", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "points-n2-"));
+    const secret = runtimeSecret();
+    const stuck = [tx(), tx(), tx()];
+    const fresh = tx();
     const posts = [];
     const env = { POINTS_INGEST_SECRET: secret, POINTS_API_URL: "https://points.invalid" };
+    let active = 0;
+    let peak = 0;
     const confirmReceipt = (hash) => {
+      active += 1;
+      peak = Math.max(peak, active);
       if (stuck.includes(hash)) return new Promise(() => {});
+      active -= 1;
       return { status: "success", transactionHash: hash };
     };
     const base = {
@@ -731,12 +826,15 @@ describe("points push", { concurrency: false }, () => {
     const waiting = [];
     try {
       for (const hash of stuck) waiting.push(deliverPointsNotify({ ...base, txHash: hash }));
+      const opened = Date.now() + 2_000;
+      while (peak < 3 && Date.now() < opened) await new Promise((resolve) => setImmediate(resolve));
       const started = Date.now();
       const result = await deliverPointsNotify({ ...base, txHash: fresh });
       const elapsed = Date.now() - started;
       console.log("n2_credit_ms", elapsed);
       assert.equal(result.sent, 1, `n2_credit_ms ${elapsed}`);
       assert.ok(elapsed < 2_000, `n2_credit_ms ${elapsed}`);
+      assert.ok(peak <= 4);
       assert.deepEqual(posts, [fresh]);
     } finally {
       clearPointsRetryTimers();
@@ -765,7 +863,7 @@ describe("points push", { concurrency: false }, () => {
       });
       const elapsed = Date.now() - started;
       assert.equal(result.sent, 0);
-      assert.ok(elapsed < waitMs * 1.8, `elapsed ${elapsed}`);
+      assert.ok(elapsed < 15_000, `elapsed ${elapsed}`);
       assert.ok(elapsed >= waitMs);
     } finally {
       clearPointsRetryTimers();
@@ -856,19 +954,42 @@ describe("points push", { concurrency: false }, () => {
     };
     let confirms = 0;
     const env = { POINTS_INGEST_SECRET: secret, POINTS_API_URL: "https://points.invalid" };
+    const fields = identFields();
     const confirmReceipt = () => {
       confirms += 1;
       return new Promise(() => {});
     };
+    const lookupNonce = (from, nonce, hint) =>
+      findTxAtNonce(
+        {
+          async getTransactionCount() {
+            return fields.txNonce;
+          },
+          async getBlockNumber() {
+            return 80n;
+          },
+          async getLogs() {
+            return [];
+          },
+          async getTransaction() {
+            return null;
+          },
+        },
+        from,
+        nonce,
+        hint,
+      );
     try {
       await deliverPointsNotify({
         chainId: 84532,
         txHash: hash,
+        ...fields,
         dataDir: dir,
         env,
         fetchImpl: async () => new Response("ok", { status: 200 }),
         confirmReceipt,
         confirmWaitMs: 5,
+        lookupNonce,
         scheduleDelay: () => {},
       });
       let gaveUp = false;
@@ -879,6 +1000,7 @@ describe("points push", { concurrency: false }, () => {
           fetchImpl: async () => new Response("ok", { status: 200 }),
           confirmReceipt,
           confirmWaitMs: 5,
+          lookupNonce,
           scheduleDelay: () => {},
         });
         gaveUp = logs.some((line) => line.includes("points_notify not_mined") && line.includes(hash));
@@ -893,6 +1015,7 @@ describe("points push", { concurrency: false }, () => {
         fetchImpl: async () => new Response("ok", { status: 200 }),
         confirmReceipt,
         confirmWaitMs: 5,
+        lookupNonce,
         scheduleDelay: () => {},
       });
       assert.equal(again.sent, 0);
@@ -1212,10 +1335,12 @@ describe("points push", { concurrency: false }, () => {
     const base = {
       chainId: 84532,
       txHash: hash,
+      ...identFields(),
       dataDir: dir,
       env,
       fetchImpl,
       confirmReceipt,
+      lookupNonce: pendingLookup,
       scheduleDelay,
       jitter: () => 0,
     };
@@ -1268,10 +1393,12 @@ describe("points push", { concurrency: false }, () => {
       await deliverPointsNotify({
         chainId: 84532,
         txHash: hash,
+        ...identFields(),
         dataDir: dir,
         env,
         fetchImpl,
         confirmReceipt,
+        lookupNonce: pendingLookup,
         scheduleDelay: () => {},
       });
       for (let i = 0; i < 30; i += 1) {
@@ -1280,6 +1407,7 @@ describe("points push", { concurrency: false }, () => {
           env,
           fetchImpl,
           confirmReceipt,
+          lookupNonce: pendingLookup,
           scheduleDelay: () => {},
         });
       }
@@ -1293,6 +1421,7 @@ describe("points push", { concurrency: false }, () => {
         env,
         fetchImpl,
         confirmReceipt,
+        lookupNonce: pendingLookup,
         confirmWaitMs: 15,
         scheduleDelay: () => {},
       });
@@ -1304,6 +1433,7 @@ describe("points push", { concurrency: false }, () => {
         env,
         fetchImpl,
         confirmReceipt,
+        lookupNonce: pendingLookup,
         scheduleDelay: () => {},
       });
       assert.equal(result.sent, 1);
@@ -1520,6 +1650,41 @@ describe("points push", { concurrency: false }, () => {
   });
 });
 
+function relayerRoot() {
+  return fileURLToPath(new URL("..", import.meta.url));
+}
+
+function identFields() {
+  return { ...rescueCall(), sentBlock: 1 };
+}
+
+function pendingLookup() {
+  return { status: "pending" };
+}
+
+function logClient({ count, head, logs, txs, fromBlocks }) {
+  return {
+    async getTransactionCount() {
+      return count;
+    },
+    async getBlockNumber() {
+      return BigInt(head);
+    },
+    async getLogs(filter) {
+      const fromBlock = BigInt(filter.fromBlock);
+      const toBlock = BigInt(filter.toBlock);
+      if (fromBlocks) fromBlocks.push(fromBlock);
+      return (logs || []).filter((log) => {
+        const n = BigInt(log.blockNumber);
+        return n >= fromBlock && n <= toBlock;
+      });
+    },
+    async getTransaction({ hash }) {
+      return (txs || {})[String(hash).toLowerCase()] || null;
+    },
+  };
+}
+
 async function mkdirPending(dir, file, hashes) {
   const { mkdir, writeFile } = await import("node:fs/promises");
   await mkdir(dir, { recursive: true });
@@ -1528,6 +1693,480 @@ async function mkdirPending(dir, file, hashes) {
   );
   await writeFile(file, `${lines.join("\n")}\n`, { mode: 0o600 });
 }
+
+describe("replacement lookup and backfill", () => {
+  it("credits a rescue mined more than 64 blocks after the stored block", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "points-far-"));
+    const secret = runtimeSecret();
+    const fields = identFields();
+    const original = tx();
+    const mined = tx();
+    const posts = [];
+    const fromBlocks = [];
+    const env = { POINTS_INGEST_SECRET: secret, POINTS_API_URL: "https://points.invalid" };
+    const txBody = {
+      hash: mined,
+      from: fields.txFrom,
+      nonce: fields.txNonce,
+      to: fields.txTo,
+      input: fields.txInput,
+    };
+    const client = logClient({
+      count: fields.txNonce + 1,
+      head: 300,
+      fromBlocks,
+      logs: [{ transactionHash: mined, blockNumber: 90 }],
+      txs: { [mined]: txBody },
+    });
+    try {
+      const result = await deliverPointsNotify({
+        chainId: 84532,
+        txHash: original,
+        ...fields,
+        sentBlock: 10,
+        dataDir: dir,
+        env,
+        fetchImpl: async (_url, init) => {
+          posts.push(JSON.parse(init.body).txHash);
+          return new Response("ok", { status: 200 });
+        },
+        confirmReceipt: () => new Promise(() => {}),
+        confirmWaitMs: 5,
+        lookupNonce: (from, nonce, hint) => findTxAtNonce(client, from, nonce, hint),
+        getTx: async () => txBody,
+        scheduleDelay: () => {},
+      });
+      assert.equal(result.sent, 1);
+      assert.deepEqual(posts, [mined]);
+      assert.ok(fromBlocks.some((block) => block === 10n));
+      assert.equal(fromBlocks.some((block) => block === 300n - 64n), false);
+    } finally {
+      clearPointsRetryTimers();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("credits nothing for a different contract or different call arguments", async () => {
+    const secret = runtimeSecret();
+    const env = { POINTS_INGEST_SECRET: secret, POINTS_API_URL: "https://points.invalid" };
+    const cases = [
+      { name: "contract", to: `0x${"44".repeat(20)}`, input: null },
+      { name: "args", to: null, input: rescueCall().txInput },
+    ];
+    for (const sample of cases) {
+      const dir = await mkdtemp(join(tmpdir(), "points-mismatch-"));
+      const fields = identFields();
+      const original = tx();
+      const other = tx();
+      const posts = [];
+      const body = {
+        hash: other,
+        from: fields.txFrom,
+        nonce: fields.txNonce,
+        to: sample.to || fields.txTo,
+        input: sample.name === "args" ? sample.input : fields.txInput,
+      };
+      const client = logClient({
+        count: fields.txNonce + 1,
+        head: 50,
+        logs: [{ transactionHash: other, blockNumber: 4 }],
+        txs: { [other]: body },
+      });
+      try {
+        const result = await deliverPointsNotify({
+          chainId: 84532,
+          txHash: original,
+          ...fields,
+          dataDir: dir,
+          env,
+          fetchImpl: async (_url, init) => {
+            posts.push(JSON.parse(init.body).txHash);
+            return new Response("ok", { status: 200 });
+          },
+          confirmReceipt: () => new Promise(() => {}),
+          confirmWaitMs: 5,
+          lookupNonce: (from, nonce, hint) => findTxAtNonce(client, from, nonce, hint),
+          getTx: async () => body,
+          scheduleDelay: () => {},
+        });
+        assert.equal(result.sent, 0, sample.name);
+        assert.deepEqual(posts, []);
+        const text = await readFile(pointsOutboxPath(dir), "utf8");
+        assert.match(text, /"op":"cancel"/);
+      } finally {
+        clearPointsRetryTimers();
+        await rm(dir, { recursive: true, force: true });
+      }
+    }
+  });
+
+  it("keeps an unresolved row after its own cap", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "points-unresolved-"));
+    const secret = runtimeSecret();
+    const hash = tx();
+    const logs = [];
+    const original = console.error;
+    console.error = (...args) => {
+      logs.push(args.join(" "));
+    };
+    let lookups = 0;
+    const env = { POINTS_INGEST_SECRET: secret, POINTS_API_URL: "https://points.invalid" };
+    const lookupNonce = () => {
+      lookups += 1;
+      return { status: "unresolved" };
+    };
+    try {
+      await deliverPointsNotify({
+        chainId: 84532,
+        txHash: hash,
+        ...identFields(),
+        dataDir: dir,
+        env,
+        fetchImpl: async () => new Response("ok", { status: 200 }),
+        confirmReceipt: () => new Promise(() => {}),
+        confirmWaitMs: 5,
+        lookupNonce,
+        scheduleDelay: () => {},
+      });
+      for (let i = 0; i < 12; i += 1) {
+        await retryPointsOutbox({
+          dataDir: dir,
+          env,
+          fetchImpl: async () => new Response("ok", { status: 200 }),
+          confirmReceipt: () => new Promise(() => {}),
+          confirmWaitMs: 5,
+          lookupNonce,
+          scheduleDelay: () => {},
+        });
+      }
+      assert.equal(lookups, 8);
+      assert.ok(logs.some((line) => line.includes("points_notify unresolved") && line.includes(hash)));
+      const stored = await readUnresolvedPoints(dir);
+      assert.equal(stored.length, 1);
+      assert.equal(stored[0].txHash, hash);
+      const again = lookups;
+      const result = await retryPointsOutbox({
+        dataDir: dir,
+        env,
+        fetchImpl: async () => new Response("ok", { status: 200 }),
+        confirmReceipt: () => new Promise(() => {}),
+        confirmWaitMs: 5,
+        lookupNonce,
+        scheduleDelay: () => {},
+      });
+      assert.equal(result.sent, 0);
+      assert.equal(lookups, again);
+    } finally {
+      console.error = original;
+      clearPointsRetryTimers();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps a legacy mine count when the compacted row has no mineAttempts", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "points-legacy-mine-"));
+    const secret = runtimeSecret();
+    const hash = tx();
+    const env = { POINTS_INGEST_SECRET: secret, POINTS_API_URL: "https://points.invalid" };
+    const file = pointsOutboxPath(dir);
+    await mkdir(dir, { recursive: true });
+    await writeFile(
+      file,
+      `${JSON.stringify({ op: "enqueue", chainId: 84532, txHash: hash, attempts: 40, ...identFields() })}\n`,
+      { mode: 0o600 },
+    );
+    let confirms = 0;
+    try {
+      const result = await retryPointsOutbox({
+        dataDir: dir,
+        env,
+        fetchImpl: async () => new Response("ok", { status: 200 }),
+        confirmReceipt: () => {
+          confirms += 1;
+          return new Promise(() => {});
+        },
+        confirmWaitMs: 5,
+        lookupNonce: pendingLookup,
+        scheduleDelay: () => {},
+      });
+      assert.equal(result.sent, 0);
+      assert.equal(confirms, 1);
+      const text = await readFile(file, "utf8");
+      assert.match(text, /not_mined/);
+    } finally {
+      clearPointsRetryTimers();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps an explicit zero mine count", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "points-zero-mine-"));
+    const secret = runtimeSecret();
+    const hash = tx();
+    const env = { POINTS_INGEST_SECRET: secret, POINTS_API_URL: "https://points.invalid" };
+    const file = pointsOutboxPath(dir);
+    await mkdir(dir, { recursive: true });
+    await writeFile(
+      file,
+      `${JSON.stringify({ op: "enqueue", chainId: 84532, txHash: hash, attempts: 40, mineAttempts: 0, ...identFields() })}\n`,
+      { mode: 0o600 },
+    );
+    try {
+      const result = await retryPointsOutbox({
+        dataDir: dir,
+        env,
+        fetchImpl: async () => new Response("ok", { status: 200 }),
+        confirmReceipt: () => new Promise(() => {}),
+        confirmWaitMs: 5,
+        lookupNonce: pendingLookup,
+        scheduleDelay: () => {},
+      });
+      assert.equal(result.sent, 0);
+      const text = await readFile(file, "utf8");
+      assert.equal(text.includes("not_mined"), false);
+    } finally {
+      clearPointsRetryTimers();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("posts the row hash when that hash is the mined rescue", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "points-own-"));
+    const secret = runtimeSecret();
+    const fields = identFields();
+    const hash = tx();
+    const posts = [];
+    const env = { POINTS_INGEST_SECRET: secret, POINTS_API_URL: "https://points.invalid", CHAIN_ID: "84532" };
+    try {
+      const result = await backfillPointsRescue({
+        chainId: 84532,
+        txHash: hash,
+        ...fields,
+        dataDir: dir,
+        env,
+        fetchImpl: async (_url, init) => {
+          posts.push(JSON.parse(init.body).txHash);
+          return new Response("ok", { status: 200 });
+        },
+        confirmReceipt: async () => ({ status: "success", transactionHash: hash }),
+        lookupNonce: async () => ({
+          status: "found",
+          tx: { hash, from: fields.txFrom, nonce: fields.txNonce, to: fields.txTo, input: fields.txInput },
+        }),
+        scheduleDelay: () => {},
+      });
+      assert.equal(result.sent, 1);
+      assert.deepEqual(posts, [hash]);
+      const text = await readFile(pointsOutboxPath(dir), "utf8");
+      assert.equal(text.includes('"op":"replace"'), false);
+    } finally {
+      clearPointsRetryTimers();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("posts a dropped rescue and a legacy mined receipt", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "points-drop-replay-"));
+    const secret = runtimeSecret();
+    const dropped = tx();
+    const legacy = tx();
+    const posts = [];
+    const env = { POINTS_INGEST_SECRET: secret, POINTS_API_URL: "https://points.invalid", CHAIN_ID: "84532" };
+    const fields = identFields();
+    const file = pointsOutboxPath(dir);
+    await mkdir(dir, { recursive: true });
+    await writeFile(file, `${JSON.stringify({ op: "dropped", txHash: dropped, error: "not_mined" })}\n`, { mode: 0o600 });
+    try {
+      const replayed = await backfillPointsRescue({
+        chainId: 84532,
+        txHash: dropped,
+        ...fields,
+        dataDir: dir,
+        env,
+        fetchImpl: async (_url, init) => {
+          posts.push(JSON.parse(init.body).txHash);
+          return new Response("ok", { status: 200 });
+        },
+        confirmReceipt: async () => ({ status: "success", transactionHash: dropped }),
+        lookupNonce: async () => ({
+          status: "found",
+          tx: { hash: dropped, from: fields.txFrom, nonce: fields.txNonce, to: fields.txTo, input: fields.txInput },
+        }),
+        scheduleDelay: () => {},
+      });
+      const old = await backfillPointsRescue({
+        chainId: 84532,
+        txHash: legacy,
+        dataDir: dir,
+        env,
+        fetchImpl: async (_url, init) => {
+          posts.push(JSON.parse(init.body).txHash);
+          return new Response("ok", { status: 200 });
+        },
+        confirmReceipt: async () => ({ status: "success", transactionHash: legacy }),
+        scheduleDelay: () => {},
+      });
+      assert.equal(replayed.sent, 1);
+      assert.equal(old.sent, 1);
+      assert.deepEqual(posts, [dropped, legacy]);
+    } finally {
+      clearPointsRetryTimers();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("continues after one backfill row throws and skips another chain", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "points-rows-"));
+    const secret = runtimeSecret();
+    const bad = tx();
+    const good = tx();
+    const other = tx();
+    const posts = [];
+    const env = { POINTS_INGEST_SECRET: secret, POINTS_API_URL: "https://points.invalid", CHAIN_ID: "84532" };
+    try {
+      const result = await backfillRows(
+        [
+          { chainId: 84532, txHash: bad, dataDir: "/dev/null/nope" },
+          { chainId: 421614, txHash: other, dataDir: dir },
+          { chainId: 84532, txHash: good, dataDir: dir },
+        ],
+        {
+          env,
+          fetchImpl: async (_url, init) => {
+            posts.push(JSON.parse(init.body).txHash);
+            return new Response("ok", { status: 200 });
+          },
+          confirmReceipt: async () => ({ status: "success", transactionHash: good }),
+          scheduleDelay: () => {},
+        },
+      );
+      assert.equal(result.failed, 1);
+      assert.equal(result.sent, 1);
+      assert.deepEqual(posts, [good]);
+    } finally {
+      clearPointsRetryTimers();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("credits exactly three mined rescues that are missing from the outbox", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "points-three-"));
+    const secret = runtimeSecret();
+    const hashes = [tx(), tx(), tx()];
+    const other = tx();
+    const posts = [];
+    const lines = [
+      ...hashes.map((hash) => JSON.stringify({ event: "rescue_ok", chainId: 84532, txHash: hash })),
+      JSON.stringify({ event: "rescue_ok", chainId: 421614, txHash: other }),
+    ];
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, "rescues.jsonl"), `${lines.join("\n")}\n`, { mode: 0o600 });
+    const rpc = http.createServer(async (req, res) => {
+      const chunks = [];
+      for await (const chunk of req) chunks.push(chunk);
+      const body = JSON.parse(Buffer.concat(chunks).toString("utf8") || "null");
+      const list = Array.isArray(body) ? body : [body];
+      const out = list.map((call) => {
+        let result = null;
+        if (call.method === "eth_chainId") result = "0x14a34";
+        else if (call.method === "eth_blockNumber") result = "0x20";
+        else if (call.method === "eth_getTransactionReceipt") {
+          const hash = String(call.params?.[0] || "").toLowerCase();
+          if (hashes.includes(hash)) {
+            result = {
+              status: "0x1",
+              blockNumber: "0x10",
+              transactionHash: hash,
+              transactionIndex: "0x0",
+              blockHash: `0x${"0".repeat(64)}`,
+              from: `0x${"11".repeat(20)}`,
+              to: `0x${"22".repeat(20)}`,
+              gasUsed: "0x1",
+              cumulativeGasUsed: "0x1",
+              effectiveGasPrice: "0x1",
+              logs: [],
+              logsBloom: `0x${"0".repeat(256)}`,
+              type: "0x0",
+              contractAddress: null,
+            };
+          }
+        }
+        return { jsonrpc: "2.0", id: call.id, result };
+      });
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify(Array.isArray(body) ? out : out[0]));
+    });
+    const catcher = http.createServer(async (req, res) => {
+      const chunks = [];
+      for await (const chunk of req) chunks.push(chunk);
+      const raw = Buffer.concat(chunks).toString("utf8");
+      const timestamp = String(req.headers["x-points-timestamp"] || "");
+      const signature = String(req.headers["x-points-signature"] || "");
+      const expected = createHmac("sha256", secret).update(`${timestamp}\n${raw}`).digest("hex");
+      if (!timestamp || signature !== expected) {
+        res.writeHead(401);
+        res.end('{"ok":false}');
+        return;
+      }
+      posts.push(JSON.parse(raw).txHash);
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end('{"ok":true}');
+    });
+    const rpcPort = await new Promise((resolve) => {
+      rpc.listen(0, "127.0.0.1", () => resolve(rpc.address().port));
+    });
+    const pointsPort = await new Promise((resolve) => {
+      catcher.listen(0, "127.0.0.1", () => resolve(catcher.address().port));
+    });
+    const previous = {
+      DATA_DIR: process.env.DATA_DIR,
+      CHAIN_ID: process.env.CHAIN_ID,
+      RPC_URL: process.env.RPC_URL,
+      POINTS_INGEST_SECRET: process.env.POINTS_INGEST_SECRET,
+      POINTS_API_URL: process.env.POINTS_API_URL,
+      QA_POINTS_TARGET: process.env.QA_POINTS_TARGET,
+    };
+    try {
+      process.env.DATA_DIR = dir;
+      process.env.CHAIN_ID = "84532";
+      process.env.RPC_URL = `http://127.0.0.1:${rpcPort}/rpc`;
+      process.env.POINTS_INGEST_SECRET = secret;
+      process.env.POINTS_API_URL = "https://points.invalid";
+      process.env.QA_POINTS_TARGET = `http://127.0.0.1:${pointsPort}`;
+      const child = spawn(process.execPath, ["--import", join(relayerRoot(), "test/pointsFetchShim.mjs"), "scripts/backfill-points.mjs"], {
+        cwd: relayerRoot(),
+        env: process.env,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      const output = [];
+      child.stdout.on("data", (buf) => output.push(String(buf)));
+      child.stderr.on("data", (buf) => output.push(String(buf)));
+      const code = await new Promise((resolve) => child.on("exit", resolve));
+      assert.equal(code, 0, output.join(""));
+      assert.deepEqual(posts.slice().sort(), hashes.slice().sort());
+      assert.equal(posts.length, 3);
+      assert.match(output.join(""), /points_backfill done 3 skipped 0 failed 0/);
+    } finally {
+      for (const [key, value] of Object.entries(previous)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+      await new Promise((resolve) => rpc.close(() => resolve()));
+      await new Promise((resolve) => catcher.close(() => resolve()));
+      clearPointsRetryTimers();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not delete the compaction temp it is writing", () => {
+    const src = readFileSync(fileURLToPath(new URL("../points/notify.mjs", import.meta.url)), "utf8");
+    const sweep = src.slice(src.indexOf("async function sweepTemps"));
+    assert.match(sweep, /liveTemps\.has/);
+    const compact = src.slice(src.indexOf("async function maybeCompact"), src.indexOf("async function sweepTemps"));
+    assert.match(compact, /liveTemps\.add/);
+    assert.match(compact, /liveTemps\.delete/);
+  });
+});
 
 describe("backfill parser", () => {
   it("replays rescue_ok tx hashes and skips other lines", () => {

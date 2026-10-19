@@ -1,15 +1,16 @@
 /**
  * Replay rescue_ok rows from DATA_DIR/rescues.jsonl.
- * Uses the sender and nonce lookup when the call is known, and skips a row otherwise.
- * Does not reset attempt counters. No-op unless both
- * POINTS_INGEST_SECRET and POINTS_API_URL are set in the environment.
+ * Stop the relayer first. This script and the relayer write the same outbox file.
+ * Rows for the process CHAIN_ID are posted. Other chains are skipped.
+ * A waiting row keeps its attempt counters. One bad row does not stop the run.
+ * No-op unless both POINTS_INGEST_SECRET and POINTS_API_URL are set.
  */
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { createPublicClient, http as viemHttp } from "viem";
 import { arbitrumSepolia, baseSepolia } from "viem/chains";
-import { backfillPointsRescue, findTxAtNonce, pointsMinConfirmations, pointsPushEnabled } from "../points/notify.mjs";
+import { backfillRows, findTxAtNonce, pointsMinConfirmations, pointsPushEnabled } from "../points/notify.mjs";
 
 const TX_RE = /^0x[0-9a-fA-F]{64}$/;
 const CHAINS = new Set([84532, 421614]);
@@ -45,48 +46,57 @@ export function rescueTxsFromJsonl(text, defaultChainId) {
     if (/^0x[0-9a-f]{40}$/.test(txTo)) rowOut.txTo = txTo;
     const txInput = String(row.txInput || "").trim().toLowerCase();
     if (/^0x[0-9a-f]*$/.test(txInput) && txInput.length >= 10) rowOut.txInput = txInput;
+    if (row.sentBlock !== undefined && row.sentBlock !== null && /^\d+$/.test(String(row.sentBlock).trim())) {
+      rowOut.sentBlock = Number(row.sentBlock);
+    }
     out.push(rowOut);
   }
   return out;
 }
 
-async function main() {
-  if (!pointsPushEnabled(process.env)) {
+export async function runBackfill(env = process.env) {
+  if (!pointsPushEnabled(env)) {
     console.log("points_backfill disabled");
-    return;
+    return { rows: 0, skipped: 0, failed: 0, sent: 0 };
   }
-  const dataDir = process.env.DATA_DIR || "./data";
+  const chainId = Number(env.CHAIN_ID);
+  if (!CHAINS.has(chainId)) {
+    console.error("points_backfill", "chain");
+    return { rows: 0, skipped: 0, failed: 0, sent: 0 };
+  }
+  const dataDir = env.DATA_DIR || "./data";
   let text = "";
   try {
     text = await readFile(join(dataDir, "rescues.jsonl"), "utf8");
   } catch (err) {
     if (err && err.code === "ENOENT") {
       console.log("points_backfill empty");
-      return;
+      return { rows: 0, skipped: 0, failed: 0, sent: 0 };
     }
     throw err;
   }
-  const rows = rescueTxsFromJsonl(text, process.env.CHAIN_ID);
-  const rpcUrl = String(process.env.RPC_URL || "").trim();
+  const rows = rescueTxsFromJsonl(text, chainId).filter((row) => row.chainId === chainId);
+  const rpcUrl = String(env.RPC_URL || "").trim();
   let lookupNonce;
   let confirmReceipt;
   if (rpcUrl) {
-    const chain = Number(process.env.CHAIN_ID) === 84532 ? baseSepolia : arbitrumSepolia;
+    const chain = chainId === 84532 ? baseSepolia : arbitrumSepolia;
     const client = createPublicClient({ chain, transport: viemHttp(rpcUrl) });
-    lookupNonce = (from, nonce) => findTxAtNonce(client, from, nonce);
+    lookupNonce = (from, nonce, hint) => findTxAtNonce(client, from, nonce, hint || {});
     confirmReceipt = (hash) =>
       client.waitForTransactionReceipt({
         hash,
-        confirmations: pointsMinConfirmations(process.env, hash),
+        confirmations: pointsMinConfirmations(env, hash),
         timeout: 20_000,
       });
   }
-  let skipped = 0;
-  for (const row of rows) {
-    const result = await backfillPointsRescue({ ...row, dataDir, env: process.env, lookupNonce, confirmReceipt });
-    if (result && result.skipped) skipped += 1;
-  }
-  console.log(`points_backfill done ${rows.length} skipped ${skipped}`);
+  const result = await backfillRows(rows, { dataDir, env, lookupNonce, confirmReceipt });
+  console.log(`points_backfill done ${rows.length} skipped ${result.skipped} failed ${result.failed}`);
+  return { rows: rows.length, ...result };
+}
+
+async function main() {
+  await runBackfill(process.env);
 }
 
 function isDirectRun() {

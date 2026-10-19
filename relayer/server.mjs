@@ -1,4 +1,4 @@
-import { createPublicClient, createWalletClient, http as viemHttp, keccak256 } from "viem";
+import { createPublicClient, createWalletClient, encodeFunctionData, http as viemHttp, keccak256, parseTransaction } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { arbitrumSepolia } from "viem/chains";
 import { createRelayerApp } from "./app.mjs";
@@ -228,15 +228,24 @@ async function submitRescue(body) {
       logSimulationFailure(err);
       throw simulationFailure(err);
     }
+    let sentBlock = "0";
+    try {
+      sentBlock = (await publicClient.getBlockNumber()).toString();
+    } catch {
+      sentBlock = "0";
+    }
+    const txData = encodeFunctionData({ abi: rescueAbi, functionName: "rescueWithPermit", args });
+    const request = await walletClient.prepareTransactionRequest({
+      account,
+      to: /** @type {`0x${string}`} */ (SWAP),
+      data: txData,
+    });
+    const serialized = await walletClient.signTransaction(request);
+    const parsed = parseTransaction(serialized);
     const txHash = await withBroadcastRetry(
       async (attempt) => {
         attempts = attempt;
-        return walletClient.writeContract({
-          address: /** @type {`0x${string}`} */ (SWAP),
-          abi: rescueAbi,
-          functionName: "rescueWithPermit",
-          args,
-        });
+        return walletClient.sendRawTransaction({ serializedTransaction: serialized });
       },
       {
         maxAttempts: BROADCAST_MAX_ATTEMPTS,
@@ -245,22 +254,19 @@ async function submitRescue(body) {
       },
     );
     nonceStore.markConsumed(order.user, order.nonce);
-    let seenTx = null;
-    try {
-      seenTx = await publicClient.getTransaction({ hash: txHash });
-    } catch {
-      seenTx = null;
-    }
-    const txFrom = seenTx && seenTx.from ? seenTx.from : account.address;
-    const txNonce = seenTx && seenTx.nonce !== undefined && seenTx.nonce !== null ? seenTx.nonce.toString() : undefined;
-    const txTo = seenTx && seenTx.to ? seenTx.to : SWAP;
-    const txInput = seenTx && seenTx.input ? seenTx.input : undefined;
+    const txFrom = String(parsed.from || account.address);
+    const txNonce = parsed.nonce === undefined || parsed.nonce === null ? undefined : parsed.nonce.toString();
+    const txTo = parsed.to ? String(parsed.to) : String(SWAP);
+    const txInput = typeof parsed.data === "string" && parsed.data.length > 2 ? parsed.data : txData;
     await rescueLog.append({
       event: "rescue_ok",
       ...summary,
       txHash,
       txFrom,
       txNonce,
+      txTo,
+      txInput,
+      sentBlock,
       attempts,
       ms: Date.now() - started,
     });
@@ -274,6 +280,7 @@ async function submitRescue(body) {
         txNonce,
         txTo,
         txInput,
+        sentBlock,
         dataDir: DATA_DIR,
         env: process.env,
         confirmReceipt: confirmPointsReceipt,
@@ -328,8 +335,8 @@ const server = createRelayerApp({
   trustedProxyHops: TRUSTED_PROXY_HOPS,
 });
 
-function lookupPointsNonce(from, nonce) {
-  return findTxAtNonce(publicClient, from, nonce);
+function lookupPointsNonce(from, nonce, item) {
+  return findTxAtNonce(publicClient, from, nonce, item || {});
 }
 
 function readPointsTx(hash) {
@@ -337,10 +344,13 @@ function readPointsTx(hash) {
 }
 
 function confirmPointsReceipt(hash) {
-  return publicClient.waitForTransactionReceipt({
+  const depth = pointsMinConfirmations(process.env, hash);
+  const budget = 20_000;
+  const started = Date.now();
+  const first = publicClient.waitForTransactionReceipt({
     hash,
-    confirmations: pointsMinConfirmations(process.env, hash),
-    timeout: 20_000,
+    confirmations: 1,
+    timeout: budget,
     onReplaced(response) {
       const job = notePointsReceiptReplacement(
         { chainId: CHAIN_ID, txHash: hash, dataDir: DATA_DIR },
@@ -350,6 +360,16 @@ function confirmPointsReceipt(hash) {
         console.error("points_notify", "error");
       });
     },
+  });
+  if (depth <= 1) return first;
+  return first.then((receipt) => {
+    const left = budget - (Date.now() - started);
+    const nextHash = receipt && receipt.transactionHash ? receipt.transactionHash : hash;
+    return publicClient.waitForTransactionReceipt({
+      hash: nextHash,
+      confirmations: pointsMinConfirmations(process.env, hash),
+      timeout: left > 0 ? left : 1,
+    });
   });
 }
 

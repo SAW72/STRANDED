@@ -1,7 +1,7 @@
 import { createHmac, randomBytes } from "node:crypto";
 import { appendFile, mkdir, open, readdir, readFile, rename, rm } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
-import { decodeFunctionData } from "viem";
+import { decodeFunctionData, encodeEventTopics } from "viem";
 import { rescueAbi } from "../rescueAbi.mjs";
 
 const TX_RE = /^0x[0-9a-f]{64}$/;
@@ -15,6 +15,8 @@ const MAX_FAST_ATTEMPTS = 6;
 const NOT_FOUND_ATTEMPTS = 8;
 /** Give up after this many real not-mined receipt waits. Outages do not count. */
 const MAX_MINE_ATTEMPTS = 24;
+/** Give up after this many unresolved scans, then keep a durable record. Outages do not count. */
+const MAX_UNRESOLVED = 8;
 const MAX_PARALLEL = 4;
 const PERMANENT_REJECTIONS = new Set([
   "status_failed",
@@ -33,8 +35,24 @@ const PERMANENT_REJECTIONS = new Set([
 const CONFIRM_WAIT_MS = 20_000;
 const COMPACT_AFTER_LINES = 6;
 const DEFAULT_MIN_CONFIRMATIONS = 2;
-const NONCE_SCAN_BLOCKS = 64;
+const LOG_CHUNK_BLOCKS = 2_000n;
 const ADDR_RE = /^0x[0-9a-f]{40}$/;
+const RESCUED_EVENT = {
+  type: "event",
+  name: "Rescued",
+  inputs: [
+    { name: "user", type: "address", indexed: true },
+    { name: "tokenIn", type: "address", indexed: true },
+    { name: "amountIn", type: "uint256" },
+    { name: "feeAmount", type: "uint256" },
+    { name: "amountSwap", type: "uint256" },
+    { name: "nativeOut", type: "uint256" },
+    { name: "nativeTo", type: "address", indexed: true },
+    { name: "to", type: "address" },
+    { name: "nonce", type: "uint256" },
+    { name: "relayer", type: "address" },
+  ],
+};
 
 let tail = Promise.resolve();
 let io = Promise.resolve();
@@ -42,6 +60,9 @@ let settles = Promise.resolve();
 const scheduledRetries = new Set();
 const retryTimers = new Map();
 const inFlight = new Set();
+const liveTemps = new Set();
+let confirmSlots = MAX_PARALLEL;
+const confirmQueue = [];
 
 function enqueueWork(fn) {
   const run = tail.then(fn, fn);
@@ -81,6 +102,24 @@ export function clearPointsRetryTimers() {
   retryTimers.clear();
   scheduledRetries.clear();
   inFlight.clear();
+  confirmSlots = MAX_PARALLEL;
+  confirmQueue.length = 0;
+}
+
+function acquireConfirm() {
+  if (confirmSlots > 0) {
+    confirmSlots -= 1;
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    confirmQueue.push(resolve);
+  });
+}
+
+function releaseConfirm() {
+  const next = confirmQueue.shift();
+  if (next) next();
+  else confirmSlots += 1;
 }
 
 export function configuredIngestSecret(env = process.env) {
@@ -312,7 +351,19 @@ async function startDelivery(opts) {
     await sweepTemps(file);
     const folded = await readFold(file);
     const dest = folded.follow(item.txHash);
-    if (!isSettled(folded, item.txHash) && !isSettled(folded, dest) && !folded.pending.has(dest)) {
+    const replay = opts.replay === true;
+    const blocked =
+      folded.cancelled.has(item.txHash) ||
+      folded.cancelled.has(dest) ||
+      folded.delivered.has(item.txHash) ||
+      folded.delivered.has(dest) ||
+      folded.pending.has(dest) ||
+      (!replay &&
+        (folded.dropped.has(item.txHash) ||
+          folded.dropped.has(dest) ||
+          folded.unresolved.has(item.txHash) ||
+          folded.unresolved.has(dest)));
+    if (!blocked) {
       await writeRecord(file, {
         op: "enqueue",
         chainId: item.chainId,
@@ -416,6 +467,7 @@ async function sendOne(opts, txHash) {
 async function settleItem(file, opts, item) {
   const outcome = await confirmIfNeeded(opts, item);
   if (outcome.gate === "cancelled") return enqueueIo(() => persistCancel(file, opts, outcome.item.txHash));
+  if (outcome.gate === "hold") return enqueueIo(() => persistUnresolved(file, opts, outcome.item));
   if (outcome.gate !== "ready") return enqueueIo(() => applyOutcome(file, opts, outcome));
   const ready = await enqueueIo(() => takeReady(file, opts, outcome));
   if (!ready) return 0;
@@ -428,10 +480,15 @@ async function confirmIfNeeded(opts, item) {
   const waitMs = Number.isFinite(Number(opts.confirmWaitMs)) ? Number(opts.confirmWaitMs) : CONFIRM_WAIT_MS;
   let receipt;
   let confirmError;
+  await acquireConfirm();
   try {
-    receipt = await withTimeout(Promise.resolve().then(() => opts.confirmReceipt(item.txHash)), waitMs);
-  } catch (err) {
-    confirmError = err;
+    try {
+      receipt = await withTimeout(Promise.resolve().then(() => opts.confirmReceipt(item.txHash)), waitMs);
+    } catch (err) {
+      confirmError = err;
+    }
+  } finally {
+    releaseConfirm();
   }
   if (receipt && receiptAccepted(receipt)) {
     const next = itemForReceipt(item, receipt);
@@ -440,6 +497,7 @@ async function confirmIfNeeded(opts, item) {
     return classifyOtherHash(opts, item, next.txHash);
   }
   if (receipt && !receiptAccepted(receipt)) return { gate: "rejected", item };
+  if (!hasResolvableIdentity(item)) return { gate: "hold", item };
   const looked = await lookupMinedReplacement(opts, item);
   if (looked) return looked;
   if (confirmError && confirmError.message !== "confirm_timeout") {
@@ -490,9 +548,7 @@ function itemForReceipt(item, receipt) {
 }
 
 async function classifyOtherHash(opts, item, hash) {
-  if (!hasCallIdentity(item)) {
-    return { gate: "pending", item, error: "unresolved", kind: "outage", alert: true };
-  }
+  if (!hasCallIdentity(item)) return { gate: "hold", item };
   let tx = null;
   if (typeof opts.getTx === "function") {
     try {
@@ -510,24 +566,22 @@ async function classifyOtherHash(opts, item, hash) {
 }
 
 async function lookupMinedReplacement(opts, item) {
-  if (!hasNonceIdentity(item) || typeof opts.lookupNonce !== "function") return null;
+  if (!hasResolvableIdentity(item) || typeof opts.lookupNonce !== "function") return { gate: "hold", item };
   let looked;
   try {
-    looked = await opts.lookupNonce(item.txFrom, item.txNonce);
+    looked = await opts.lookupNonce(item.txFrom, item.txNonce, item);
   } catch {
     return { gate: "pending", item, error: "rpc_error", kind: "outage", alert: true };
   }
   if (!looked || looked.status === "pending") return null;
-  if (looked.status === "unresolved") {
-    return { gate: "pending", item, error: "unresolved", kind: "outage", alert: true };
-  }
+  if (looked.status === "mismatch" || looked.status === "absent") return { gate: "cancelled", item };
   if (looked.status !== "found" || !looked.tx) {
-    return { gate: "pending", item, error: "unresolved", kind: "outage", alert: true };
+    return { gate: "pending", item, error: "unresolved", kind: "unresolved", alert: true };
   }
+  if (!senderAndNonceMatch(item, looked.tx) || !matchesRescue(item, looked.tx)) return { gate: "cancelled", item };
   const cand = candidateFromTx(looked.tx);
-  if (!cand) return { gate: "pending", item, error: "unresolved", kind: "outage", alert: true };
-  if (cand.hash === item.txHash) return null;
-  if (!hasCallIdentity(item) || !matchesRescue(item, looked.tx)) return { gate: "cancelled", item };
+  if (!cand) return { gate: "pending", item, error: "unresolved", kind: "unresolved", alert: true };
+  if (cand.hash === item.txHash) return { gate: "ready", item };
   return {
     gate: "ready",
     item: replacementItem(item, looked.tx),
@@ -561,6 +615,10 @@ async function applyOutcome(file, opts, outcome) {
   const counts = await noteAttempt(file, opts, item, error, kind);
   if (kind === "mine" && counts.mineAttempts >= MAX_MINE_ATTEMPTS) {
     await persistDrop(file, opts, item.txHash, "not_mined");
+    return 0;
+  }
+  if (kind === "unresolved" && counts.unresolvedAttempts >= MAX_UNRESOLVED) {
+    await persistUnresolved(file, opts, item);
     return 0;
   }
   scheduleBackoff(opts, item.txHash, counts.attempts);
@@ -597,6 +655,7 @@ async function takeReady(file, opts, outcome) {
         attempts: item.attempts || 0,
         mineAttempts: item.mineAttempts || 0,
         notFound: item.notFound || 0,
+        unresolvedAttempts: item.unresolvedAttempts || 0,
         ...identityFrom(item),
       });
     }
@@ -648,6 +707,7 @@ async function noteAttempt(file, opts, item, error, kind) {
   const attempts = (current?.attempts || 0) + 1;
   const mineAttempts = (current?.mineAttempts || 0) + (kind === "mine" ? 1 : 0);
   const notFound = (current?.notFound || 0) + (kind === "missing" ? 1 : 0);
+  const unresolvedAttempts = (current?.unresolvedAttempts || 0) + (kind === "unresolved" ? 1 : 0);
   await writeRecord(file, {
     op: "attempt",
     txHash: item.txHash,
@@ -656,8 +716,9 @@ async function noteAttempt(file, opts, item, error, kind) {
     attempts,
     mineAttempts,
     notFound,
+    unresolvedAttempts,
   });
-  return { attempts, mineAttempts, notFound };
+  return { attempts, mineAttempts, notFound, unresolvedAttempts };
 }
 
 function scheduleBackoff(opts, txHash, attempts) {
@@ -811,7 +872,8 @@ async function writeRecord(file, record) {
     record.op === "delivered" ||
     record.op === "replace" ||
     record.op === "cancel" ||
-    record.op === "observe"
+    record.op === "observe" ||
+    record.op === "unresolved"
   ) {
     await appendDurable(file, record);
     return;
@@ -856,6 +918,9 @@ async function maybeCompact(file) {
   for (const hash of folded.dropped) {
     kept.push({ op: "dropped", txHash: hash, at, error: folded.dropErrors.get(hash) || "dropped" });
   }
+  for (const row of folded.unresolved.values()) {
+    kept.push({ op: "unresolved", chainId: row.chainId, txHash: row.txHash, at, ...identityFrom(row) });
+  }
   for (const [hash, obs] of folded.observed) {
     if (folded.links.has(hash) || folded.cancelled.has(hash)) continue;
     const row = { op: "observe", txHash: hash, replacedBy: obs.replacedBy, at };
@@ -868,6 +933,7 @@ async function maybeCompact(file) {
   }
   const next = kept.map((row) => JSON.stringify(row)).join("\n");
   const tmp = `${file}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`;
+  liveTemps.add(tmp);
   const fh = await open(tmp, "w", 0o600);
   try {
     await fh.writeFile(next ? `${next}\n` : "");
@@ -880,6 +946,8 @@ async function maybeCompact(file) {
   } catch (err) {
     await rm(tmp, { force: true });
     throw err;
+  } finally {
+    liveTemps.delete(tmp);
   }
 }
 
@@ -893,11 +961,14 @@ async function sweepTemps(file) {
     throw err;
   }
   const base = basename(file);
-  await Promise.all(
-    names
-      .filter((name) => name.startsWith(`${base}.`) && name.endsWith(".tmp"))
-      .map((name) => rm(join(dir, name), { force: true })),
-  );
+  const victims = [];
+  for (const name of names) {
+    if (!name.startsWith(`${base}.`) || !name.endsWith(".tmp")) continue;
+    const full = join(dir, name);
+    if (liveTemps.has(full)) continue;
+    victims.push(full);
+  }
+  await Promise.all(victims.map((full) => rm(full, { force: true })));
 }
 
 async function readState(file) {
@@ -923,6 +994,7 @@ function emptyFold() {
   const dropped = new Set();
   const dropErrors = new Map();
   const observed = new Map();
+  const unresolved = new Map();
   const follow = (hash) => {
     const seen = new Set();
     let current = hash;
@@ -932,17 +1004,25 @@ function emptyFold() {
     }
     return current;
   };
-  return { pending, links, cancelled, delivered, dropped, dropErrors, observed, follow };
+  return { pending, links, cancelled, delivered, dropped, dropErrors, observed, unresolved, follow };
 }
 
 function foldText(text) {
   const folded = emptyFold();
-  const { pending, links, cancelled, delivered, dropped, dropErrors, observed } = folded;
+  const { pending, links, cancelled, delivered, dropped, dropErrors, observed, unresolved } = folded;
   const follow = folded.follow;
   const movePending = () => {
     for (const [key, value] of [...pending.entries()]) {
       const moved = follow(key);
-      if (moved === key || cancelled.has(moved) || delivered.has(moved) || dropped.has(moved)) continue;
+      if (
+        moved === key ||
+        cancelled.has(moved) ||
+        delivered.has(moved) ||
+        dropped.has(moved) ||
+        unresolved.has(moved)
+      ) {
+        continue;
+      }
       pending.delete(key);
       if (!pending.has(moved)) pending.set(moved, { ...value, txHash: moved });
     }
@@ -977,14 +1057,25 @@ function foldText(text) {
     if (row.op === "enqueue") {
       const dest = follow(hash);
       const ident = identityFrom(row);
-      if (cancelled.has(hash) || cancelled.has(dest) || delivered.has(dest) || dropped.has(dest)) continue;
+      if (dropped.has(hash) || dropped.has(dest)) {
+        dropped.delete(hash);
+        dropped.delete(dest);
+        dropErrors.delete(hash);
+        dropErrors.delete(dest);
+      }
+      if (unresolved.has(hash) || unresolved.has(dest)) {
+        unresolved.delete(hash);
+        unresolved.delete(dest);
+      }
+      if (cancelled.has(hash) || cancelled.has(dest) || delivered.has(dest)) continue;
       if (!pending.has(dest)) {
         pending.set(dest, {
           chainId: Number(row.chainId),
           txHash: dest,
           attempts: Number(row.attempts) || 0,
-          mineAttempts: Number(row.mineAttempts) || 0,
+          mineAttempts: Number(row.mineAttempts ?? row.attempts) || 0,
           notFound: Number(row.notFound) || 0,
+          unresolvedAttempts: Number(row.unresolvedAttempts) || 0,
           ...ident,
         });
       } else {
@@ -997,6 +1088,7 @@ function foldText(text) {
         current.attempts += 1;
         if (row.error === "receipt_pending") current.mineAttempts += 1;
         if (row.error === "http_404") current.notFound += 1;
+        if (row.error === "unresolved") current.unresolvedAttempts += 1;
       }
     } else if (row.op === "replace") {
       const next = String(row.replacedBy || "").trim().toLowerCase();
@@ -1023,6 +1115,9 @@ function foldText(text) {
       dropped.add(hash);
       if (row.error) dropErrors.set(hash, String(row.error));
       pending.delete(hash);
+    } else if (row.op === "unresolved") {
+      unresolved.set(hash, { chainId: Number(row.chainId), txHash: hash, ...identityFrom(row) });
+      pending.delete(hash);
     }
   }
   return folded;
@@ -1036,7 +1131,9 @@ function isSettled(folded, hash) {
     folded.delivered.has(hash) ||
     folded.delivered.has(dest) ||
     folded.dropped.has(hash) ||
-    folded.dropped.has(dest)
+    folded.dropped.has(dest) ||
+    folded.unresolved.has(hash) ||
+    folded.unresolved.has(dest)
   );
 }
 
@@ -1049,6 +1146,7 @@ function compactEnqueue(item, at) {
     attempts: item.attempts,
     mineAttempts: item.mineAttempts || 0,
     notFound: item.notFound || 0,
+    unresolvedAttempts: item.unresolvedAttempts || 0,
   };
   const ident = identityFrom(item);
   return { ...row, ...ident };
@@ -1063,6 +1161,26 @@ async function persistCancel(file, opts, txHash) {
   return 0;
 }
 
+async function persistUnresolved(file, opts, item) {
+  const folded = await readFold(file);
+  if (!folded.unresolved.has(item.txHash)) {
+    await writeRecord(file, {
+      op: "unresolved",
+      chainId: item.chainId,
+      txHash: item.txHash,
+      at: stamp(opts),
+      ...identityFrom(item),
+    });
+    console.error("points_notify", "unresolved", item.txHash);
+  }
+  return 0;
+}
+
+export async function readUnresolvedPoints(dataDir) {
+  const folded = await readFold(pointsOutboxPath(dataDir));
+  return [...folded.unresolved.values()];
+}
+
 function identityFrom(source) {
   const out = {};
   if (!source || typeof source !== "object") return out;
@@ -1074,6 +1192,8 @@ function identityFrom(source) {
   if (ADDR_RE.test(to)) out.txTo = to;
   const input = String(source.txInput || source.input || "").trim().toLowerCase();
   if (/^0x[0-9a-f]*$/.test(input) && input.length >= 2) out.txInput = input;
+  const block = readNonce(source.sentBlock);
+  if (block !== null) out.sentBlock = block;
   return out;
 }
 
@@ -1092,6 +1212,17 @@ function hasNonceIdentity(item) {
 
 function hasCallIdentity(item) {
   return Boolean(item && item.txTo && item.txInput && item.txInput.length >= 10);
+}
+
+function hasResolvableIdentity(item) {
+  return hasNonceIdentity(item) && hasCallIdentity(item) && Number.isSafeInteger(item && item.sentBlock) && item.sentBlock >= 0;
+}
+
+function senderAndNonceMatch(item, tx) {
+  if (!tx || typeof tx !== "object") return false;
+  if (String(tx.from || "").toLowerCase() !== String(item.txFrom).toLowerCase()) return false;
+  const nonce = readNonce(tx.nonce);
+  return nonce !== null && nonce === item.txNonce;
 }
 
 function candidateFromTx(tx) {
@@ -1148,85 +1279,143 @@ function argsEqual(left, right) {
   return false;
 }
 
+function rescueUser(input) {
+  try {
+    const decoded = decodeFunctionData({ abi: rescueAbi, data: input });
+    if (!decoded || decoded.functionName !== "rescueWithPermit" || !decoded.args || !decoded.args[0]) return "";
+    const order = decoded.args[0];
+    const user = order.user || order[0];
+    return user ? String(user).trim().toLowerCase() : "";
+  } catch {
+    return "";
+  }
+}
+
 /**
- * Finds the mined transaction at sender+nonce.
- * `pending` means that nonce is still unused. `unresolved` means the nonce was
- * mined but the transaction is outside the recent block window.
+ * Finds the mined rescue at sender+nonce.
+ * `pending` means that nonce is still unused.
+ * `found` is a Rescued log whose transaction matches the sender, nonce, and call.
+ * `mismatch` and `absent` mean the nonce was consumed by a different call.
+ * `unresolved` means the scan could not decide. RPC failures throw.
  * @param {import("viem").PublicClient} client
+ * @param {string} from
+ * @param {number|string|bigint} nonce
+ * @param {object} [hint]
  */
-export async function findTxAtNonce(client, from, nonce) {
-  const address = String(from || "").trim();
+export async function findTxAtNonce(client, from, nonce, hint = {}) {
+  const address = String(from || "").trim().toLowerCase();
   const parsed = readNonce(nonce);
-  if (!ADDR_RE.test(address.toLowerCase()) || parsed === null) return { status: "pending" };
+  if (!ADDR_RE.test(address) || parsed === null) return { status: "pending" };
   const count = await client.getTransactionCount({
     address: /** @type {`0x${string}`} */ (address),
     blockTag: "latest",
   });
   if (BigInt(count) <= BigInt(parsed)) return { status: "pending" };
+  const contract = String(hint.txTo || "").trim().toLowerCase();
+  const input = String(hint.txInput || "").trim().toLowerCase();
+  const sent = readNonce(hint.sentBlock);
+  if (!ADDR_RE.test(contract) || input.length < 10 || sent === null) return { status: "unresolved" };
+  const user = rescueUser(input);
+  if (!ADDR_RE.test(user)) return { status: "unresolved" };
   const head = await client.getBlockNumber();
-  const span = BigInt(NONCE_SCAN_BLOCKS);
-  let start = head > span ? head - span : 0n;
-  for (let n = head; n >= start; n -= 1n) {
-    const block = await client.getBlock({ blockNumber: n, includeTransactions: true });
-    const txs = block && block.transactions ? block.transactions : [];
-    for (const tx of txs) {
-      if (!tx || typeof tx === "string") continue;
-      if (String(tx.from || "").toLowerCase() !== address.toLowerCase()) continue;
-      if (BigInt(tx.nonce) !== BigInt(parsed)) continue;
-      return { status: "found", tx };
+  const start = BigInt(sent);
+  if (start > head) return { status: "unresolved" };
+  const topics = encodeEventTopics({
+    abi: [RESCUED_EVENT],
+    eventName: "Rescued",
+    args: { user: /** @type {`0x${string}`} */ (user) },
+  });
+  const probe = { txTo: contract, txInput: input };
+  let cursor = start;
+  let incomplete = false;
+  while (cursor <= head) {
+    const end = cursor + LOG_CHUNK_BLOCKS - 1n > head ? head : cursor + LOG_CHUNK_BLOCKS - 1n;
+    const logs = await client.getLogs({
+      address: /** @type {`0x${string}`} */ (contract),
+      topics,
+      fromBlock: cursor,
+      toBlock: end,
+    });
+    for (const log of logs || []) {
+      const hash = log && (log.transactionHash || log.hash);
+      if (!hash) continue;
+      const tx = await client.getTransaction({ hash });
+      if (!tx) {
+        incomplete = true;
+        continue;
+      }
+      if (String(tx.from || "").toLowerCase() !== address) continue;
+      if (readNonce(tx.nonce) !== parsed) continue;
+      const seen = { ...tx, hash: tx.hash || hash };
+      if (matchesRescue(probe, seen)) return { status: "found", tx: seen };
+      return { status: "mismatch", tx: seen };
     }
-    if (n === 0n) break;
+    if (end >= head) break;
+    cursor = end + 1n;
   }
-  return { status: "unresolved" };
+  if (incomplete) return { status: "unresolved" };
+  return { status: "absent" };
+}
+
+function isClosed(folded, hash) {
+  const dest = folded.follow(hash);
+  return folded.cancelled.has(hash) || folded.cancelled.has(dest) || folded.delivered.has(hash) || folded.delivered.has(dest);
 }
 
 /**
- * Replays one rescue_ok row. A pending or already decided hash is left alone
- * so a later pass does not reset its counters or start another give-up cycle.
- * Otherwise the same sender+nonce lookup is used, or the row is skipped.
+ * Replays one rescue_ok row.
+ * A waiting row keeps its counters. A delivered or cancelled row is left alone.
+ * A dropped row can be posted again. The worker unique index refuses a second credit.
+ * Legacy rows without call identity post when their own receipt is mined.
  */
 export async function backfillPointsRescue(opts) {
   const env = opts.env || process.env;
   if (!pointsPushEnabled(env)) return { enabled: false, skipped: true, sent: 0 };
   const item = normalizeItem(opts.chainId, opts.txHash);
+  const wanted = Number(env.CHAIN_ID);
+  if (CHAINS.has(wanted) && item.chainId !== wanted) return { enabled: true, skipped: true, sent: 0 };
   const file = pointsOutboxPath(opts.dataDir);
   const folded = await enqueueIo(() => readFold(file));
   const dest = folded.follow(item.txHash);
-  if (isSettled(folded, item.txHash) || isSettled(folded, dest) || folded.pending.has(item.txHash) || folded.pending.has(dest)) {
+  if (isClosed(folded, item.txHash) || isClosed(folded, dest) || folded.pending.has(item.txHash) || folded.pending.has(dest)) {
     return { enabled: true, skipped: true, sent: 0 };
   }
-  const stored = folded.pending.get(dest);
-  const ident = { ...identityFrom(opts), ...(stored ? identityFrom(stored) : {}) };
-  if (!hasNonceIdentity(ident) || !hasCallIdentity(ident) || typeof opts.lookupNonce !== "function") {
-    return { enabled: true, skipped: true, sent: 0 };
-  }
+  const ident = identityFrom(opts);
+  if (!hasNonceIdentity(ident) || !hasCallIdentity(ident)) return backfillLegacyReceipt(opts, env, item);
+  if (typeof opts.lookupNonce !== "function") return { enabled: true, skipped: true, sent: 0 };
   let looked;
   try {
-    looked = await opts.lookupNonce(ident.txFrom, ident.txNonce);
+    looked = await opts.lookupNonce(ident.txFrom, ident.txNonce, ident);
   } catch {
     return { enabled: true, skipped: true, sent: 0 };
   }
-  if (!looked || looked.status !== "found" || !looked.tx) return { enabled: true, skipped: true, sent: 0 };
-  if (!matchesRescue(ident, looked.tx)) {
+  if (!looked || looked.status === "pending" || looked.status === "unresolved") {
+    return { enabled: true, skipped: true, sent: 0 };
+  }
+  if (looked.status === "mismatch" || looked.status === "absent" || !looked.tx || !matchesRescue(ident, looked.tx) || !senderAndNonceMatch(ident, looked.tx)) {
     await notePointsCancel({ chainId: item.chainId, txHash: item.txHash, dataDir: opts.dataDir, now: opts.now });
     console.error("points_notify", "cancel", item.txHash);
     return { enabled: true, skipped: true, sent: 0, cancelled: true };
   }
   const cand = candidateFromTx(looked.tx);
-  await notePointsReplacement({
-    chainId: item.chainId,
-    txHash: item.txHash,
-    replacedBy: cand.hash,
-    dataDir: opts.dataDir,
-    now: opts.now,
-  });
+  if (!cand) return { enabled: true, skipped: true, sent: 0 };
+  if (cand.hash !== item.txHash) {
+    await notePointsReplacement({
+      chainId: item.chainId,
+      txHash: item.txHash,
+      replacedBy: cand.hash,
+      dataDir: opts.dataDir,
+      now: opts.now,
+    });
+  }
   const delivered = await deliverPointsNotify({
     chainId: item.chainId,
     txHash: cand.hash,
     txFrom: ident.txFrom,
     txNonce: ident.txNonce,
-    txTo: cand.to,
-    txInput: cand.input,
+    txTo: cand.to || ident.txTo,
+    txInput: cand.input || ident.txInput,
+    sentBlock: ident.sentBlock,
     dataDir: opts.dataDir,
     env,
     confirmReceipt: opts.confirmReceipt,
@@ -1235,6 +1424,47 @@ export async function backfillPointsRescue(opts) {
     fetchImpl: opts.fetchImpl,
     now: opts.now,
     scheduleDelay: opts.scheduleDelay,
+    replay: true,
   });
   return { ...delivered, skipped: false };
+}
+
+async function backfillLegacyReceipt(opts, env, item) {
+  if (typeof opts.confirmReceipt !== "function") return { enabled: true, skipped: true, sent: 0 };
+  let receipt;
+  try {
+    receipt = await opts.confirmReceipt(item.txHash);
+  } catch {
+    return { enabled: true, skipped: true, sent: 0 };
+  }
+  if (!receiptAccepted(receipt)) return { enabled: true, skipped: true, sent: 0 };
+  const delivered = await deliverPointsNotify({
+    chainId: item.chainId,
+    txHash: item.txHash,
+    dataDir: opts.dataDir,
+    env,
+    confirmReceipt: async () => receipt,
+    fetchImpl: opts.fetchImpl,
+    now: opts.now,
+    scheduleDelay: opts.scheduleDelay,
+    replay: true,
+  });
+  return { ...delivered, skipped: false };
+}
+
+export async function backfillRows(rows, opts) {
+  let skipped = 0;
+  let failed = 0;
+  let sent = 0;
+  for (const row of rows) {
+    try {
+      const result = await backfillPointsRescue({ ...opts, ...row });
+      if (!result || result.skipped) skipped += 1;
+      else sent += Number(result.sent) || 0;
+    } catch {
+      failed += 1;
+      console.error("points_backfill", "row", row && row.txHash ? row.txHash : "");
+    }
+  }
+  return { skipped, failed, sent };
 }
