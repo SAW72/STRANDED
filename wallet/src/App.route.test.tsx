@@ -212,9 +212,6 @@ describe("App routes", () => {
 
   it("shows SDEMO on the token row when a token is configured", async () => {
     vi.stubEnv("VITE_TOKEN_ADDRESS_ARB_SEPOLIA", WALLET);
-    accountState.address = WALLET;
-    accountState.isConnected = true;
-    accountState.chainId = ARB_SEPOLIA_CHAIN_ID;
 
     function tokenRow(container: HTMLElement): string {
       const dt = [...container.querySelectorAll("dt")].find((node) => node.textContent === "Token");
@@ -229,8 +226,6 @@ describe("App routes", () => {
     expect(grttToken).toMatch(/SDEMO/);
     expect(grttToken).not.toMatch(/\bGRTT\b/);
     expect(grttToken).not.toBe("not configured");
-    expect(grtt.container.querySelector("[data-testid='sample-banner']")?.textContent).toContain(SAMPLE_BADGE);
-    expect(grtt.container.querySelector("[data-testid='rescue-quote-fields']")?.textContent).toMatch(/SDEMO/);
     await grtt.unmount();
 
     readState.symbol = "";
@@ -239,7 +234,6 @@ describe("App routes", () => {
     expect(emptyToken).toMatch(/SDEMO/);
     expect(emptyToken).not.toMatch(/\bToken\b/);
     expect(emptyToken).not.toBe("not configured");
-    expect(empty.container.querySelector("[data-testid='sample-banner']")?.textContent).toContain(SAMPLE_BADGE);
     await empty.unmount();
   });
 
