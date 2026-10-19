@@ -332,6 +332,7 @@ describe("banned-word scanner", () => {
   });
 
   it("keeps allowed compounds only on a word boundary", () => {
+    expect(bannedWordsIn(["Trade-off", "s"].join(""))).toEqual([]);
     expect(bannedWordsIn(["Trade-off", "er live now"].join(""))).toEqual(["trade"]);
     expect(bannedWordsIn(["data-value", "d holders"].join(""))).toEqual(["value"]);
     expect(bannedWordsIn(["tra", "de", "-off"].join(""))).toEqual([]);
@@ -548,15 +549,18 @@ describe("banned-word scanner", () => {
   it("flags /tmp copy when TMPDIR is unset, including a path that climbs out", () => {
     const airdrop = ["air", "drop"].join("");
     const rewards = ["re", "wards"].join("");
-    const samples = [
-      `Saved to /tmp/${airdrop}`,
-      `/tmp/${rewards}/claim`,
-      `/tmp/does-not-exist-${airdrop}`,
-      `/tmp/../${airdrop}`,
+    const samples: Array<[string, string[]]> = [
+      [`Saved to /tmp/${airdrop}`, ["airdrop"]],
+      [`/tmp/${rewards}/list.txt`, ["reward"]],
+      [`/tmp/${rewards}/claim`, ["reward"]],
+      [`See /tmp/${airdrop} for details`, ["airdrop"]],
+      [`/tmp/does-not-exist-${airdrop}`, ["airdrop"]],
+      [`/tmp/../${airdrop}`, ["airdrop"]],
     ];
     withTmpdir(undefined, () => {
-      for (const text of samples) {
-        expect(bannedWordsIn(text).length, text).toBeGreaterThan(0);
+      expect(process.env.TMPDIR).toBeUndefined();
+      for (const [text, stems] of samples) {
+        expect(bannedWordsIn(text), text).toEqual(stems);
       }
     });
   });
