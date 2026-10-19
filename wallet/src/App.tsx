@@ -330,9 +330,9 @@ function RescueApp() {
       chainId: selectedChainId,
       user: address,
       tokenIn: token ?? undefined,
-      tokenSymbol: typeof tokenSymbol === "string" ? tokenSymbol : DEMO_FALLBACK_TICKER,
+      tokenSymbol: DEMO_FALLBACK_TICKER,
     });
-  }, [useFixture, selectedChainId, address, token, tokenSymbol]);
+  }, [useFixture, selectedChainId, address, token]);
 
   const quote: RescueQuote | null = useFixture ? fixtureQuote : liveQuote;
   const quoteSource: QuoteSource | null = quote ? (useFixture ? "fixture" : "relayer") : null;
@@ -355,10 +355,10 @@ function RescueApp() {
   });
 
   const chainTicker = typeof tokenSymbol === "string" ? tokenSymbol : null;
-  // A sample fixture still names the delisted ticker. The rows and the banner
-  // use the on-chain symbol, or SDEMO when that read has not succeeded.
+  // Sample mode never shows the on-chain symbol. An empty read and a live
+  // ticker such as GRTT or gMOCK both render as SDEMO.
   const demoSymbol = useFixture
-    ? (chainTicker ?? DEMO_FALLBACK_TICKER)
+    ? DEMO_FALLBACK_TICKER
     : (chainTicker ?? quote?.tokenSymbol ?? receipt?.tokenSymbol ?? null);
 
   const reviewVisible = isConnected && quoteReady;
@@ -387,7 +387,7 @@ function RescueApp() {
   }, [reviewVisible]);
 
   const reviewDecimals = quote?.tokenDecimals ?? displayDecimals;
-  const reviewSymbol = quote?.tokenSymbol;
+  const reviewSymbol = useFixture ? DEMO_FALLBACK_TICKER : quote?.tokenSymbol;
 
   const orderNonceHint = quote?.nonce;
   const { data: nonceUsed, refetch: refetchNonceUsed } = useReadContract({
@@ -678,7 +678,11 @@ function RescueApp() {
         <h2>3. Stranded token</h2>
         <dl className="kv">
           <dt>Token</dt>
-          <dd>{token ? `${tokenSymbol ?? "Token"} · ${shortenAddress(token)}` : "not configured"}</dd>
+          <dd>
+            {token
+              ? `${useFixture ? DEMO_FALLBACK_TICKER : (tokenSymbol ?? "Token")} · ${shortenAddress(token)}`
+              : "not configured"}
+          </dd>
           <dt>Balance</dt>
           <dd>
             {tokenBalance !== undefined
@@ -703,7 +707,7 @@ function RescueApp() {
           Use full balance
         </button>
         <p className="token-disclosure" data-testid="token-disclosure">
-          {tokenDisclosure(demoSymbol)}
+          {tokenDisclosure(demoSymbol, selectedChainId)}
         </p>
       </section>
 
@@ -719,7 +723,7 @@ function RescueApp() {
         <p className="subtitle">{REVIEW_SUBTITLE}</p>
 
         {quoteSource === "fixture" && (
-          <div className="banner banner-sample" role="status">
+          <div className="banner banner-sample" role="status" data-testid="sample-banner">
             <strong>{SAMPLE_BADGE}</strong>
             <p>{FIXTURE_BANNER}</p>
           </div>
@@ -793,7 +797,7 @@ function RescueApp() {
           <ReviewRow
             label={TOKEN_LABEL}
             value={dashOr(
-              quote ? `${quote.tokenSymbol} · ${quote.tokenDecimals} decimals` : null,
+              quote ? `${reviewSymbol} · ${quote.tokenDecimals} decimals` : null,
               quoteReady,
             )}
             help={TOKEN_HELPER}

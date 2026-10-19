@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { bannedWordsIn } from "./bannedWords";
+import { ARB_SEPOLIA_CHAIN_ID, BASE_SEPOLIA_CHAIN_ID } from "./chains";
 import appSource from "../App.tsx?raw";
 import pointsSource from "../Points.tsx?raw";
 import copySource from "../copy.ts?raw";
@@ -35,20 +37,6 @@ const GRTT_DISCLOSURE =
 const SDEMO_BANNER = "Testnet demo. SDEMO has no value and isn't for sale.";
 const GRTT_BANNER = "Testnet demo. GRTT has no value and isn't for sale.";
 
-const BANNED = [
-  "invest",
-  "earn",
-  "reward",
-  "airdrop",
-  "presale",
-  "price",
-  "listing",
-  "apy",
-  "profit",
-  "trade",
-  "value",
-] as const;
-
 /** User-visible sources. Code identifiers in other modules are not included. */
 const COPY_SOURCES = [
   copySource,
@@ -61,11 +49,6 @@ const COPY_SOURCES = [
   copyValueSource,
   indexHtml,
 ];
-
-function bannedWordsIn(text: string): string[] {
-  const stripped = text.replace(/\bno value\b/gi, " ").replace(/\bno cash value\b/gi, " ");
-  return BANNED.filter((word) => new RegExp(`\\b${word}\\b`, "i").test(stripped));
-}
 
 function stringLiterals(source: string): string[] {
   const found: string[] = [];
@@ -115,6 +98,16 @@ describe("token disclosure", () => {
     expect(UNKNOWN_DEMO_BANNER).toBe(SDEMO_BANNER);
     expect(UNKNOWN_DEMO_BANNER).not.toMatch(/this token/i);
   });
+
+  it("names Base Sepolia when that chain is selected", () => {
+    expect(tokenDisclosure("SDEMO", BASE_SEPOLIA_CHAIN_ID)).toBe(
+      "SDEMO is a testnet demo token on Base Sepolia. It has no value and is not for sale. This is experimental, unaudited demo software.",
+    );
+    expect(tokenDisclosure(null, BASE_SEPOLIA_CHAIN_ID)).toContain("on Base Sepolia");
+    expect(tokenDisclosure(null, BASE_SEPOLIA_CHAIN_ID)).not.toContain("Arbitrum");
+    expect(tokenDisclosure("SDEMO", ARB_SEPOLIA_CHAIN_ID)).toBe(SDEMO_DISCLOSURE);
+    expect(tokenDisclosure(null)).toBe(UNKNOWN_TOKEN_DISCLOSURE);
+  });
 });
 
 describe("banned words in user-visible copy", () => {
@@ -142,6 +135,9 @@ describe("banned words in user-visible copy", () => {
     expect(bannedWordsIn("high value")).toEqual(["value"]);
     expect(bannedWordsIn("They have no cash value, and nothing is promised.")).toEqual([]);
     expect(bannedWordsIn("high cash value")).toEqual(["value"]);
+    expect(bannedWordsIn(["re", "wards"].join(""))).toEqual(["reward"]);
+    expect(bannedWordsIn(["air", "drop", "ped"].join(""))).toEqual(["airdrop"]);
+    expect(bannedWordsIn(["earn", "ed"].join(""))).toEqual(["earn"]);
   });
 
   it("finds none of the banned words in the disclosure, banner, copy module, or UI text", () => {

@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { WagmiProvider } from "wagmi";
 import { App } from "./App";
 import { ARB_SEPOLIA_CHAIN_ID } from "./lib/chains";
+import { SAMPLE_BADGE } from "./copy";
 import { UNKNOWN_DEMO_BANNER } from "./lib/tokenDisclosure";
 import { wagmiConfig } from "./wagmi";
 
@@ -17,6 +18,10 @@ const accountState = vi.hoisted(() => ({
   address: undefined as `0x${string}` | undefined,
   isConnected: false,
   chainId: undefined as number | undefined,
+}));
+
+const readState = vi.hoisted(() => ({
+  symbol: undefined as unknown,
 }));
 
 vi.mock("wagmi", async () => {
@@ -34,6 +39,10 @@ vi.mock("wagmi", async () => {
       isReconnecting: false,
       isDisconnected: !accountState.isConnected,
     }),
+    useReadContract: ((params?: { functionName?: string }) => {
+      if (params?.functionName === "symbol") return { data: readState.symbol };
+      return { data: undefined };
+    }) as typeof actual.useReadContract,
   };
 });
 
@@ -73,6 +82,7 @@ afterEach(() => {
   accountState.address = undefined;
   accountState.isConnected = false;
   accountState.chainId = undefined;
+  readState.symbol = undefined;
   vi.unstubAllEnvs();
   window.history.pushState({}, "", "/");
 });
@@ -158,6 +168,59 @@ describe("App routes", () => {
     expect(view.container.querySelector("[data-testid='demo-banner']")?.textContent).toBe(
       UNKNOWN_DEMO_BANNER,
     );
+    expect(view.container.querySelector("[data-testid='sample-banner']")?.textContent).toContain(
+      SAMPLE_BADGE,
+    );
+    await view.unmount();
+  });
+
+  it("renders SDEMO when the on-chain symbol is empty", async () => {
+    readState.symbol = "";
+    accountState.address = WALLET;
+    accountState.isConnected = true;
+    accountState.chainId = ARB_SEPOLIA_CHAIN_ID;
+    const view = await renderAt("/", <App />);
+    expect(view.container.querySelector("[data-testid='rescue-quote-fields']")?.textContent).toMatch(/SDEMO/);
+    expect(view.container.textContent).not.toMatch(/\bGRTT\b/);
+    expect(view.container.querySelector("[data-testid='sample-banner']")?.textContent).toContain(
+      SAMPLE_BADGE,
+    );
+    await view.unmount();
+  });
+
+  it("renders SDEMO when the chain reports GRTT or gMOCK", async () => {
+    readState.symbol = "GRTT";
+    accountState.address = WALLET;
+    accountState.isConnected = true;
+    accountState.chainId = ARB_SEPOLIA_CHAIN_ID;
+    const grtt = await renderAt("/", <App />);
+    const grttRows = grtt.container.querySelector("[data-testid='rescue-quote-fields']")?.textContent ?? "";
+    expect(grttRows).toMatch(/SDEMO/);
+    expect(grtt.container.textContent).not.toMatch(/\bGRTT\b/);
+    expect(grtt.container.querySelector("[data-testid='sample-banner']")?.textContent).toContain(SAMPLE_BADGE);
+    expect(grtt.container.querySelector("[data-testid='demo-banner']")?.textContent).toBe(UNKNOWN_DEMO_BANNER);
+    await grtt.unmount();
+
+    readState.symbol = "gMOCK";
+    const gmock = await renderAt("/", <App />);
+    expect(gmock.container.querySelector("[data-testid='rescue-quote-fields']")?.textContent).toMatch(/SDEMO/);
+    expect(gmock.container.textContent).not.toMatch(/\bgMOCK\b/);
+    expect(gmock.container.textContent).not.toMatch(/\bGRTT\b/);
+    expect(gmock.container.querySelector("[data-testid='sample-banner']")?.textContent).toContain(SAMPLE_BADGE);
+    await gmock.unmount();
+  });
+
+  it("names Base Sepolia in the disclosure when that network is selected", async () => {
+    const view = await renderAt("/", <App />);
+    const disclosure = () => view.container.querySelector("[data-testid='token-disclosure']")?.textContent ?? "";
+    expect(disclosure()).toContain("Arbitrum Sepolia");
+    const base = [...view.container.querySelectorAll("button")].find((button) => button.textContent === "Base Sepolia");
+    if (!(base instanceof HTMLButtonElement)) throw new Error("missing Base Sepolia");
+    await act(async () => {
+      base.click();
+    });
+    expect(disclosure()).toContain("Base Sepolia");
+    expect(disclosure()).not.toContain("Arbitrum");
     await view.unmount();
   });
 });
