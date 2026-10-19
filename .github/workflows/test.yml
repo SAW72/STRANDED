@@ -172,7 +172,6 @@ jobs:
           export USER_PRIVATE_KEY="$(openssl rand -hex 32)"
           export RPC_URL="https://rpc.example.invalid/v2/$(openssl rand -hex 16)"
           npm run build
-          node checkDistSecrets.mjs dist
 
   # Local anvil only. Proves production _isBroadcast under forge script
   # --broadcast. No fork, no public RPC, no key.

@@ -39,7 +39,7 @@ The wallet must be used at https://strandedtoken.trade. https://gas-rescue.onren
 
 `Content-Security-Policy` in that file is only `frame-ancestors 'none'`. It does not set `default-src` or any other directive.
 
-These `render.yaml` headers are not live until the Render Blueprint is synced. The live site currently serves only `X-Content-Type-Options: nosniff`. Syncing the Blueprint, or adding the headers on the static site in the dashboard, is Spencer's step. A git push does not apply them.
+These `render.yaml` headers are not live until the Render Blueprint is synced. The live host https://gas-rescue.onrender.com currently serves `X-Content-Type-Options: nosniff` and `Strict-Transport-Security: max-age=315360000; includeSubdomains; preload`. That HSTS value is the host edge policy, not the blueprint's `max-age=31536000; includeSubDomains`. `X-Frame-Options`, `Referrer-Policy`, and `Content-Security-Policy` are still absent until Spencer syncs the Blueprint. Syncing the Blueprint, or adding the headers on the static site in the dashboard, is Spencer's step. A git push does not apply them.
 
 ## 3. Secrets (dashboard only)
 
@@ -76,6 +76,8 @@ On **stranded** (static site):
 Optional Base Sepolia live quotes: set `VITE_RELAYER_URL` to your existing Base Relayer origin and rebuild.
 
 The wallet build reads only variables whose names start with `VITE_`. `VITE_RELAYER_URL` is the Base Relayer origin. `VITE_RELAYER_BASE_URL` is the only alias for that same Base origin. `RELAYER_BASE_URL` is no longer read. Do not put an unprefixed `RELAYER_` name on the static site: a Vite `envPrefix` of `RELAYER_` copies every `RELAYER_*` value from the build environment into the public bundle, including `RELAYER_PRIVATE_KEY`.
+
+The wallet build runs the bundle secret check and fails when a secret-like environment value is present in the output, including base64 and any 16-character slice. Check the static site environment in the Render dashboard before merging, and remove secret-like names from that build. The check does not try to catch deliberate obfuscation: hex text beyond the plain compare, reversed text, `\u` escapes, `fromCharCode`, gzip, or UTF-16. The control that keeps those build values out of the client is `envPrefix` set to `['VITE_']`.
 
 ## 4. Custom domain
 
