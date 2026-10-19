@@ -682,6 +682,10 @@ test("rejects a wildcard or an uncommented allowlist entry", () => {
   assert.equal(star.errors.length, 1);
   assert.equal(star.errors[0].rule, "allowlist");
   assert.equal(star.values.size, 0);
+  const mark = parseAllowlist("ab?cd # public value\n");
+  assert.equal(mark.errors.length, 1);
+  assert.equal(mark.errors[0].rule, "allowlist");
+  assert.equal(mark.values.size, 0);
   const bare = parseAllowlist("abcdef\n");
   assert.equal(bare.errors.length, 1);
   assert.equal(bare.errors[0].rule, "allowlist");
@@ -744,7 +748,24 @@ test("allowlist covers a public query key and an explorer tx link", () => {
 });
 
 test("an allowlisted secret value still fails as raw text, base64, and two halves", () => {
-  for (const name of ["RELAYER_PRIVATE_KEY", "ADMIN_SECRET", "VITE_API_SECRET"]) {
+  for (const name of [
+    "RELAYER_PRIVATE_KEY",
+    "ADMIN_SECRET",
+    "VITE_API_SECRET",
+    "VITE_PRIVATE_KEY",
+    "VITE_MNEMONIC",
+    "VITE_SEED",
+    "VITE_DB_PASSWORD",
+    "RELAYER_KEY",
+    "ETHERSCAN_API_KEY",
+    "DEPLOYER_PK",
+    "RECOVERY_PHRASE",
+    "DB_PASSWD",
+    "GCP_CREDENTIAL",
+    "VITE_ACCESS_TOKEN",
+    "VITE_PRIV_KEY",
+    "VITE_SIGNER_KEY",
+  ]) {
     const value = hex64();
     const encoded = Buffer.from(value, "utf8").toString("base64");
     const mid = value.length / 2;
@@ -769,6 +790,105 @@ test("an allowlisted secret value still fails as raw text, base64, and two halve
     assert.equal(rendered(halfHits).includes(value.slice(0, mid)), false);
     assert.equal(rendered(halfHits).includes(value.slice(mid)), false);
   }
+});
+
+test("a non-hex allowlisted value under a protected name still fails", () => {
+  const value = `qa-${randomBytes(16).toString("hex")}`;
+  for (const name of [
+    "vite_db_password",
+    "VITE_PRIVATE_KEY",
+    "VITE_MNEMONIC",
+    "VITE_SEED",
+    "VITE_DB_PASSWORD",
+    "RELAYER_KEY",
+    "ETHERSCAN_API_KEY",
+    "DEPLOYER_PK",
+    "RECOVERY_PHRASE",
+    "DB_PASSWD",
+    "GCP_CREDENTIAL",
+    "VITE_API_SECRET",
+    "VITE_ACCESS_TOKEN",
+    "VITE_PRIV_KEY",
+    "VITE_SIGNER_KEY",
+  ]) {
+    const dir = writeDist({ "assets/app.js": `${JSON.stringify(value)}\n` });
+    const hits = scanDist(dir, { knownRoots: [], env: { [name]: value }, allowlist: new Set([value]) });
+    assert.ok(rules(hits).includes("forbidden-value"), name);
+    assert.equal(rendered(hits).includes(value), false);
+  }
+});
+
+test("a listed address or id whose name contains TOKEN passes, and 64 hex does not", () => {
+  const address = `0x${randomBytes(20).toString("hex")}`;
+  const addressDir = writeDist({ "assets/app.js": `${JSON.stringify(address)}\n` });
+  assert.deepEqual(
+    scanDist(addressDir, {
+      knownRoots: [],
+      env: { VITE_TOKEN_ADDRESS: address },
+      allowlist: new Set([address]),
+    }),
+    [],
+  );
+  const id = "public-id-84532";
+  const idDir = writeDist({ "assets/app.js": `${JSON.stringify(id)}\n` });
+  assert.deepEqual(
+    scanDist(idDir, {
+      knownRoots: [],
+      env: { VITE_TOKEN_ID: id },
+      allowlist: new Set([id]),
+    }),
+    [],
+  );
+  const body = hex64();
+  const hexDir = writeDist({ "assets/app.js": `${JSON.stringify(body)}\n` });
+  const hexHits = scanDist(hexDir, {
+    knownRoots: [],
+    env: { FOO_TOKEN_V2: body },
+    allowlist: new Set([body]),
+  });
+  assert.ok(rules(hexHits).includes("forbidden-value"));
+  assert.equal(rendered(hexHits).includes(body), false);
+});
+
+test("an allowlisted keyed url still fails for the value, the key, and its base64", () => {
+  const key = randomBytes(16).toString("hex");
+  const keyed = `https://rpc.example.invalid/v2/${key}`;
+  const encoded = Buffer.from(keyed, "utf8").toString("base64");
+  const allowlist = new Set([keyed, key, encoded]);
+  const env = { RPC_URL: keyed };
+  const full = writeDist({ "assets/app.js": `${JSON.stringify(keyed)}\n` });
+  const fullHits = scanDist(full, { knownRoots: [], env, allowlist });
+  assert.ok(rules(fullHits).includes("forbidden-value"));
+  assert.equal(rendered(fullHits).includes(key), false);
+  const keyOnly = writeDist({ "assets/app.js": `${JSON.stringify(key)}\n` });
+  const keyHits = scanDist(keyOnly, { knownRoots: [], env, allowlist });
+  assert.ok(rules(keyHits).includes("forbidden-value"));
+  assert.equal(rendered(keyHits).includes(key), false);
+  const encodedDir = writeDist({ "assets/app.js": `${JSON.stringify(encoded)}\n` });
+  const encodedHits = scanDist(encodedDir, { knownRoots: [], env, allowlist });
+  assert.ok(rules(encodedHits).includes("forbidden-encoding"));
+  assert.equal(rendered(encodedHits).includes(key), false);
+  assert.equal(rendered(encodedHits).includes(encoded), false);
+});
+
+test("parseAllowlist rejects a keyed provider url and keeps a public query and an explorer link", () => {
+  const key = randomBytes(16).toString("hex");
+  const rejected = parseAllowlist(`https://rpc.example.invalid/v2/${key} # reviewed\n`);
+  assert.equal(rejected.values.size, 0);
+  assert.equal(rejected.errors.length, 1);
+  assert.equal(rejected.errors[0].rule, "allowlist");
+  assert.equal(rejected.errors[0].detail, "keyed provider URL");
+  assert.match(formatFinding(rejected.errors[0]), /allowlist keyed provider URL/);
+  const queryKey = randomBytes(8).toString("hex");
+  const queryRejected = parseAllowlist(`https://rpc.example.invalid/rpc?apikey=${queryKey} # reviewed\n`);
+  assert.equal(queryRejected.values.size, 0);
+  assert.equal(queryRejected.errors[0].detail, "keyed provider URL");
+  const banner = "https://cdn.example.invalid/app?key=hero-banner-2026";
+  const tx = `https://explorer.example.invalid/tx/0x${"c".repeat(64)}`;
+  const accepted = parseAllowlist(`${banner} # public banner\n${tx} # public tx\n`);
+  assert.deepEqual(accepted.errors, []);
+  assert.equal(accepted.values.has(banner), true);
+  assert.equal(accepted.values.has(tx), true);
 });
 
 test("an allowlist prefix does not skip a longer public value", () => {
@@ -827,6 +947,68 @@ test("flags a keyed rpc key alone, beside its host, and as a 16 character slice"
   const mixedHits = scanDist(mixedDir, { knownRoots: [], env: { RPC_URL: mixedUrl } });
   assert.ok(rules(mixedHits).includes("forbidden-value"));
   assert.equal(rendered(mixedHits).includes(mixed), false);
+});
+
+test("flags a lone password from userinfo", () => {
+  const password = "abcdefghijkl";
+  const url = `https://qa:${password}@rpc.example.invalid/rpc`;
+  assert.equal(isKeyLikeRpc(url), true);
+  const dir = writeDist({ "assets/app.js": `${JSON.stringify(password)}\n` });
+  const hits = scanDist(dir, { knownRoots: [], env: { RPC_URL: url } });
+  assert.ok(rules(hits).includes("forbidden-value"));
+  assert.equal(rendered(hits).includes(password), false);
+});
+
+test("matches a hex key part when only an upper-case slice is present", () => {
+  let key = randomBytes(16).toString("hex");
+  if (!/[a-f]/.test(key.slice(0, 16))) key = `a${key.slice(1)}`;
+  const upper = key.slice(0, 16).toUpperCase();
+  assert.notEqual(upper, key.slice(0, 16));
+  const keyed = `https://rpc.example.invalid/v2/${key}`;
+  const dir = writeDist({ "assets/app.js": `${JSON.stringify(upper)}\n` });
+  const hits = scanDist(dir, { knownRoots: [], env: { RPC_URL: keyed } });
+  assert.ok(rules(hits).includes("forbidden-split"));
+  assert.equal(rendered(hits).includes(key), false);
+  assert.equal(rendered(hits).includes(upper), false);
+});
+
+test("ignores a common or short userinfo word", () => {
+  assert.equal(isKeyLikeRpc("https://anonymous@rpc.example.invalid/"), false);
+  assert.equal(isKeyLikeRpc("https://qa:password@rpc.example.invalid/"), false);
+  assert.equal(isKeyLikeRpc("https://qa:credentials@rpc.example.invalid/"), false);
+  const dir = writeDist({ "assets/app.js": "anonymous password credentials\n" });
+  const findings = scanDist(dir, {
+    knownRoots: [],
+    env: {
+      RPC_URL: "https://anonymous@rpc.example.invalid/",
+      ALT_RPC_URL: "https://qa:password@rpc.example.invalid/",
+      OTHER_RPC_URL: "https://qa:credentials@rpc.example.invalid/",
+    },
+  });
+  assert.deepEqual(findings, []);
+});
+
+test("does not flag s3, ipfs, or a support-team userinfo url", () => {
+  const id = randomBytes(16).toString("hex");
+  const s3 = `s3://bucket.example.invalid/${id}`;
+  const ipfs = `ipfs://ipfs/${id}`;
+  const team = "//support-team@rpc.example.invalid/";
+  assert.equal(isKeyLikeRpc(s3), false);
+  assert.equal(isKeyLikeRpc(ipfs), false);
+  assert.equal(isKeyLikeRpc(team), false);
+  const dir = writeDist({
+    "assets/app.js": [s3, ipfs, team].map((item) => JSON.stringify(item)).join("\n"),
+  });
+  const findings = scanDist(dir, { knownRoots: [], env: {} });
+  assert.equal(findings.some((finding) => finding.rule === "rpc-url"), false);
+});
+
+test("flags access_token, auth, apikey, and x-api-key query values", () => {
+  const value = randomBytes(6).toString("hex");
+  for (const name of ["access_token", "auth", "apikey", "x-api-key"]) {
+    assert.equal(isKeyLikeRpc(`https://rpc.example.invalid/rpc?${name}=${value}`), true, name);
+  }
+  assert.equal(isKeyLikeRpc(`https://rpc.example.invalid/rpc?access_token=${value.slice(0, 11)}`), false);
 });
 
 test("matches an upper-case scheme and a scheme-less userinfo url", () => {
@@ -919,6 +1101,12 @@ test("treats escaped newlines and tabs as mnemonic separators", () => {
   assertMnemonic(words.join("\\n"));
   assertMnemonic(words.join("\\t"));
   assertMnemonic(words.join("\\r"));
+  const body = `\\n${words.join(" ")}`;
+  const dir = writeDist({ "assets/app.js": body });
+  const findings = scanDist(dir, { knownRoots: [], env: {} }).filter((finding) => finding.rule === "mnemonic");
+  assert.equal(findings.length, 1);
+  assert.equal(findings[0].line, 1);
+  assert.equal(findings[0].column, 3);
 });
 
 test("SIGTERM guard exits without reporting a pass", async () => {
