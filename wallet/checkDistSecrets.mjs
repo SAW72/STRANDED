@@ -9,11 +9,17 @@
  * - forbidden-value, forbidden-encoding, forbidden-split: every secret-like env value,
  *   including base64/base64url and any 16-character slice. An RPC URL is compared only
  *   when it is key-like: the full value, and the key part of that URL. Exact allowlist
- *   values are skipped only after the name gate, and never for RELAYER_PRIVATE_KEY,
- *   ADMIN_SECRET, or a name containing PRIVATE, SECRET, MNEMONIC, SEED, or PASSWORD.
- * - rpc-url: provider-style http(s) or ws(s) URLs with a key-like path, query, userinfo,
- *   or fragment. The scheme match is case-insensitive, and a scheme-less //user@host
- *   URL counts. An exact allowlist entry skips that URL.
+ *   values are skipped only after the name gate. A keyed RPC URL is never skipped.
+ *   The value list also never skips RELAYER_PRIVATE_KEY, ADMIN_SECRET, a protected
+ *   name (API_KEY, ACCESS_TOKEN, PASSWD, PASSWORD, CREDENTIAL, PHRASE, MNEMONIC,
+ *   SEED, PRIVATE, PRIV_KEY, SIGNER_KEY, RELAYER_KEY, SECRET, or PK as its own name part),
+ *   or a 64-hex value under any secret-like name.
+ * - rpc-url: http(s) or ws(s) URLs with a key-like path, query, userinfo, or fragment.
+ *   The scheme match is case-insensitive. A // inside another scheme, such as s3 or
+ *   ipfs, is not a provider URL. A common or short user word is not a key part. A
+ *   password, or high-entropy userinfo, is. An exact allowlist entry can skip a
+ *   listed public URL such as an explorer link or a public query slug. A keyed
+ *   provider URL cannot be listed.
  * - mnemonic: a 12, 15, 18, 21, or 24-word BIP39 English phrase with a valid checksum,
  *   including a sliding window inside a longer run. Newlines, repeated spaces, title case,
  *   quoted arrays, and the escape text \n, \t, and \r count. Approved separators are
@@ -26,7 +32,7 @@
  *   .github/workflows/gitleaks.yml is exempt only for that exact value.
  * - relayer-env-key: any RELAYER_* name in built JS, unless that exact name is allowlisted.
  * - symlink: a link that is broken or points outside the walked root. Links inside the root are followed.
- * - allowlist: the reviewed allowlist has a wildcard or a value with no comment.
+ * - allowlist: the reviewed allowlist has a wildcard, a value with no comment, or a keyed provider URL.
  *
  * Deliberate obfuscation is out of scope. See DEPLOY.md.
  */
@@ -47,9 +53,11 @@ const HEX64 = /(?<![A-Za-z0-9])(?:0x)?([0-9a-fA-F]{64})(?![A-Za-z0-9])/gi;
 const RELAYER_NAME = /(?<![A-Za-z0-9_])RELAYER_[A-Z0-9_]+(?![A-Za-z0-9_])/g;
 const JWT = /(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{8,}(?![A-Za-z0-9_-])/g;
 const JWT_DOT_JOIN = /eyJ[A-Za-z0-9_-]{10,}(?:["']\s*\+\s*["']\.["']\s*\+\s*["']|\.)[A-Za-z0-9_-]{10,}(?:["']\s*\+\s*["']\.["']\s*\+\s*["']|\.)[A-Za-z0-9_-]{8,}/g;
-const SECRET_NAME = /(?:SECRET|PRIVATE|(?:^|_)KEY$|(?:^|_)PK$|PASSWD|PASSWORD|CREDENTIAL|API_KEY|APIKEY|MNEMONIC|SEED|PHRASE|TOKEN)/;
+const SECRET_NAME = /(?:SECRET|PRIVATE|(?:^|_)KEY$|(?:^|_)PK$|PASSWD|PASSWORD|CREDENTIAL|API_KEY|APIKEY|MNEMONIC|SEED|PHRASE|TOKEN)/i;
+const PROTECTED_NAME = /API_KEY|ACCESS_TOKEN|PASSWD|PASSWORD|CREDENTIAL|PHRASE|MNEMONIC|SEED|PRIVATE|PRIV_KEY|SIGNER_KEY|RELAYER_KEY|SECRET|(?:^|_)PK(?:_|$)/i;
 const ALWAYS_NAMES = ["RELAYER_PRIVATE_KEY", "ADMIN_SECRET"];
-const QUERY_KEY = /^(?:api[_-]?key|apikey|key|access[_-]?key|dkey|token)$/i;
+const QUERY_KEY = /^(?:api[_-]?key|apikey|key|access[_-]?key|access[_-]?token|dkey|token|auth|x-api-key)$/i;
+const COMMON_USERINFO = new Set(["anonymous", "password", "credentials", "username", "guest"]);
 
 export function isSecretLikeName(name) {
   return typeof name === "string" && SECRET_NAME.test(name);
@@ -100,6 +108,15 @@ function fragmentKeyParts(hash) {
   return found;
 }
 
+function userinfoCounts(value, password) {
+  if (!value || value.length < 8) return false;
+  if (COMMON_USERINFO.has(value.toLowerCase())) return false;
+  if (/^[0-9a-fA-F]+$/.test(value)) return true;
+  if (/[0-9]/.test(value) && /[A-Za-z]/.test(value)) return true;
+  if (password) return true;
+  return value.length >= 16;
+}
+
 function inspectRpc(value) {
   let raw = String(value).trim();
   if (raw.startsWith("//")) raw = `https:${raw}`;
@@ -112,11 +129,11 @@ function inspectRpc(value) {
   if (!/^(?:https?|wss?):$/.test(url.protocol)) return { keyLike: false, parts: [] };
   const parts = [];
   let keyLike = false;
-  if (url.password) {
+  if (userinfoCounts(url.password, true)) {
     keyLike = true;
-    if (url.password.length >= 8) parts.push(url.password);
+    parts.push(url.password);
   }
-  if (url.username.length >= 8) {
+  if (userinfoCounts(url.username, false)) {
     keyLike = true;
     parts.push(url.username);
   }
@@ -315,7 +332,9 @@ function addValueVariants(variants, text) {
 
 function valueAllowlisted(name, value, options) {
   if (ALWAYS_NAMES.includes(name)) return false;
-  if (/PRIVATE|SECRET|MNEMONIC|SEED|PASSWORD/i.test(name)) return false;
+  if (PROTECTED_NAME.test(name)) return false;
+  const body = hexBody(value);
+  if (isSecretLikeName(name) && body && body.length === 64) return false;
   return allowlistHas(options, value);
 }
 
@@ -331,7 +350,7 @@ export function secretMaterial(env = {}, options = {}) {
     const inspected = rpcName ? inspectRpc(value) : { keyLike: false, parts: [] };
     const keyedRpc = inspected.keyLike;
     if (!secretName && !keyedRpc) continue;
-    if (valueAllowlisted(name, value, options)) continue;
+    if (!keyedRpc && valueAllowlisted(name, value, options)) continue;
     const variants = new Set();
     addValueVariants(variants, value);
     for (const part of inspected.parts) addValueVariants(variants, part);
@@ -523,7 +542,7 @@ function contentFindings(file, text, options, secrets) {
     pushFinding(findings, seen, at(file, text, match.index, "hex64"));
   }
 
-  const urlRe = /(?:(?:https?|wss?):)?\/\/[^\s"'<>]+/gi;
+  const urlRe = /(?:(?<![A-Za-z0-9+.-])(?:https?|wss?):\/\/|(?<![A-Za-z0-9:])\/\/)[^\s"'<>]+/gi;
   for (const match of text.matchAll(urlRe)) {
     const candidate = match[0].replace(/[),.;]+$/, "");
     if (!isKeyLikeRpc(candidate)) continue;
@@ -714,6 +733,44 @@ export function scanHexLiterals(targets, options = {}) {
   return findings;
 }
 
+function isPublicQuerySlug(value) {
+  if (!/^[a-z0-9]+(?:-[a-z0-9]+)+$/i.test(value)) return false;
+  return /[g-z]/i.test(value);
+}
+
+function isExplorerTxHash(pathname, segment) {
+  if (!/\/tx\//i.test(pathname)) return false;
+  const body = String(segment).replace(/^0x/i, "");
+  return /^[0-9a-fA-F]{40,64}$/.test(body);
+}
+
+function isKeyedProviderUrl(value) {
+  if (!isKeyLikeRpc(value)) return false;
+  let raw = String(value).trim();
+  if (raw.startsWith("//")) raw = `https:${raw}`;
+  let url;
+  try {
+    url = new URL(raw);
+  } catch {
+    return true;
+  }
+  if (userinfoCounts(url.password, true) || userinfoCounts(url.username, false)) return true;
+  if (fragmentKeyParts(url.hash).length > 0) return true;
+  const ankrHost = url.hostname.split(".").includes("ankr");
+  for (const segment of url.pathname.split("/")) {
+    if (!segment) continue;
+    if (!(isKeySegment(segment) || (ankrHost && isShortAnkrKey(segment)))) continue;
+    if (isExplorerTxHash(url.pathname, segment)) continue;
+    return true;
+  }
+  for (const [key, val] of url.searchParams) {
+    if (!QUERY_KEY.test(key) || String(val).length < 12) continue;
+    if (isPublicQuerySlug(val)) continue;
+    return true;
+  }
+  return false;
+}
+
 export function parseAllowlist(text, file = "secretScanAllowlist.txt") {
   const values = new Set();
   const errors = [];
@@ -722,8 +779,20 @@ export function parseAllowlist(text, file = "secretScanAllowlist.txt") {
     const line = lines[i].trim();
     if (!line || line.startsWith("#")) continue;
     const match = /^(\S+)\s+#\s*(\S.*)$/.exec(line);
-    if (!match || match[1].includes("*") || match[1].includes("?")) {
+    const entry = match ? match[1] : "";
+    const queryUrl = /^(?:https?|wss?):\/\//i.test(entry);
+    if (!match || entry.includes("*") || (!queryUrl && entry.includes("?"))) {
       errors.push({ file, line: i + 1, column: 1, rule: "allowlist" });
+      continue;
+    }
+    if (isKeyedProviderUrl(match[1])) {
+      errors.push({
+        file,
+        line: i + 1,
+        column: 1,
+        rule: "allowlist",
+        detail: "keyed provider URL",
+      });
       continue;
     }
     values.add(match[1]);
@@ -744,7 +813,8 @@ function loadAllowlistFile(file) {
 
 export function formatFinding(finding) {
   const column = finding.column ? `:${finding.column}` : "";
-  return `${finding.file}:${finding.line}${column} ${finding.rule}`;
+  const detail = finding.detail ? ` ${finding.detail}` : "";
+  return `${finding.file}:${finding.line}${column} ${finding.rule}${detail}`;
 }
 
 function defaultKnownRoots() {
