@@ -92,16 +92,43 @@ export function formatBannedHits(hits: BannedHit[]): string {
     .join("\n");
 }
 
-function normalizeRoot(root: string): string {
-  return root.replaceAll("\\", "/").replace(/\/+$/, "");
+/**
+ * Lexical POSIX collapse only. No disk access.
+ * A trailing slash is kept so the caller can decide to strip it.
+ * Backslashes are not rewritten: a literal `\tmp\...` path is not a root.
+ */
+function collapseDotSegments(text: string): string {
+  if (!text.startsWith("/")) return text;
+  const keepSlash = text.length > 1 && text.endsWith("/");
+  const parts: string[] = [];
+  for (const part of text.split("/")) {
+    if (part === "" || part === ".") continue;
+    if (part === "..") {
+      if (parts.length > 0) parts.pop();
+      continue;
+    }
+    parts.push(part);
+  }
+  const body = `/${parts.join("/")}`;
+  if (keepSlash && body !== "/") return `${body}/`;
+  return body;
 }
 
-/** Checkout plus the real OS temp dir. TMPDIR wins. A bare /tmp is not added when TMPDIR points elsewhere. */
+function stripTrailingSlash(text: string): string {
+  if (text.length <= 1) return text;
+  return text.replace(/\/+$/, "");
+}
+
+function normalizeRoot(root: string): string {
+  return stripTrailingSlash(collapseDotSegments(root));
+}
+
+/** Checkout, plus TMPDIR when it is set. There is no bare `/tmp` fallback. */
 function buildRoots(): string[] {
   const proc = (globalThis as { process?: { cwd?: () => string; env?: Record<string, string | undefined> } }).process;
   const tmpdir = proc?.env?.TMPDIR;
-  const temp = tmpdir && tmpdir.length > 0 ? tmpdir : "/tmp";
-  const roots = [proc?.cwd?.(), temp];
+  const roots = [proc?.cwd?.()];
+  if (tmpdir && tmpdir.length > 0) roots.push(tmpdir);
   const found: string[] = [];
   for (const root of roots) {
     if (!root) continue;
@@ -112,15 +139,16 @@ function buildRoots(): string[] {
 }
 
 /**
- * A genuine build path under this checkout or the real OS temp dir.
+ * A genuine build path under this checkout or TMPDIR.
  * The next character after the root must be `/`, so a sibling prefix is not a path.
- * Slash-separated copy is not a path.
+ * `..` is collapsed first, so a path that climbs out of the root is not masked.
+ * Backslashes are not rewritten.
  */
 export function isAbsoluteBuildPath(text: string): boolean {
   const trimmed = text.trim();
   if (!trimmed || /[\s,;|"'`]/.test(trimmed)) return false;
-  const norm = trimmed.replaceAll("\\", "/");
-  if (!norm.startsWith("/")) return false;
+  if (!trimmed.startsWith("/")) return false;
+  const norm = stripTrailingSlash(collapseDotSegments(trimmed));
   return buildRoots().some((root) => norm === root || norm.startsWith(`${root}/`));
 }
 
@@ -172,22 +200,66 @@ function prepareCopy(text: string): string {
     .replace(/[^A-Za-z0-9\s']/g, " ");
 }
 
-function redactSecretRuns(text: string): string {
-  return text.replace(/(?:0x)?[0-9a-fA-F]{32,}/gi, "[redacted]");
+const SECRET_MASK = "\u0000";
+
+function mergeRanges(ranges: Array<[number, number]>): Array<[number, number]> {
+  const sorted = ranges.filter(([start, end]) => end > start).sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const merged: Array<[number, number]> = [];
+  for (const range of sorted) {
+    const last = merged[merged.length - 1];
+    if (!last || range[0] > last[1]) merged.push([range[0], range[1]]);
+    else if (range[1] > last[1]) last[1] = range[1];
+  }
+  return merged;
+}
+
+/**
+ * Replace secret runs on the full string with a same-length mask.
+ * The excerpt is cut after this, so a window edge cannot keep a short slice of a longer run.
+ * Word matching does not use this string.
+ */
+function maskSecretRuns(text: string): string {
+  const patterns = [
+    /(?:0x)?[0-9a-fA-F]{32,}/gi,
+    /[A-Za-z0-9+/]{20,}={0,2}/g,
+    /[1-9A-HJ-NP-Za-km-z]{32,}/g,
+    /eyJ[A-Za-z0-9_-]{8,}(?:\.[A-Za-z0-9_-]{8,}){2}/g,
+  ];
+  const ranges: Array<[number, number]> = [];
+  for (const pattern of patterns) {
+    for (const match of text.matchAll(pattern)) {
+      const start = match.index ?? 0;
+      ranges.push([start, start + match[0].length]);
+    }
+  }
+  const merged = mergeRanges(ranges);
+  if (merged.length === 0) return text;
+  let out = "";
+  let cursor = 0;
+  for (const [start, end] of merged) {
+    out += text.slice(cursor, start);
+    out += SECRET_MASK.repeat(end - start);
+    cursor = end;
+  }
+  return out + text.slice(cursor);
+}
+
+function excerptAt(masked: string, start: number, end: number): string {
+  return masked
+    .slice(start, end)
+    .replace(/\u0000+/g, "[redacted]")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function hitsOnPrepared(prepared: string, excerptFrom: string, file: string): BannedHit[] {
+  const masked = maskSecretRuns(excerptFrom);
   const hits: BannedHit[] = [];
   for (const match of prepared.matchAll(BANNED_PATTERN)) {
     const word = match[0];
     const stem = FORM_TO_STEM.get(word.toLowerCase()) ?? word.toLowerCase();
     const index = match.index ?? 0;
-    const excerpt = redactSecretRuns(
-      excerptFrom
-        .slice(Math.max(0, index - 48), Math.min(excerptFrom.length, index + word.length + 48))
-        .replace(/\s+/g, " ")
-        .trim(),
-    );
+    const excerpt = excerptAt(masked, Math.max(0, index - 48), Math.min(masked.length, index + word.length + 48));
     hits.push({ stem, match: word, excerpt, file });
   }
   return hits;
@@ -210,8 +282,9 @@ export function bannedHitsInText(text: string, file: string): BannedHit[] {
   for (const run of normalized.matchAll(HYPHEN_RUN)) {
     const collapsed = run[0].replace(new RegExp(`[${HYPHEN_SOURCE}]`, "g"), "");
     const prepared = prepareCopy(collapsed);
+    const shown = excerptAt(maskSecretRuns(run[0]), 0, run[0].length);
     for (const hit of hitsOnPrepared(prepared, run[0], file)) {
-      remember(hits, [{ ...hit, excerpt: run[0] }]);
+      remember(hits, [{ ...hit, excerpt: shown }]);
     }
   }
   return hits;

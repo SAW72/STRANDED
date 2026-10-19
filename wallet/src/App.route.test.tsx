@@ -7,7 +7,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WagmiProvider } from "wagmi";
 import { App } from "./App";
-import { ARB_SEPOLIA_CHAIN_ID } from "./lib/chains";
+import { ARB_SEPOLIA_CHAIN_ID, BASE_SEPOLIA_CHAIN_ID } from "./lib/chains";
 import { sampleFixtureRaw } from "./lib/fixture";
 import { QUOTE_ERROR, SAMPLE_BADGE } from "./copy";
 import { liveSymbolUnreadText, UNKNOWN_DEMO_BANNER } from "./lib/tokenDisclosure";
@@ -390,6 +390,30 @@ describe("App routes", () => {
     });
     expect(disclosure()).toContain("Base Sepolia");
     expect(disclosure()).not.toContain("Arbitrum");
+    await view.unmount();
+  });
+
+  it("shows the unread sentence for Base Sepolia", async () => {
+    vi.stubEnv("VITE_RELAYER_URL", "https://relayer.example.invalid");
+    vi.stubEnv("VITE_RELAYER_URL_ARB_SEPOLIA", "");
+    vi.stubEnv("VITE_RELAYER_BASE_URL", "");
+    vi.stubEnv("RELAYER_BASE_URL", "");
+    vi.stubEnv("VITE_TOKEN_ADDRESS", WALLET);
+    readState.symbolPending = true;
+    readState.symbol = undefined;
+    readState.symbolError = false;
+    const view = await renderAt("/", <App />);
+    const base = [...view.container.querySelectorAll("button")].find((node) => node.textContent === "Base Sepolia");
+    if (!(base instanceof HTMLButtonElement)) throw new Error("missing Base Sepolia");
+    await act(async () => {
+      base.click();
+    });
+    const expected = liveSymbolUnreadText(BASE_SEPOLIA_CHAIN_ID);
+    const banner = view.container.querySelector("[data-testid='demo-banner']")?.textContent ?? "";
+    const disclosure = view.container.querySelector("[data-testid='token-disclosure']")?.textContent ?? "";
+    expect(banner).toBe(expected);
+    expect(disclosure).toBe(expected);
+    expect(banner).not.toContain("Arbitrum");
     await view.unmount();
   });
 });

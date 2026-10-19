@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -237,6 +238,31 @@ const priceLabel = ["Pri", "ce", ":"].join("");
 const apyLabel = ["AP", "Y", ":"].join("");
 const rewardsLabel = ["Re", "wards", "!"].join("");
 const earnLabel = `(${["ea", "rn"].join("")})`;
+
+function withTmpdir(value: string | undefined, run: () => void) {
+  const previous = process.env.TMPDIR;
+  if (value === undefined) delete process.env.TMPDIR;
+  else process.env.TMPDIR = value;
+  try {
+    run();
+  } finally {
+    if (previous === undefined) delete process.env.TMPDIR;
+    else process.env.TMPDIR = previous;
+  }
+}
+
+/** True when haystack contains any `min` consecutive characters of secret. */
+function containsRun(haystack: string, secret: string, min = 8): boolean {
+  if (secret.length < min) return false;
+  for (let i = 0; i <= secret.length - min; i += 1) {
+    if (haystack.includes(secret.slice(i, i + min))) return true;
+  }
+  return false;
+}
+
+function findingBlob(hits: BannedHit[]): string {
+  return [formatBannedHits(hits), ...hits.flatMap((hit) => [hit.file, hit.stem, hit.match, hit.excerpt])].join("\n");
+}
 
 describe("banned-word scanner", () => {
   const phrase = ["Claim your ", "air", "drop", " today"].join("");
@@ -517,6 +543,120 @@ describe("banned-word scanner", () => {
     const textHits = bannedHitsInText(trader, "notice.txt");
     expect(textHits.map((hit) => hit.file)).toEqual(["notice.txt"]);
     expect(textHits[0]?.stem).toBe("trade");
+  });
+
+  it("flags /tmp copy when TMPDIR is unset, including a path that climbs out", () => {
+    const airdrop = ["air", "drop"].join("");
+    const rewards = ["re", "wards"].join("");
+    const samples = [
+      `Saved to /tmp/${airdrop}`,
+      `/tmp/${rewards}/claim`,
+      `/tmp/does-not-exist-${airdrop}`,
+      `/tmp/../${airdrop}`,
+    ];
+    withTmpdir(undefined, () => {
+      for (const text of samples) {
+        expect(bannedWordsIn(text).length, text).toBeGreaterThan(0);
+      }
+    });
+  });
+
+  it("does not mask a path that resolves outside the temp root", () => {
+    const airdrop = ["air", "drop"].join("");
+    withTmpdir("/tmp", () => {
+      expect(bannedWordsIn(`/tmp/${airdrop}`)).toEqual([]);
+      expect(bannedWordsIn(`/tmp/foo/../${airdrop}`)).toEqual([]);
+      expect(bannedWordsIn(`/tmp/../${airdrop}`)).toEqual(["airdrop"]);
+      expect(bannedWordsIn(`Saved to /tmp/../${airdrop}`)).toEqual(["airdrop"]);
+    });
+  });
+
+  it("flags a literal backslash temp path", () => {
+    const airdrop = ["air", "drop"].join("");
+    withTmpdir("/tmp", () => {
+      expect(bannedWordsIn(`/tmp/${airdrop}`)).toEqual([]);
+      expect(bannedWordsIn(`\\tmp\\${airdrop}`)).toEqual(["airdrop"]);
+    });
+  });
+
+  it("masks a macOS temp root that keeps its trailing slash", () => {
+    const root = "/var/folders/mask-root/T";
+    const airdrop = ["air", "drop"].join("");
+    withTmpdir(`${root}/`, () => {
+      expect(bannedWordsIn(`${root}/${airdrop}.js`)).toEqual([]);
+      expect(bannedWordsIn(`See ${root}/notes.txt then ${airdrop}`)).toEqual(["airdrop"]);
+    });
+  });
+
+  it("does not mask a sibling directory that only shares the root prefix", () => {
+    const root = "/var/folders/mask-root/T";
+    const airdrop = ["air", "drop"].join("");
+    withTmpdir(root, () => {
+      expect(bannedWordsIn(`${root}/${airdrop}.js`)).toEqual([]);
+      expect(bannedWordsIn(`${root}-other/${airdrop}`)).toEqual(["airdrop"]);
+    });
+  });
+
+  it("flags a banned word after a comma, semicolon, or pipe in a temp path", () => {
+    const root = "/var/folders/mask-root/T";
+    const airdrop = ["air", "drop"].join("");
+    const rewards = ["re", "wards"].join("");
+    withTmpdir(root, () => {
+      expect(bannedWordsIn(`${root}/x,${airdrop}`)).toEqual(["airdrop"]);
+      expect(bannedWordsIn(`${root}/x;${airdrop}`)).toEqual(["airdrop"]);
+      expect(bannedWordsIn(`${root}/x|${rewards}`)).toEqual(["reward"]);
+    });
+  });
+
+  it("does not flag a banned word that stays inside the temp path before a delimiter", () => {
+    const root = "/var/folders/mask-root/T";
+    const airdrop = ["air", "drop"].join("");
+    const rewards = ["re", "wards"].join("");
+    const price = ["pri", "ce"].join("");
+    withTmpdir(root, () => {
+      expect(bannedWordsIn(`${root}/${airdrop}.js,note`)).toEqual([]);
+      expect(bannedWordsIn(`${root}/${rewards}.txt;keep`)).toEqual([]);
+      expect(bannedWordsIn(`${root}/${price}.log|keep`)).toEqual([]);
+    });
+  });
+
+  it("redacts secret runs on the full text before cutting the excerpt", () => {
+    const hex = createHash("sha256").update("FAKE-excerpt-hex").digest("hex");
+    const b64 = createHash("sha256").update("FAKE-excerpt-b64").digest("base64");
+    const alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+    const seed = createHash("sha256").update("FAKE-base58-key").digest();
+    let base58 = "";
+    for (let i = 0; i < 64; i += 1) base58 += alphabet[(seed[i % seed.length] ?? 0) % alphabet.length];
+    const header = Buffer.from('{"alg":"none","typ":"JWT"}').toString("base64url");
+    const payload = Buffer.from('{"sub":"FAKE-jwt-subject"}').toString("base64url");
+    const sig = createHash("sha256").update("FAKE-jwt-sig").digest("base64url");
+    const jwt = `${header}.${payload}.${sig}`;
+    const left = ["air", "drop"].join("");
+    const right = ["re", "ward"].join("");
+    const pad = ".".repeat(16);
+    const cases = [
+      { secret: hex, text: `${left}${pad}${hex}${pad}${right}`, stems: ["airdrop", "reward"] },
+      { secret: hex, text: `${hex}${".".repeat(18)}${left}`, stems: ["airdrop"] },
+      { secret: hex, text: `${left}${".".repeat(18)}${hex}`, stems: ["airdrop"] },
+      { secret: b64, text: `${left}${pad}${b64}${pad}${right}`, stems: ["airdrop", "reward"] },
+      { secret: base58, text: `${left}${pad}${base58}${pad}${right}`, stems: ["airdrop", "reward"] },
+      { secret: jwt, text: `${left}${pad}${jwt}${pad}${right}`, stems: ["airdrop", "reward"] },
+    ];
+    for (const [index, item] of cases.entries()) {
+      const hits = bannedHitsInText(item.text, "copy.ts");
+      expect(hits.map((hit) => hit.stem).sort(), `case ${index} stems`).toEqual([...item.stems].sort());
+      expect(hits.every((hit) => item.stems.includes(hit.stem)), `case ${index} match`).toBe(true);
+      expect(hits.some((hit) => hit.excerpt.includes("[redacted]")), `case ${index} marker`).toBe(true);
+      expect(containsRun(findingBlob(hits), item.secret), `case ${index} leak`).toBe(false);
+    }
+  });
+
+  it("does not throw on an out-of-range numeric character reference", () => {
+    const entity = "&#9999999;";
+    const word = ["air", "drop"].join("");
+    expect(() => bannedWordsIn(entity)).not.toThrow();
+    expect(bannedWordsIn(entity)).toEqual([]);
+    expect(bannedWordsIn(`${entity}${word}`)).toEqual(["airdrop"]);
   });
 });
 

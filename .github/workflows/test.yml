@@ -129,10 +129,14 @@ jobs:
           grep -F "10 passed; 0 failed; 0 skipped" fork-summary.txt
 
   # Wallet UX (Vite + vitest). No Relayer key. Fixtures when Relayer URL unset.
+  # The copy scanner masks TMPDIR only. Point it at the runner temp dir so a
+  # bare /tmp path in shipped copy is still a failure.
   wallet:
     name: Wallet build + test
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      TMPDIR: ${{ runner.temp }}
     defaults:
       run:
         working-directory: wallet
