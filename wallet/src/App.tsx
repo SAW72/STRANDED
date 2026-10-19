@@ -119,7 +119,13 @@ import { receiptFromSubmit, type RescueReceiptView } from "./lib/receipt";
 import { submitRescue } from "./lib/rescues";
 import { isPointsRoute, Points } from "./Points";
 import { RescueReceipt } from "./RescueReceipt";
-import { DEMO_FALLBACK_TICKER, demoBannerText, demoTicker, tokenDisclosure } from "./lib/tokenDisclosure";
+import {
+  DEMO_FALLBACK_TICKER,
+  demoBannerText,
+  demoTicker,
+  liveSymbolUnreadText,
+  tokenDisclosure,
+} from "./lib/tokenDisclosure";
 import {
   StrandedCelebration,
   StrandedHero,
@@ -153,6 +159,9 @@ function dashOr(value: ReactNode, ready: boolean): ReactNode {
 
 function RescueApp() {
   const [selectedChainId, setSelectedChainId] = useState<SupportedChainId>(ARB_SEPOLIA_CHAIN_ID);
+  const selectedChainRef = useRef(selectedChainId);
+  selectedChainRef.current = selectedChainId;
+  const signEntry = useRef(false);
   const relayer = relayerUrl(selectedChainId);
   const useFixture = !relayer;
 
@@ -364,6 +373,7 @@ function RescueApp() {
   // ticker such as GRTT or gMOCK both render as SDEMO.
   const demoSymbol = useFixture ? DEMO_FALLBACK_TICKER : liveTicker;
   const liveSymbolReady = useFixture || (Boolean(liveTicker) && !symbolPending && !symbolFailed);
+  const unreadCopy = !useFixture && !liveSymbolReady ? liveSymbolUnreadText(selectedChainId) : null;
 
   const reviewVisible = isConnected && quoteReady && liveSymbolReady;
 
@@ -447,7 +457,7 @@ function RescueApp() {
   }
 
   async function onSign() {
-    if (signing || awaitingFreshHoldings || submitState.kind === "posting") return;
+    if (signEntry.current || signing || awaitingFreshHoldings || submitState.kind === "posting") return;
     if (!canPromptSignatures(phase) || !quoteReady || !quote || !address || !token || !rescue) return;
     setSubmitState((current) => quoteSessionOnNewAttempt(current));
     if (!onSelectedChain) {
@@ -475,6 +485,7 @@ function RescueApp() {
     }
 
     const order = buildOrder({ quote });
+    signEntry.current = true;
     setSigning(true);
     setSignError(null);
     let rescuePostAttempted = false;
@@ -522,7 +533,7 @@ function RescueApp() {
         });
         if (submitted.ok) {
           const nextReceipt = receiptFromSubmit(quote, submitted);
-          if (nextReceipt) setReceipt(nextReceipt);
+          if (nextReceipt && nextReceipt.chainId === selectedChainRef.current) setReceipt(nextReceipt);
           postedOk = true;
           console.info("[rescue] submit ok", submitted.txHash);
           // Spent Order (nonce/sig/minOut/deadline) must not linger — UsedNonce on replay.
@@ -573,6 +584,7 @@ function RescueApp() {
         setSigned(outcome.signed);
       }
     } finally {
+      signEntry.current = false;
       setSigning(false);
       setAwaitingFreshHoldings(false);
     }
@@ -596,7 +608,7 @@ function RescueApp() {
         <a href="/points">{POINTS_NAV_LABEL}</a>
       </p>
       <p className="demo-banner" role="note" data-testid="demo-banner">
-        {demoBannerText(demoSymbol)}
+        {unreadCopy ?? demoBannerText(demoSymbol)}
       </p>
       <StrandedCelebration kind={celebration} onDone={() => setCelebration(null)} />
       <StrandedHero onPlay={() => setCelebration("rescue")} />
@@ -720,7 +732,7 @@ function RescueApp() {
           Use full balance
         </button>
         <p className="token-disclosure" data-testid="token-disclosure">
-          {tokenDisclosure(demoSymbol, selectedChainId)}
+          {unreadCopy ?? tokenDisclosure(demoSymbol, selectedChainId)}
         </p>
       </section>
 

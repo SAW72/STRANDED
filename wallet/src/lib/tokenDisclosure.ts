@@ -41,3 +41,9 @@ export function demoBannerText(symbol: string | null | undefined): string {
   if (!ticker) return UNKNOWN_DEMO_BANNER;
   return `Testnet demo. ${ticker} has no value and isn't for sale.`;
 }
+
+/** Live mode, while the on-chain symbol is loading, missing, or failed. */
+export function liveSymbolUnreadText(chainId?: number): string {
+  const network = disclosureNetwork(chainId);
+  return `Token loading or unread on ${network}. This testnet demo has no value and is not for sale.`;
+}

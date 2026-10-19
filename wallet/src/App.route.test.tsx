@@ -10,7 +10,7 @@ import { App } from "./App";
 import { ARB_SEPOLIA_CHAIN_ID } from "./lib/chains";
 import { sampleFixtureRaw } from "./lib/fixture";
 import { QUOTE_ERROR, SAMPLE_BADGE } from "./copy";
-import { UNKNOWN_DEMO_BANNER } from "./lib/tokenDisclosure";
+import { liveSymbolUnreadText, UNKNOWN_DEMO_BANNER } from "./lib/tokenDisclosure";
 import { wagmiConfig } from "./wagmi";
 
 const WALLET = "0x1111111111111111111111111111111111111111" as const;
@@ -130,10 +130,10 @@ describe("App routes", () => {
     expect(view.container.textContent).not.toContain("Details confirmed. You can sign next.");
     const disclosures = view.container.querySelectorAll("[data-testid='token-disclosure']");
     expect(disclosures).toHaveLength(1);
-    expect(disclosures[0]?.textContent).not.toMatch(/\bGRTT\b/);
+    expect(disclosures[0]?.textContent?.includes("GRTT")).toBe(false);
     const banner = view.container.querySelector("[data-testid='demo-banner']")?.textContent ?? "";
     expect(banner).toBe(UNKNOWN_DEMO_BANNER);
-    expect(banner).not.toMatch(/\bGRTT\b/);
+    expect(banner.includes("GRTT")).toBe(false);
     expect(banner).not.toMatch(/this token/i);
     await view.unmount();
   });
@@ -170,7 +170,7 @@ describe("App routes", () => {
     expect(view.container.querySelector("[data-testid='rescue-quote-collapsed']")).toBeNull();
     const values = rows.map((row) => row.querySelector(".review-figure")?.textContent ?? "").join("\n");
     expect(values).toMatch(/SDEMO/);
-    expect(values).not.toMatch(/\bGRTT\b/);
+    expect(values.includes("GRTT")).toBe(false);
     for (const row of rows) {
       expect(row.querySelector(".review-figure")?.textContent).not.toBe("—");
     }
@@ -242,7 +242,7 @@ describe("App routes", () => {
     const grtt = await renderAt("/", <App />);
     const grttToken = tokenRow(grtt.container);
     expect(grttToken).toMatch(/SDEMO/);
-    expect(grttToken).not.toMatch(/\bGRTT\b/);
+    expect(grttToken.includes("GRTT")).toBe(false);
     expect(grttToken).not.toBe("not configured");
     await grtt.unmount();
 
@@ -347,6 +347,36 @@ describe("App routes", () => {
     expect(button(failed.container, "confirm-details").disabled).toBe(true);
     expect(button(failed.container, "sign-order").disabled).toBe(true);
     await failed.unmount();
+  });
+
+  it("uses one neutral sentence when the live symbol is loading or unread", async () => {
+    vi.stubEnv("VITE_RELAYER_URL_ARB_SEPOLIA", "https://relayer.example.invalid");
+    vi.stubEnv("VITE_TOKEN_ADDRESS_ARB_SEPOLIA", WALLET);
+    accountState.address = WALLET;
+    accountState.isConnected = true;
+    accountState.chainId = ARB_SEPOLIA_CHAIN_ID;
+    const expected = liveSymbolUnreadText(ARB_SEPOLIA_CHAIN_ID);
+
+    async function expectUnread(pending: boolean) {
+      readState.symbolPending = pending;
+      readState.symbolError = false;
+      readState.symbol = pending ? undefined : "";
+      const view = await renderAt("/", <App />);
+      const banner = view.container.querySelector("[data-testid='demo-banner']")?.textContent ?? "";
+      const disclosure = view.container.querySelector("[data-testid='token-disclosure']")?.textContent ?? "";
+      expect(banner).toBe(expected);
+      expect(disclosure).toBe(expected);
+      expect(banner.includes("SDEMO")).toBe(false);
+      expect(disclosure.includes("SDEMO")).toBe(false);
+      expect(banner.toLowerCase().includes("testnet demo token")).toBe(false);
+      expect(disclosure.toLowerCase().includes("testnet demo token")).toBe(false);
+      expect(button(view.container, "confirm-details").disabled).toBe(true);
+      expect(button(view.container, "sign-order").disabled).toBe(true);
+      await view.unmount();
+    }
+
+    await expectUnread(true);
+    await expectUnread(false);
   });
 
   it("names Base Sepolia in the disclosure when that network is selected", async () => {

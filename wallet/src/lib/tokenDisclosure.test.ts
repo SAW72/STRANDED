@@ -25,6 +25,7 @@ import {
 import disclosureSource from "./tokenDisclosure.ts?raw";
 import {
   demoBannerText,
+  liveSymbolUnreadText,
   tokenDisclosure,
   UNKNOWN_DEMO_BANNER,
   UNKNOWN_TOKEN_DISCLOSURE,
@@ -99,6 +100,19 @@ describe("token disclosure", () => {
     expect(UNKNOWN_DEMO_BANNER).not.toMatch(/this token/i);
   });
 
+  it("uses one unread sentence that does not name the sample ticker", () => {
+    const arb = liveSymbolUnreadText(ARB_SEPOLIA_CHAIN_ID);
+    const base = liveSymbolUnreadText(BASE_SEPOLIA_CHAIN_ID);
+    expect(arb).toBe(liveSymbolUnreadText());
+    expect(arb.includes("SDEMO")).toBe(false);
+    expect(base.includes("SDEMO")).toBe(false);
+    expect(arb.toLowerCase().includes("testnet demo token")).toBe(false);
+    expect(base).toContain("Base Sepolia");
+    expect(arb).toContain("Token loading or unread");
+    expect(bannedWordsIn(arb)).toEqual([]);
+    expect(bannedWordsIn(base)).toEqual([]);
+  });
+
   it("names Base Sepolia when that chain is selected", () => {
     expect(tokenDisclosure("SDEMO", BASE_SEPOLIA_CHAIN_ID)).toBe(
       "SDEMO is a testnet demo token on Base Sepolia. It has no value and is not for sale. This is experimental, unaudited demo software.",
@@ -121,6 +135,8 @@ describe("banned words in user-visible copy", () => {
     demoBannerText("SDEMO"),
     demoBannerText("GRTT"),
     demoBannerText(null),
+    liveSymbolUnreadText(),
+    liveSymbolUnreadText(BASE_SEPOLIA_CHAIN_ID),
     ...COPY_SOURCES.flatMap((source) => stringLiterals(source).filter(isUserCopy)),
     ...COPY_SOURCES.flatMap((source) => jsxText(source).filter(isUserCopy)),
   ];

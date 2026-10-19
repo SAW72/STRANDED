@@ -19,8 +19,7 @@ it.skipIf(process.env.SPA_CLEANUP_CHILD === "1")("spaFallback.test.ts removes ev
       encoding: "utf8",
     });
     expect(child.status, child.stdout + child.stderr).toBe(0);
-    const left = fs.readdirSync(tmp).filter((name) => name.startsWith("stranded-"));
-    expect(left).toEqual([]);
+    expect(fs.readdirSync(tmp)).toEqual([]);
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }

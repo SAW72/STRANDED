@@ -92,38 +92,60 @@ export function formatBannedHits(hits: BannedHit[]): string {
     .join("\n");
 }
 
+function normalizeRoot(root: string): string {
+  return root.replaceAll("\\", "/").replace(/\/+$/, "");
+}
+
+/** Checkout plus the real OS temp dir. TMPDIR wins. A bare /tmp is not added when TMPDIR points elsewhere. */
 function buildRoots(): string[] {
   const proc = (globalThis as { process?: { cwd?: () => string; env?: Record<string, string | undefined> } }).process;
-  const roots = [proc?.cwd?.(), proc?.env?.TMPDIR, proc?.env?.TEMP, proc?.env?.TMP, "/tmp"];
+  const tmpdir = proc?.env?.TMPDIR;
+  const temp = tmpdir && tmpdir.length > 0 ? tmpdir : "/tmp";
+  const roots = [proc?.cwd?.(), temp];
   const found: string[] = [];
   for (const root of roots) {
     if (!root) continue;
-    const norm = root.replaceAll("\\", "/").replace(/\/+$/, "");
+    const norm = normalizeRoot(root);
     if (norm && !found.includes(norm)) found.push(norm);
   }
   return found;
 }
 
 /**
- * A genuine build path: an absolute path under this checkout, the temp dir, or
- * /tmp, or a node_modules segment that ends in a file extension.
+ * A genuine build path under this checkout or the real OS temp dir.
+ * The next character after the root must be `/`, so a sibling prefix is not a path.
  * Slash-separated copy is not a path.
  */
 export function isAbsoluteBuildPath(text: string): boolean {
   const trimmed = text.trim();
-  if (!trimmed || /\s/.test(trimmed)) return false;
+  if (!trimmed || /[\s,;|"'`]/.test(trimmed)) return false;
   const norm = trimmed.replaceAll("\\", "/");
-  if (/(?:^|\/)node_modules\/.+\.[A-Za-z0-9]+$/.test(norm)) return true;
   if (!norm.startsWith("/")) return false;
   return buildRoots().some((root) => norm === root || norm.startsWith(`${root}/`));
 }
 
+function charFromCode(code: number, raw: string): string {
+  if (!Number.isInteger(code) || code < 0 || code > 0x10ffff) return raw;
+  if (code >= 0xd800 && code <= 0xdfff) return raw;
+  return String.fromCodePoint(code);
+}
+
+function decodeHtmlEntities(text: string): string {
+  const shy = text.replace(/&shy;/gi, "\u00AD");
+  const hex = shy.replace(/&#x([0-9a-fA-F]{1,6});/gi, (raw, digits: string) =>
+    charFromCode(Number.parseInt(digits, 16), raw),
+  );
+  return hex.replace(/&#([0-9]{1,7});/g, (raw, digits: string) =>
+    charFromCode(Number.parseInt(digits, 10), raw),
+  );
+}
+
 function normalizeCopy(text: string): string {
-  return text.replace(IGNORABLE, "").normalize("NFKC");
+  return decodeHtmlEntities(text).replace(IGNORABLE, "").normalize("NFKC");
 }
 
 function maskBuildPaths(text: string): string {
-  return text.replace(/(?:\/|[A-Za-z]:[\\/])[^\s"'`<>)]+/g, (candidate) =>
+  return text.replace(/(?:\/|[A-Za-z]:[\\/])[^\s"'`<>),;|]+/g, (candidate) =>
     isAbsoluteBuildPath(candidate) ? " ".repeat(candidate.length) : candidate,
   );
 }
@@ -131,7 +153,8 @@ function maskBuildPaths(text: string): string {
 function maskAllowedCompounds(text: string): string {
   let next = text;
   for (const compound of ALLOWED_COMPOUNDS) {
-    const pattern = new RegExp(compound.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
+    const body = compound.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const pattern = new RegExp(`(?<![A-Za-z0-9])${body}(?![A-Za-z0-9])`, "gi");
     next = next.replace(pattern, (match) => " ".repeat(match.length));
   }
   return next;
@@ -149,16 +172,22 @@ function prepareCopy(text: string): string {
     .replace(/[^A-Za-z0-9\s']/g, " ");
 }
 
+function redactSecretRuns(text: string): string {
+  return text.replace(/(?:0x)?[0-9a-fA-F]{32,}/gi, "[redacted]");
+}
+
 function hitsOnPrepared(prepared: string, excerptFrom: string, file: string): BannedHit[] {
   const hits: BannedHit[] = [];
   for (const match of prepared.matchAll(BANNED_PATTERN)) {
     const word = match[0];
     const stem = FORM_TO_STEM.get(word.toLowerCase()) ?? word.toLowerCase();
     const index = match.index ?? 0;
-    const excerpt = excerptFrom
-      .slice(Math.max(0, index - 48), Math.min(excerptFrom.length, index + word.length + 48))
-      .replace(/\s+/g, " ")
-      .trim();
+    const excerpt = redactSecretRuns(
+      excerptFrom
+        .slice(Math.max(0, index - 48), Math.min(excerptFrom.length, index + word.length + 48))
+        .replace(/\s+/g, " ")
+        .trim(),
+    );
     hits.push({ stem, match: word, excerpt, file });
   }
   return hits;
@@ -329,7 +358,7 @@ export function hitsInAppCode(code: string, file: string): BannedHit[] {
 export function cssContentHits(css: string, file: string): BannedHit[] {
   const hits: BannedHit[] = [];
   const patterns = [
-    /(?<![\w-])content\s*:\s*(?:"((?:\\.|[^"\\])*)"|'((?:\\.|[^'\\])*)')/g,
+    /(?<![\w-])content\s*:\s*(?:"((?:\\.|[^"\\])*)"|'((?:\\.|[^'\\])*)')/gi,
     /--[\w-]+\s*:\s*(?:"((?:\\.|[^"\\])*)"|'((?:\\.|[^'\\])*)')/g,
   ];
   for (const pattern of patterns) {

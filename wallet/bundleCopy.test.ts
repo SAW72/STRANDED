@@ -305,6 +305,16 @@ describe("banned-word scanner", () => {
     expect(bannedWordsIn("valuation tradeoff")).toEqual([]);
   });
 
+  it("keeps allowed compounds only on a word boundary", () => {
+    expect(bannedWordsIn(["Trade-off", "er live now"].join(""))).toEqual(["trade"]);
+    expect(bannedWordsIn(["data-value", "d holders"].join(""))).toEqual(["value"]);
+    expect(bannedWordsIn(["tra", "de", "-off"].join(""))).toEqual([]);
+    expect(bannedWordsIn(["tra", "de", "off"].join(""))).toEqual([]);
+    expect(bannedWordsIn(["no", "-", "value"].join(""))).toEqual([]);
+    expect(bannedWordsIn(["no", "_", "value"].join(""))).toEqual([]);
+    expect(bannedWordsIn("valuation")).toEqual([]);
+  });
+
   it("flags slash-separated copy and still scans Price:/month", () => {
     const slashList = ["Track points/", "re", "wards/", "air", "drops in one place"].join("");
     const buySell = ["Buy/sell/", "tra", "de"].join("");
@@ -314,7 +324,8 @@ describe("banned-word scanner", () => {
     expect(bannedWordsIn(buySell)).toEqual(["trade"]);
     expect(bannedWordsIn(claim)).toEqual(["airdrop"]);
     expect(bannedWordsIn(priceMonth)).toEqual(["price"]);
-    expect(bannedWordsIn(`pkg/node_modules/left/${["re", "wards"].join("")}.js`)).toEqual([]);
+    expect(bannedWordsIn(`pkg/node_modules/left/${["re", "wards"].join("")}.js`)).toEqual(["reward"]);
+    expect(bannedHitsInText(path.join(process.cwd(), "node_modules", "left", `${["re", "wards"].join("")}.js`), "dep")).toEqual([]);
     expect(bannedWordsIn(["Air", "drop", "!node_modules"].join(""))).toEqual(["airdrop"]);
     expect(hitsInAppCode(`export const label = ${JSON.stringify(slashList)};`, "format.ts").length).toBeGreaterThan(0);
   });
@@ -333,6 +344,50 @@ describe("banned-word scanner", () => {
     }).code;
     const hits = hitsInAppCode(jsx, "Shy.tsx");
     expect(hits.map((hit) => hit.stem)).toContain("airdrop");
+  });
+
+  it("masks only this checkout and the real temp dir", () => {
+    const airdrop = ["air", "drop"].join("");
+    const rewards = ["re", "wards"].join("");
+    const previousTmp = process.env.TMPDIR;
+    const previousTemp = process.env.TEMP;
+    const previousTmpShort = process.env.TMP;
+    const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "mask-root-"));
+    process.env.TMPDIR = scratch;
+    process.env.TEMP = path.join(path.parse(scratch).root, "temp-alias");
+    process.env.TMP = process.env.TEMP;
+    try {
+      const tempRoot = os.tmpdir().replaceAll("\\", "/").replace(/\/+$/, "");
+      expect(tempRoot).toBe(scratch.replaceAll("\\", "/").replace(/\/+$/, ""));
+      expect(bannedWordsIn(`See ${tempRoot}/${rewards} for details`)).toEqual([]);
+      expect(bannedHitsInText(path.join(process.cwd(), rewards, "list.txt"), "cwd")).toEqual([]);
+      expect(bannedWordsIn(`See ${path.join(process.cwd(), rewards, "list.txt")} for details`)).toEqual([]);
+      expect(bannedWordsIn(`${tempRoot}foo/${airdrop}`)).toEqual(["airdrop"]);
+      expect(bannedWordsIn(`${tempRoot}/x ${airdrop}`)).toEqual(["airdrop"]);
+      expect(bannedHitsInText(path.join(scratch, ["air", "drop"].join("-")), "hyphen")).toEqual([]);
+      const outside = [
+        `Saved to /tmp/${airdrop}`,
+        `See /tmp/${airdrop} for details`,
+        `/tmp/x,${airdrop}`,
+        `/tmp/${rewards}/list.txt`,
+        `node_modules/${airdrop}.now`,
+        `/tmp/x;${airdrop}`,
+        `/tmp/x|${rewards}`,
+        `${process.env.TEMP}/${airdrop}`,
+      ];
+      for (const text of outside) {
+        expect(bannedWordsIn(text).length, text).toBeGreaterThan(0);
+      }
+      expect(bannedHitsInText(path.join(scratch, rewards, "list.txt"), "temp")).toEqual([]);
+    } finally {
+      if (previousTmp === undefined) delete process.env.TMPDIR;
+      else process.env.TMPDIR = previousTmp;
+      if (previousTemp === undefined) delete process.env.TEMP;
+      else process.env.TEMP = previousTemp;
+      if (previousTmpShort === undefined) delete process.env.TMP;
+      else process.env.TMP = previousTmpShort;
+      fs.rmSync(scratch, { recursive: true, force: true });
+    }
   });
 
   it("passes a checkout path that contains rewards", () => {
@@ -419,6 +474,28 @@ describe("banned-word scanner", () => {
     expect(hits.find((hit) => hit.stem === "apy")?.excerpt).toBe(apyLabel);
     expect(hits.find((hit) => hit.stem === "earn")?.excerpt).toBe(earnLabel);
     expect(formatBannedHits(hits)).toContain("App.tsx");
+  });
+
+  it("hides a secret-like run in the hit excerpt", () => {
+    const secret = "ab".repeat(32);
+    const word = ["air", "drop"].join("");
+    const hit = bannedHitsInText(`${secret} ${word} ${secret}`, "copy.ts")[0];
+    expect(hit?.match).toBe(word);
+    expect(hit?.excerpt.includes(word)).toBe(true);
+    expect(hit?.excerpt.includes(secret)).toBe(false);
+    expect(hit?.excerpt.includes("[redacted]")).toBe(true);
+  });
+
+  it("flags upper-case content and numeric HTML entities", () => {
+    const word = ["air", "drop"].join("");
+    const upper = cssContentHits(`.plant{CONTENT:${JSON.stringify(word)}}`, "upper.css");
+    expect(upper.map((hit) => hit.stem)).toEqual(["airdrop"]);
+    expect(cssContentHits(`.row{justify-CONTENT:${JSON.stringify(word)}}`, "upper.css")).toEqual([]);
+    expect(cssContentHits(`.row{justify-content:${JSON.stringify(word)}}`, "upper.css")).toEqual([]);
+    expect(bannedWordsIn(`&#97;${["ir", "drop"].join("")}`)).toEqual(["airdrop"]);
+    expect(bannedWordsIn(`&#x61;${["ir", "drop"].join("")}`)).toEqual(["airdrop"]);
+    expect(bannedWordsIn(["air", "&shy;", "drop"].join(""))).toEqual(["airdrop"]);
+    expect(bannedWordsIn("&#112;resale")).toEqual(["presale"]);
   });
 
   it("reads CSS content values and ignores justify-content", () => {
