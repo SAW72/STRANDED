@@ -17,6 +17,7 @@ import { createKillSwitch, parseEnvFlag } from "./killSwitch.mjs";
 import { createNonceStore } from "./nonceStore.mjs";
 import { createBuildQuote, encodeSwapData } from "./quote.mjs";
 import { rescueAbi } from "./rescueAbi.mjs";
+import { schedulePointsNotify, schedulePointsRetry } from "./points/notify.mjs";
 import { createRescueLog, orderLogSummary } from "./rescueLog.mjs";
 import { createRescueLimiter, parseRescueLimitConfig } from "./rescueLimit.mjs";
 import { DEFAULT_BASE_DELAY_MS, DEFAULT_MAX_ATTEMPTS, withBroadcastRetry } from "./retry.mjs";
@@ -245,6 +246,17 @@ async function submitRescue(body) {
       attempts,
       ms: Date.now() - started,
     });
+    // Post-confirmation only. The broadcast retry callback above must not call this.
+    try {
+      schedulePointsNotify({
+        chainId: CHAIN_ID,
+        txHash,
+        dataDir: DATA_DIR,
+        env: process.env,
+      });
+    } catch {
+      console.error("points_notify", "error");
+    }
     return { ok: true, txHash, stubRpc: false, attempts };
   } catch (err) {
     const raw = `${err && err.error ? err.error : ""} ${err && err.revert ? err.revert : ""} ${err && err.shortMessage ? err.shortMessage : ""} ${err && err.message ? err.message : ""}`;
@@ -290,6 +302,11 @@ const server = createRelayerApp({
 });
 
 await rescueLimiter.ready;
+try {
+  schedulePointsRetry({ dataDir: DATA_DIR, env: process.env });
+} catch {
+  console.error("points_notify", "error");
+}
 const limitLabel = (value) => (value == null ? "off" : String(value));
 server.listen(PORT, HOST, () => {
   console.log(

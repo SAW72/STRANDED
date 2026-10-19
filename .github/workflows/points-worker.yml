@@ -1,0 +1,43 @@
+# Offline points ledger tests. No Cloudflare API, no chain RPC, no secrets.
+name: Points worker
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Offline points ledger
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: points-worker
+    env:
+      POINTS_INGEST_SECRET: ""
+      POINTS_API_URL: ""
+      BASE_SEPOLIA_RPC_URL: ""
+      ARB_SEPOLIA_RPC_URL: ""
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: points-worker/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Test
+        run: npm test
