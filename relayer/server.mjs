@@ -18,6 +18,7 @@ import { createNonceStore } from "./nonceStore.mjs";
 import { createBuildQuote, encodeSwapData } from "./quote.mjs";
 import { rescueAbi } from "./rescueAbi.mjs";
 import {
+  findTxAtNonce,
   notePointsReceiptReplacement,
   pointsMinConfirmations,
   schedulePointsNotify,
@@ -244,10 +245,22 @@ async function submitRescue(body) {
       },
     );
     nonceStore.markConsumed(order.user, order.nonce);
+    let seenTx = null;
+    try {
+      seenTx = await publicClient.getTransaction({ hash: txHash });
+    } catch {
+      seenTx = null;
+    }
+    const txFrom = seenTx && seenTx.from ? seenTx.from : account.address;
+    const txNonce = seenTx && seenTx.nonce !== undefined && seenTx.nonce !== null ? seenTx.nonce.toString() : undefined;
+    const txTo = seenTx && seenTx.to ? seenTx.to : SWAP;
+    const txInput = seenTx && seenTx.input ? seenTx.input : undefined;
     await rescueLog.append({
       event: "rescue_ok",
       ...summary,
       txHash,
+      txFrom,
+      txNonce,
       attempts,
       ms: Date.now() - started,
     });
@@ -257,9 +270,15 @@ async function submitRescue(body) {
       const queued = schedulePointsNotify({
         chainId: CHAIN_ID,
         txHash,
+        txFrom,
+        txNonce,
+        txTo,
+        txInput,
         dataDir: DATA_DIR,
         env: process.env,
         confirmReceipt: confirmPointsReceipt,
+        lookupNonce: lookupPointsNonce,
+        getTx: readPointsTx,
       });
       if (queued.durable) await queued.durable;
     } catch {
@@ -309,6 +328,14 @@ const server = createRelayerApp({
   trustedProxyHops: TRUSTED_PROXY_HOPS,
 });
 
+function lookupPointsNonce(from, nonce) {
+  return findTxAtNonce(publicClient, from, nonce);
+}
+
+function readPointsTx(hash) {
+  return publicClient.getTransaction({ hash });
+}
+
 function confirmPointsReceipt(hash) {
   return publicClient.waitForTransactionReceipt({
     hash,
@@ -332,6 +359,8 @@ try {
     dataDir: DATA_DIR,
     env: process.env,
     confirmReceipt: confirmPointsReceipt,
+    lookupNonce: lookupPointsNonce,
+    getTx: readPointsTx,
   });
 } catch {
   console.error("points_notify", "error");

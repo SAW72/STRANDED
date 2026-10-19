@@ -1,6 +1,8 @@
 import { createHmac, randomBytes } from "node:crypto";
 import { appendFile, mkdir, open, readdir, readFile, rename, rm } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
+import { decodeFunctionData } from "viem";
+import { rescueAbi } from "../rescueAbi.mjs";
 
 const TX_RE = /^0x[0-9a-f]{64}$/;
 const CHAINS = new Set([84532, 421614]);
@@ -31,6 +33,8 @@ const PERMANENT_REJECTIONS = new Set([
 const CONFIRM_WAIT_MS = 20_000;
 const COMPACT_AFTER_LINES = 6;
 const DEFAULT_MIN_CONFIRMATIONS = 2;
+const NONCE_SCAN_BLOCKS = 64;
+const ADDR_RE = /^0x[0-9a-f]{40}$/;
 
 let tail = Promise.resolve();
 let io = Promise.resolve();
@@ -206,15 +210,58 @@ export function notePointsReplacement(opts) {
 
 /**
  * Product hook for a receipt wait that sees a replacement.
- * A cancel drops the hash. Any other replacement stores old hash to new hash.
+ * A cancel, or a replacement that is not the same rescue call, drops the hash.
+ * The same rescue contract and the same decoded call stores old hash to new hash.
  */
 export function notePointsReceiptReplacement(opts, response) {
   const reason = response && response.reason;
-  if (reason === "cancelled") return notePointsCancel(opts);
   const tx = response && response.transaction;
   const receipt = response && response.transactionReceipt;
   const replacedBy = tx && tx.hash ? tx.hash : receipt && receipt.transactionHash;
-  return notePointsReplacement({ ...opts, replacedBy });
+  if (reason === "cancelled" || !replacedBy) return notePointsCancel(opts);
+  let item;
+  try {
+    item = normalizeItem(opts.chainId, opts.txHash);
+  } catch (err) {
+    return Promise.reject(err);
+  }
+  const next = String(replacedBy).trim().toLowerCase();
+  if (!TX_RE.test(next) || next === item.txHash) return notePointsCancel(opts);
+  const file = pointsOutboxPath(opts.dataDir);
+  return enqueueIo(async () => {
+    await mkdir(dirname(file), { recursive: true, mode: 0o700 });
+    const folded = await readFold(file);
+    if (folded.cancelled.has(item.txHash) || folded.delivered.has(next)) {
+      return folded.cancelled.has(item.txHash) ? { cancelled: true } : { replaced: true, txHash: next };
+    }
+    if (folded.links.get(item.txHash) === next) return { replaced: true, txHash: next };
+    const current = folded.pending.get(item.txHash) || folded.pending.get(folded.follow(item.txHash));
+    const candidate = tx || { hash: next, to: receipt && receipt.to, input: "" };
+    const cand = candidateFromTx({ ...candidate, hash: next });
+    if (!current || !hasCallIdentity(current) || !cand || !cand.to || cand.input.length < 10) {
+      await writeRecord(file, {
+        op: "observe",
+        txHash: item.txHash,
+        replacedBy: next,
+        txTo: cand && cand.to ? cand.to : undefined,
+        txInput: cand && cand.input ? cand.input : undefined,
+        at: stamp(opts),
+      });
+      return { observed: true };
+    }
+    if (!matchesRescue(current, candidate)) {
+      await persistCancel(file, opts, item.txHash);
+      return { cancelled: true };
+    }
+    await writeRecord(file, {
+      op: "replace",
+      chainId: item.chainId,
+      txHash: item.txHash,
+      replacedBy: next,
+      at: stamp(opts),
+    });
+    return { replaced: true, txHash: next };
+  });
 }
 
 /** Drops a pending hash. A later restart posts nothing for it. */
@@ -259,11 +306,13 @@ function launchRetry(opts) {
 async function startDelivery(opts) {
   const item = normalizeItem(opts.chainId, opts.txHash);
   const file = pointsOutboxPath(opts.dataDir);
+  const ident = identityFrom(opts);
   await mkdir(dirname(file), { recursive: true, mode: 0o700 });
   const items = await enqueueIo(async () => {
     await sweepTemps(file);
-    const pending = await readState(file);
-    if (!pending.has(item.txHash)) {
+    const folded = await readFold(file);
+    const dest = folded.follow(item.txHash);
+    if (!isSettled(folded, item.txHash) && !isSettled(folded, dest) && !folded.pending.has(dest)) {
       await writeRecord(file, {
         op: "enqueue",
         chainId: item.chainId,
@@ -272,14 +321,15 @@ async function startDelivery(opts) {
         attempts: 0,
         mineAttempts: 0,
         notFound: 0,
+        ...ident,
       });
     }
     const state = await readState(file);
     const picked = [];
     for (const row of state.values()) {
-      if (row.txHash === item.txHash || !scheduledRetries.has(row.txHash)) picked.push(row);
+      if (row.txHash === item.txHash || row.txHash === dest || !scheduledRetries.has(row.txHash)) picked.push(row);
     }
-    const fresh = picked.find((row) => row.txHash === item.txHash);
+    const fresh = picked.find((row) => row.txHash === item.txHash) || picked.find((row) => row.txHash === dest);
     const rest = picked.filter((row) => row !== fresh);
     return fresh ? [fresh, ...rest] : picked;
   });
@@ -365,6 +415,7 @@ async function sendOne(opts, txHash) {
 
 async function settleItem(file, opts, item) {
   const outcome = await confirmIfNeeded(opts, item);
+  if (outcome.gate === "cancelled") return enqueueIo(() => persistCancel(file, opts, outcome.item.txHash));
   if (outcome.gate !== "ready") return enqueueIo(() => applyOutcome(file, opts, outcome));
   const ready = await enqueueIo(() => takeReady(file, opts, outcome));
   if (!ready) return 0;
@@ -376,22 +427,25 @@ async function confirmIfNeeded(opts, item) {
   if (typeof opts.confirmReceipt !== "function") return { gate: "ready", item };
   const waitMs = Number.isFinite(Number(opts.confirmWaitMs)) ? Number(opts.confirmWaitMs) : CONFIRM_WAIT_MS;
   let receipt;
+  let confirmError;
   try {
     receipt = await withTimeout(Promise.resolve().then(() => opts.confirmReceipt(item.txHash)), waitMs);
   } catch (err) {
-    if (err && err.message === "confirm_timeout") {
-      return { gate: "pending", item, error: "receipt_pending", kind: "mine" };
-    }
+    confirmError = err;
+  }
+  if (receipt && receiptAccepted(receipt)) {
+    const next = itemForReceipt(item, receipt);
+    if (!next) return { gate: "pending", item, error: "receipt_pending", kind: "mine" };
+    if (next.txHash === item.txHash) return { gate: "ready", item: next };
+    return classifyOtherHash(opts, item, next.txHash);
+  }
+  if (receipt && !receiptAccepted(receipt)) return { gate: "rejected", item };
+  const looked = await lookupMinedReplacement(opts, item);
+  if (looked) return looked;
+  if (confirmError && confirmError.message !== "confirm_timeout") {
     return { gate: "pending", item, error: "rpc_error", kind: "outage", alert: true };
   }
-  if (!receiptAccepted(receipt)) return { gate: "rejected", item };
-  const next = itemForReceipt(item, receipt);
-  if (!next) return { gate: "pending", item, error: "receipt_pending" };
-  return {
-    gate: "ready",
-    item: next,
-    replaces: next.txHash === item.txHash ? "" : item.txHash,
-  };
+  return { gate: "pending", item, error: "receipt_pending", kind: "mine" };
 }
 
 function withTimeout(promise, ms) {
@@ -426,8 +480,69 @@ function itemForReceipt(item, receipt) {
   if (hash === item.txHash) return item;
   if (!TX_RE.test(hash)) return null;
   return {
+    ...identityFrom(item),
     chainId: item.chainId,
     txHash: hash,
+    attempts: 0,
+    mineAttempts: 0,
+    notFound: 0,
+  };
+}
+
+async function classifyOtherHash(opts, item, hash) {
+  if (!hasCallIdentity(item)) {
+    return { gate: "pending", item, error: "unresolved", kind: "outage", alert: true };
+  }
+  let tx = null;
+  if (typeof opts.getTx === "function") {
+    try {
+      tx = await opts.getTx(hash);
+    } catch {
+      return { gate: "pending", item, error: "rpc_error", kind: "outage", alert: true };
+    }
+  }
+  if (!tx || !matchesRescue(item, tx)) return { gate: "cancelled", item };
+  return {
+    gate: "ready",
+    item: replacementItem(item, tx),
+    replaces: item.txHash,
+  };
+}
+
+async function lookupMinedReplacement(opts, item) {
+  if (!hasNonceIdentity(item) || typeof opts.lookupNonce !== "function") return null;
+  let looked;
+  try {
+    looked = await opts.lookupNonce(item.txFrom, item.txNonce);
+  } catch {
+    return { gate: "pending", item, error: "rpc_error", kind: "outage", alert: true };
+  }
+  if (!looked || looked.status === "pending") return null;
+  if (looked.status === "unresolved") {
+    return { gate: "pending", item, error: "unresolved", kind: "outage", alert: true };
+  }
+  if (looked.status !== "found" || !looked.tx) {
+    return { gate: "pending", item, error: "unresolved", kind: "outage", alert: true };
+  }
+  const cand = candidateFromTx(looked.tx);
+  if (!cand) return { gate: "pending", item, error: "unresolved", kind: "outage", alert: true };
+  if (cand.hash === item.txHash) return null;
+  if (!hasCallIdentity(item) || !matchesRescue(item, looked.tx)) return { gate: "cancelled", item };
+  return {
+    gate: "ready",
+    item: replacementItem(item, looked.tx),
+    replaces: item.txHash,
+  };
+}
+
+function replacementItem(item, tx) {
+  const cand = candidateFromTx(tx);
+  return {
+    ...identityFrom(item),
+    chainId: item.chainId,
+    txHash: cand.hash,
+    txTo: cand.to || item.txTo,
+    txInput: cand.input || item.txInput,
     attempts: 0,
     mineAttempts: 0,
     notFound: 0,
@@ -455,7 +570,23 @@ async function applyOutcome(file, opts, outcome) {
 async function takeReady(file, opts, outcome) {
   const item = outcome.item;
   if (outcome.replaces) {
-    await writeRecord(file, { op: "dropped", txHash: outcome.replaces, at: stamp(opts), error: "replaced" });
+    const folded = await readFold(file);
+    if (
+      folded.cancelled.has(outcome.replaces) ||
+      folded.cancelled.has(item.txHash) ||
+      folded.delivered.has(item.txHash)
+    ) {
+      return null;
+    }
+    if (folded.links.get(outcome.replaces) !== item.txHash) {
+      await writeRecord(file, {
+        op: "replace",
+        chainId: item.chainId,
+        txHash: outcome.replaces,
+        replacedBy: item.txHash,
+        at: stamp(opts),
+      });
+    }
     const pending = await readState(file);
     if (!pending.has(item.txHash)) {
       await writeRecord(file, {
@@ -466,12 +597,17 @@ async function takeReady(file, opts, outcome) {
         attempts: item.attempts || 0,
         mineAttempts: item.mineAttempts || 0,
         notFound: item.notFound || 0,
+        ...identityFrom(item),
       });
     }
   }
   const pending = await readState(file);
+  const folded = await readFold(file);
+  if (folded.cancelled.has(item.txHash) || folded.delivered.has(item.txHash) || folded.dropped.has(item.txHash)) {
+    return null;
+  }
   if (!pending.has(item.txHash)) return null;
-  return item;
+  return { ...pending.get(item.txHash), ...identityFrom(item) };
 }
 
 async function recordPost(file, opts, item, result) {
@@ -669,7 +805,14 @@ function stampMs(opts) {
 }
 
 async function writeRecord(file, record) {
-  if (record.op === "enqueue" || record.op === "dropped" || record.op === "delivered") {
+    if (
+    record.op === "enqueue" ||
+    record.op === "dropped" ||
+    record.op === "delivered" ||
+    record.op === "replace" ||
+    record.op === "cancel" ||
+    record.op === "observe"
+  ) {
     await appendDurable(file, record);
     return;
   }
@@ -700,24 +843,28 @@ async function maybeCompact(file) {
   if (lines.length < COMPACT_AFTER_LINES) return;
   const folded = foldText(text);
   const kept = [];
+  const at = new Date().toISOString();
   for (const [from, to] of folded.links) {
-    if (!folded.pending.has(folded.follow(from))) {
-      kept.push({ op: "replace", txHash: from, replacedBy: to, at: new Date().toISOString() });
-    }
+    kept.push({ op: "replace", txHash: from, replacedBy: to, at });
   }
   for (const hash of folded.cancelled) {
-    if (!folded.pending.has(hash)) kept.push({ op: "cancel", txHash: hash, at: new Date().toISOString() });
+    kept.push({ op: "cancel", txHash: hash, at });
+  }
+  for (const hash of folded.delivered) {
+    kept.push({ op: "delivered", txHash: hash, at });
+  }
+  for (const hash of folded.dropped) {
+    kept.push({ op: "dropped", txHash: hash, at, error: folded.dropErrors.get(hash) || "dropped" });
+  }
+  for (const [hash, obs] of folded.observed) {
+    if (folded.links.has(hash) || folded.cancelled.has(hash)) continue;
+    const row = { op: "observe", txHash: hash, replacedBy: obs.replacedBy, at };
+    if (obs.txTo) row.txTo = obs.txTo;
+    if (obs.txInput) row.txInput = obs.txInput;
+    kept.push(row);
   }
   for (const item of folded.pending.values()) {
-    kept.push({
-      op: "enqueue",
-      chainId: item.chainId,
-      txHash: item.txHash,
-      at: new Date().toISOString(),
-      attempts: item.attempts,
-      mineAttempts: item.mineAttempts || 0,
-      notFound: item.notFound || 0,
-    });
+    kept.push(compactEnqueue(item, at));
   }
   const next = kept.map((row) => JSON.stringify(row)).join("\n");
   const tmp = `${file}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`;
@@ -754,20 +901,28 @@ async function sweepTemps(file) {
 }
 
 async function readState(file) {
+  return (await readFold(file)).pending;
+}
+
+async function readFold(file) {
   let text = "";
   try {
     text = await readFile(file, "utf8");
   } catch (err) {
-    if (err && err.code === "ENOENT") return new Map();
+    if (err && err.code === "ENOENT") return emptyFold();
     throw err;
   }
-  return foldText(text).pending;
+  return foldText(text);
 }
 
-function foldText(text) {
+function emptyFold() {
   const pending = new Map();
   const links = new Map();
   const cancelled = new Set();
+  const delivered = new Set();
+  const dropped = new Set();
+  const dropErrors = new Map();
+  const observed = new Map();
   const follow = (hash) => {
     const seen = new Set();
     let current = hash;
@@ -776,6 +931,37 @@ function foldText(text) {
       current = links.get(current);
     }
     return current;
+  };
+  return { pending, links, cancelled, delivered, dropped, dropErrors, observed, follow };
+}
+
+function foldText(text) {
+  const folded = emptyFold();
+  const { pending, links, cancelled, delivered, dropped, dropErrors, observed } = folded;
+  const follow = folded.follow;
+  const movePending = () => {
+    for (const [key, value] of [...pending.entries()]) {
+      const moved = follow(key);
+      if (moved === key || cancelled.has(moved) || delivered.has(moved) || dropped.has(moved)) continue;
+      pending.delete(key);
+      if (!pending.has(moved)) pending.set(moved, { ...value, txHash: moved });
+    }
+  };
+  const consider = (hash) => {
+    const obs = observed.get(hash);
+    if (!obs || !obs.txTo || !obs.txInput || obs.txInput.length < 10) return;
+    const current = pending.get(hash);
+    if (!current || !hasCallIdentity(current)) return;
+    const fake = { hash: obs.replacedBy, to: obs.txTo, input: obs.txInput };
+    if (matchesRescue(current, fake)) {
+      if (!links.has(hash)) links.set(hash, obs.replacedBy);
+      observed.delete(hash);
+      movePending();
+      return;
+    }
+    cancelled.add(hash);
+    pending.delete(hash);
+    observed.delete(hash);
   };
   for (const line of text.split("\n")) {
     if (!line.trim()) continue;
@@ -786,9 +972,12 @@ function foldText(text) {
       continue;
     }
     if (!row || typeof row.txHash !== "string") continue;
+    const hash = row.txHash.trim().toLowerCase();
+    if (!TX_RE.test(hash)) continue;
     if (row.op === "enqueue") {
-      const dest = follow(row.txHash);
-      if (cancelled.has(row.txHash) || cancelled.has(dest)) continue;
+      const dest = follow(hash);
+      const ident = identityFrom(row);
+      if (cancelled.has(hash) || cancelled.has(dest) || delivered.has(dest) || dropped.has(dest)) continue;
       if (!pending.has(dest)) {
         pending.set(dest, {
           chainId: Number(row.chainId),
@@ -796,10 +985,14 @@ function foldText(text) {
           attempts: Number(row.attempts) || 0,
           mineAttempts: Number(row.mineAttempts) || 0,
           notFound: Number(row.notFound) || 0,
+          ...ident,
         });
+      } else {
+        Object.assign(pending.get(dest), ident);
       }
+      consider(hash);
     } else if (row.op === "attempt") {
-      const current = pending.get(row.txHash) || pending.get(follow(row.txHash));
+      const current = pending.get(hash) || pending.get(follow(hash));
       if (current) {
         current.attempts += 1;
         if (row.error === "receipt_pending") current.mineAttempts += 1;
@@ -807,24 +1000,241 @@ function foldText(text) {
       }
     } else if (row.op === "replace") {
       const next = String(row.replacedBy || "").trim().toLowerCase();
-      if (!TX_RE.test(next) || next === row.txHash) continue;
-      links.set(row.txHash, next);
-      for (const [key, value] of [...pending.entries()]) {
-        const moved = follow(key);
-        if (moved === key || cancelled.has(moved)) continue;
-        pending.delete(key);
-        if (!pending.has(moved)) pending.set(moved, { ...value, txHash: moved });
-      }
+      if (!TX_RE.test(next) || next === hash) continue;
+      links.set(hash, next);
+      movePending();
+    } else if (row.op === "observe") {
+      const next = String(row.replacedBy || "").trim().toLowerCase();
+      if (!TX_RE.test(next) || next === hash) continue;
+      const seen = identityFrom(row);
+      observed.set(hash, { replacedBy: next, txTo: seen.txTo || "", txInput: seen.txInput || "" });
+      consider(hash);
     } else if (row.op === "cancel") {
-      cancelled.add(row.txHash);
-      const dest = follow(row.txHash);
+      cancelled.add(hash);
+      const dest = follow(hash);
       cancelled.add(dest);
-      pending.delete(row.txHash);
+      pending.delete(hash);
       pending.delete(dest);
-    } else if (row.op === "delivered" || row.op === "dropped") {
-      pending.delete(row.txHash);
-      pending.delete(follow(row.txHash));
+      delivered.delete(hash);
+    } else if (row.op === "delivered") {
+      delivered.add(hash);
+      pending.delete(hash);
+    } else if (row.op === "dropped") {
+      dropped.add(hash);
+      if (row.error) dropErrors.set(hash, String(row.error));
+      pending.delete(hash);
     }
   }
-  return { pending, links, cancelled, follow };
+  return folded;
+}
+
+function isSettled(folded, hash) {
+  const dest = folded.follow(hash);
+  return (
+    folded.cancelled.has(hash) ||
+    folded.cancelled.has(dest) ||
+    folded.delivered.has(hash) ||
+    folded.delivered.has(dest) ||
+    folded.dropped.has(hash) ||
+    folded.dropped.has(dest)
+  );
+}
+
+function compactEnqueue(item, at) {
+  const row = {
+    op: "enqueue",
+    chainId: item.chainId,
+    txHash: item.txHash,
+    at,
+    attempts: item.attempts,
+    mineAttempts: item.mineAttempts || 0,
+    notFound: item.notFound || 0,
+  };
+  const ident = identityFrom(item);
+  return { ...row, ...ident };
+}
+
+async function persistCancel(file, opts, txHash) {
+  const folded = await readFold(file);
+  if (!folded.cancelled.has(txHash)) {
+    await writeRecord(file, { op: "cancel", txHash, at: stamp(opts) });
+    console.error("points_notify", "cancel", txHash);
+  }
+  return 0;
+}
+
+function identityFrom(source) {
+  const out = {};
+  if (!source || typeof source !== "object") return out;
+  const from = String(source.txFrom || "").trim().toLowerCase();
+  if (ADDR_RE.test(from)) out.txFrom = from;
+  const nonce = readNonce(source.txNonce);
+  if (nonce !== null) out.txNonce = nonce;
+  const to = String(source.txTo || "").trim().toLowerCase();
+  if (ADDR_RE.test(to)) out.txTo = to;
+  const input = String(source.txInput || source.input || "").trim().toLowerCase();
+  if (/^0x[0-9a-f]*$/.test(input) && input.length >= 2) out.txInput = input;
+  return out;
+}
+
+function readNonce(value) {
+  if (value === undefined || value === null || value === "") return null;
+  const text = typeof value === "bigint" ? value.toString() : String(value).trim();
+  if (!/^\d+$/.test(text)) return null;
+  const n = Number(text);
+  if (!Number.isSafeInteger(n)) return null;
+  return n;
+}
+
+function hasNonceIdentity(item) {
+  return Boolean(item && item.txFrom && item.txNonce !== undefined && item.txNonce !== null);
+}
+
+function hasCallIdentity(item) {
+  return Boolean(item && item.txTo && item.txInput && item.txInput.length >= 10);
+}
+
+function candidateFromTx(tx) {
+  if (!tx || typeof tx !== "object") return null;
+  const hash = String(tx.hash || tx.transactionHash || "").trim().toLowerCase();
+  if (!TX_RE.test(hash)) return null;
+  const to = tx.to ? String(tx.to).trim().toLowerCase() : "";
+  const input = String(tx.input || tx.data || "").trim().toLowerCase();
+  return { hash, to, input };
+}
+
+function matchesRescue(item, tx) {
+  const cand = candidateFromTx(tx);
+  if (!cand || !hasCallIdentity(item)) return false;
+  if (!cand.to || cand.to !== String(item.txTo).toLowerCase()) return false;
+  if (cand.input.slice(0, 10) !== String(item.txInput).toLowerCase().slice(0, 10)) return false;
+  try {
+    const left = decodeFunctionData({ abi: rescueAbi, data: item.txInput });
+    const right = decodeFunctionData({ abi: rescueAbi, data: cand.input });
+    if (left.functionName !== "rescueWithPermit" || right.functionName !== "rescueWithPermit") return false;
+    return argsEqual(left.args, right.args);
+  } catch {
+    return false;
+  }
+}
+
+function argsEqual(left, right) {
+  if (left === right) return true;
+  if (typeof left === "bigint" || typeof right === "bigint") {
+    try {
+      return BigInt(left) === BigInt(right);
+    } catch {
+      return false;
+    }
+  }
+  if (typeof left === "number" || typeof right === "number") return Number(left) === Number(right);
+  if (typeof left === "string" && typeof right === "string") {
+    return left.startsWith("0x") || right.startsWith("0x") ? left.toLowerCase() === right.toLowerCase() : left === right;
+  }
+  if (Array.isArray(left) && Array.isArray(right)) {
+    if (left.length !== right.length) return false;
+    for (let i = 0; i < left.length; i += 1) {
+      if (!argsEqual(left[i], right[i])) return false;
+    }
+    return true;
+  }
+  if (left && right && typeof left === "object" && typeof right === "object") {
+    const keys = new Set([...Object.keys(left), ...Object.keys(right)]);
+    for (const key of keys) {
+      if (!argsEqual(left[key], right[key])) return false;
+    }
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Finds the mined transaction at sender+nonce.
+ * `pending` means that nonce is still unused. `unresolved` means the nonce was
+ * mined but the transaction is outside the recent block window.
+ * @param {import("viem").PublicClient} client
+ */
+export async function findTxAtNonce(client, from, nonce) {
+  const address = String(from || "").trim();
+  const parsed = readNonce(nonce);
+  if (!ADDR_RE.test(address.toLowerCase()) || parsed === null) return { status: "pending" };
+  const count = await client.getTransactionCount({
+    address: /** @type {`0x${string}`} */ (address),
+    blockTag: "latest",
+  });
+  if (BigInt(count) <= BigInt(parsed)) return { status: "pending" };
+  const head = await client.getBlockNumber();
+  const span = BigInt(NONCE_SCAN_BLOCKS);
+  let start = head > span ? head - span : 0n;
+  for (let n = head; n >= start; n -= 1n) {
+    const block = await client.getBlock({ blockNumber: n, includeTransactions: true });
+    const txs = block && block.transactions ? block.transactions : [];
+    for (const tx of txs) {
+      if (!tx || typeof tx === "string") continue;
+      if (String(tx.from || "").toLowerCase() !== address.toLowerCase()) continue;
+      if (BigInt(tx.nonce) !== BigInt(parsed)) continue;
+      return { status: "found", tx };
+    }
+    if (n === 0n) break;
+  }
+  return { status: "unresolved" };
+}
+
+/**
+ * Replays one rescue_ok row. A pending or already decided hash is left alone
+ * so a later pass does not reset its counters or start another give-up cycle.
+ * Otherwise the same sender+nonce lookup is used, or the row is skipped.
+ */
+export async function backfillPointsRescue(opts) {
+  const env = opts.env || process.env;
+  if (!pointsPushEnabled(env)) return { enabled: false, skipped: true, sent: 0 };
+  const item = normalizeItem(opts.chainId, opts.txHash);
+  const file = pointsOutboxPath(opts.dataDir);
+  const folded = await enqueueIo(() => readFold(file));
+  const dest = folded.follow(item.txHash);
+  if (isSettled(folded, item.txHash) || isSettled(folded, dest) || folded.pending.has(item.txHash) || folded.pending.has(dest)) {
+    return { enabled: true, skipped: true, sent: 0 };
+  }
+  const stored = folded.pending.get(dest);
+  const ident = { ...identityFrom(opts), ...(stored ? identityFrom(stored) : {}) };
+  if (!hasNonceIdentity(ident) || !hasCallIdentity(ident) || typeof opts.lookupNonce !== "function") {
+    return { enabled: true, skipped: true, sent: 0 };
+  }
+  let looked;
+  try {
+    looked = await opts.lookupNonce(ident.txFrom, ident.txNonce);
+  } catch {
+    return { enabled: true, skipped: true, sent: 0 };
+  }
+  if (!looked || looked.status !== "found" || !looked.tx) return { enabled: true, skipped: true, sent: 0 };
+  if (!matchesRescue(ident, looked.tx)) {
+    await notePointsCancel({ chainId: item.chainId, txHash: item.txHash, dataDir: opts.dataDir, now: opts.now });
+    console.error("points_notify", "cancel", item.txHash);
+    return { enabled: true, skipped: true, sent: 0, cancelled: true };
+  }
+  const cand = candidateFromTx(looked.tx);
+  await notePointsReplacement({
+    chainId: item.chainId,
+    txHash: item.txHash,
+    replacedBy: cand.hash,
+    dataDir: opts.dataDir,
+    now: opts.now,
+  });
+  const delivered = await deliverPointsNotify({
+    chainId: item.chainId,
+    txHash: cand.hash,
+    txFrom: ident.txFrom,
+    txNonce: ident.txNonce,
+    txTo: cand.to,
+    txInput: cand.input,
+    dataDir: opts.dataDir,
+    env,
+    confirmReceipt: opts.confirmReceipt,
+    lookupNonce: opts.lookupNonce,
+    getTx: opts.getTx,
+    fetchImpl: opts.fetchImpl,
+    now: opts.now,
+    scheduleDelay: opts.scheduleDelay,
+  });
+  return { ...delivered, skipped: false };
 }

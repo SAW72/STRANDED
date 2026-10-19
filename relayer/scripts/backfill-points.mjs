@@ -1,12 +1,15 @@
 /**
- * One-time replay of rescue_ok tx hashes from DATA_DIR/rescues.jsonl.
- * Not run by tests, CI, or this change. No-op unless both
+ * Replay rescue_ok rows from DATA_DIR/rescues.jsonl.
+ * Uses the sender and nonce lookup when the call is known, and skips a row otherwise.
+ * Does not reset attempt counters. No-op unless both
  * POINTS_INGEST_SECRET and POINTS_API_URL are set in the environment.
  */
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { deliverPointsNotify, pointsPushEnabled } from "../points/notify.mjs";
+import { createPublicClient, http as viemHttp } from "viem";
+import { arbitrumSepolia, baseSepolia } from "viem/chains";
+import { backfillPointsRescue, findTxAtNonce, pointsMinConfirmations, pointsPushEnabled } from "../points/notify.mjs";
 
 const TX_RE = /^0x[0-9a-fA-F]{64}$/;
 const CHAINS = new Set([84532, 421614]);
@@ -32,7 +35,17 @@ export function rescueTxsFromJsonl(text, defaultChainId) {
     const key = `${chainId}:${txHash.toLowerCase()}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    out.push({ chainId, txHash: txHash.toLowerCase() });
+    const rowOut = { chainId, txHash: txHash.toLowerCase() };
+    const txFrom = String(row.txFrom || "").trim().toLowerCase();
+    if (/^0x[0-9a-f]{40}$/.test(txFrom)) rowOut.txFrom = txFrom;
+    if (row.txNonce !== undefined && row.txNonce !== null && /^\d+$/.test(String(row.txNonce).trim())) {
+      rowOut.txNonce = Number(row.txNonce);
+    }
+    const txTo = String(row.txTo || "").trim().toLowerCase();
+    if (/^0x[0-9a-f]{40}$/.test(txTo)) rowOut.txTo = txTo;
+    const txInput = String(row.txInput || "").trim().toLowerCase();
+    if (/^0x[0-9a-f]*$/.test(txInput) && txInput.length >= 10) rowOut.txInput = txInput;
+    out.push(rowOut);
   }
   return out;
 }
@@ -54,10 +67,26 @@ async function main() {
     throw err;
   }
   const rows = rescueTxsFromJsonl(text, process.env.CHAIN_ID);
-  for (const row of rows) {
-    await deliverPointsNotify({ ...row, dataDir, env: process.env });
+  const rpcUrl = String(process.env.RPC_URL || "").trim();
+  let lookupNonce;
+  let confirmReceipt;
+  if (rpcUrl) {
+    const chain = Number(process.env.CHAIN_ID) === 84532 ? baseSepolia : arbitrumSepolia;
+    const client = createPublicClient({ chain, transport: viemHttp(rpcUrl) });
+    lookupNonce = (from, nonce) => findTxAtNonce(client, from, nonce);
+    confirmReceipt = (hash) =>
+      client.waitForTransactionReceipt({
+        hash,
+        confirmations: pointsMinConfirmations(process.env, hash),
+        timeout: 20_000,
+      });
   }
-  console.log(`points_backfill queued ${rows.length}`);
+  let skipped = 0;
+  for (const row of rows) {
+    const result = await backfillPointsRescue({ ...row, dataDir, env: process.env, lookupNonce, confirmReceipt });
+    if (result && result.skipped) skipped += 1;
+  }
+  console.log(`points_backfill done ${rows.length} skipped ${skipped}`);
 }
 
 function isDirectRun() {

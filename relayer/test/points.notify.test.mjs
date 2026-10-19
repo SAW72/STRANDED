@@ -6,6 +6,8 @@ import { join } from "node:path";
 import { describe, it } from "node:test";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { encodeFunctionData } from "viem";
+import { rescueAbi } from "../rescueAbi.mjs";
 import { rescueTxsFromJsonl } from "../scripts/backfill-points.mjs";
 import {
   clearPointsRetryTimers,
@@ -30,6 +32,41 @@ function tx() {
   const bytes = new Uint8Array(32);
   crypto.getRandomValues(bytes);
   return `0x${[...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("")}`;
+}
+
+function word() {
+  return tx();
+}
+
+function rescueCall() {
+  const user = `0x${"11".repeat(20)}`;
+  const order = {
+    user,
+    tokenIn: user,
+    amountIn: 1n,
+    feeAmount: 1n,
+    feeTo: user,
+    amountSwap: 1n,
+    minAmountOut: 1n,
+    to: user,
+    nativeTo: user,
+    router: user,
+    pathHash: word(),
+    chainId: 84532n,
+    deadline: 1n,
+    nonce: 1n,
+  };
+  const txInput = encodeFunctionData({
+    abi: rescueAbi,
+    functionName: "rescueWithPermit",
+    args: [order, "0xabcd", 27, word(), word(), "0xabcd"],
+  });
+  return {
+    txFrom: `0x${"33".repeat(20)}`,
+    txNonce: 4,
+    txTo: `0x${"22".repeat(20)}`,
+    txInput,
+  };
 }
 
 describe("points push", { concurrency: false }, () => {
@@ -422,7 +459,51 @@ describe("points push", { concurrency: false }, () => {
       assert.ok(Date.now() - started < 2_000);
       assert.deepEqual(posts.slice().sort(), [goodA, goodB].sort());
       const text = await readFile(file, "utf8");
-      assert.equal(text.includes(dropped), false);
+      assert.match(text, new RegExp(`"op":"dropped"[^\\n]*${dropped}|${dropped}[^\\n]*"op":"dropped"`));
+      const again = await retryPointsOutbox({
+        dataDir: dir,
+        env,
+        fetchImpl: async (_url, init) => {
+          posts.push(JSON.parse(init.body).txHash);
+          return new Response("ok", { status: 200 });
+        },
+        confirmReceipt: async (hash) => (hash === dropped ? { status: "reverted" } : { status: "success", transactionHash: hash }),
+        scheduleDelay: () => {},
+      });
+      assert.equal(again.sent, 0);
+      assert.deepEqual(posts.slice().sort(), [goodA, goodB].sort());
+    } finally {
+      clearPointsRetryTimers();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("leaves a row with no sender or nonce uncredited and does not throw", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "points-noid-"));
+    const secret = runtimeSecret();
+    const hash = tx();
+    let lookups = 0;
+    const env = { POINTS_INGEST_SECRET: secret, POINTS_API_URL: "https://points.invalid" };
+    try {
+      const result = await deliverPointsNotify({
+        chainId: 84532,
+        txHash: hash,
+        dataDir: dir,
+        env,
+        fetchImpl: async () => new Response("ok", { status: 200 }),
+        confirmReceipt: () => new Promise(() => {}),
+        confirmWaitMs: 20,
+        lookupNonce: () => {
+          lookups += 1;
+          throw new Error("lookup");
+        },
+        scheduleDelay: () => {},
+      });
+      assert.equal(result.sent, 0);
+      assert.equal(lookups, 0);
+      const text = await readFile(pointsOutboxPath(dir), "utf8");
+      assert.equal(text.includes('"op":"delivered"'), false);
+      assert.equal(text.includes('"op":"cancel"'), false);
     } finally {
       clearPointsRetryTimers();
       await rm(dir, { recursive: true, force: true });
@@ -440,21 +521,24 @@ describe("points push", { concurrency: false }, () => {
       posts.push(JSON.parse(init.body).txHash);
       return new Response("ok", { status: 200 });
     };
+    const call = rescueCall();
     try {
       const result = await deliverPointsNotify({
         chainId: 84532,
         txHash: originalHash,
+        ...call,
         dataDir: dir,
         env,
         fetchImpl,
         confirmReceipt: async () => ({ status: "0x1", transactionHash: replacement }),
+        getTx: async () => ({ hash: replacement, to: call.txTo, input: call.txInput }),
         scheduleDelay: () => {},
       });
       assert.equal(result.sent, 1);
       assert.deepEqual(posts, [replacement]);
       const text = await readFile(pointsOutboxPath(dir), "utf8");
       assert.match(text, new RegExp(`"op":"delivered","txHash":"${replacement}"`));
-      assert.match(text, /"error":"replaced"/);
+      assert.match(text, /"op":"replace"/);
     } finally {
       clearPointsRetryTimers();
       await rm(dir, { recursive: true, force: true });
@@ -935,9 +1019,11 @@ describe("points push", { concurrency: false }, () => {
     const posts = [];
     const env = { POINTS_INGEST_SECRET: secret, POINTS_API_URL: "https://points.invalid" };
     try {
+      const call = rescueCall();
       const queued = schedulePointsNotify({
         chainId: 84532,
         txHash: original,
+        ...call,
         dataDir: dir,
         env,
         fetchImpl: () => new Promise(() => {}),
@@ -945,7 +1031,7 @@ describe("points push", { concurrency: false }, () => {
       });
       const linked = notePointsReceiptReplacement(
         { chainId: 84532, txHash: original, dataDir: dir },
-        { reason: "replaced", transaction: { hash: replacement } },
+        { reason: "replaced", transaction: { hash: replacement, to: call.txTo, input: call.txInput } },
       );
       await Promise.all([queued.durable, linked]);
       clearPointsRetryTimers();
