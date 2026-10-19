@@ -1,8 +1,22 @@
 -- Forward rebuild. 0001's CREATE TABLE IF NOT EXISTS does not add
 -- CHECK (action <> 'wallet_session') to a table created before that CHECK
--- existed. Copy the rows, swap the table, and recreate the triggers and index.
--- A wallet_session row cannot satisfy the rebuilt CHECK, so it is not copied.
--- This file does not edit 0001.
+-- existed. Session rows move into points_ledger_archive. They are not deleted.
+-- The rebuilt points_ledger keeps the CHECK. This file does not edit 0001.
+
+CREATE TABLE points_ledger_archive (
+  id INTEGER PRIMARY KEY,
+  wallet TEXT NOT NULL,
+  action TEXT NOT NULL,
+  points INTEGER NOT NULL,
+  tx_hash TEXT NOT NULL,
+  metadata TEXT,
+  created_at TEXT NOT NULL
+);
+
+INSERT INTO points_ledger_archive (id, wallet, action, points, tx_hash, metadata, created_at)
+SELECT id, wallet, action, points, tx_hash, metadata, created_at
+FROM points_ledger
+WHERE action = 'wallet_session';
 
 CREATE TABLE points_ledger_next (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -342,6 +342,30 @@ describe.sequential("ingest hardening", () => {
     expect(await waiting.json()).toEqual({ ok: false, error: "awaiting_confirmations" });
   });
 
+  it("returns rpc_unconfigured and writes no rows when the RPC URL is empty", async () => {
+    const before = await ledgerCount();
+    const open = bindings(secret);
+    open.BASE_SEPOLIA_RPC_URL = "";
+    const response = await postSigned(open, { chainId: 84532, txHash: txHash("n") });
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ ok: false, error: "rpc_unconfigured" });
+    expect(await ledgerCount()).toEqual(before);
+  });
+
+  it("rejects a malformed allowlist before writing a row", async () => {
+    const samples = ["garbage", "{not json", "[]", ";;"];
+    for (const raw of samples) {
+      const before = await ledgerCount();
+      const blocked = bindings(secret);
+      blocked.TOKEN_IN_ALLOWLIST = raw;
+      installReceipt(rescuedReceipt({ chainId: 84532 }));
+      const denied = await postSigned(blocked, { chainId: 84532, txHash: txHash(raw) });
+      expect(denied.status).toBe(400);
+      expect(await denied.json()).toEqual({ ok: false, error: "token_not_allowed" });
+      expect(await ledgerCount()).toEqual(before);
+    }
+  });
+
   it("logs a bad allowlist entry and keeps a valid address", () => {
     const lines: string[] = [];
     const original = console.log;
@@ -357,6 +381,28 @@ describe.sequential("ingest hardening", () => {
     }
     expect(lines.some((line) => line.includes("points_allowlist_ignored"))).toBe(true);
     expect(lines.some((line) => line.includes("not-an-address"))).toBe(false);
+  });
+
+  it("warns on a malformed allowlist and on a colon-less piece", () => {
+    const lines: string[] = [];
+    const original = console.warn;
+    console.warn = (line?: unknown) => {
+      lines.push(String(line));
+    };
+    try {
+      const map = parseTokenAllowlist(`84532:${TOKEN_IN};no-colon`);
+      expect(map?.get(84532)?.has(TOKEN_IN)).toBe(true);
+      expect(parseTokenAllowlist("{not json")?.size).toBe(0);
+      expect(parseTokenAllowlist("[]")?.size).toBe(0);
+      expect(parseTokenAllowlist(";;")?.size).toBe(0);
+      expect(parseTokenAllowlist("garbage")?.size).toBe(0);
+    } finally {
+      console.warn = original;
+    }
+    expect(lines.length).toBeGreaterThanOrEqual(5);
+    expect(lines.every((line) => line.includes("points_allowlist_ignored"))).toBe(true);
+    expect(lines.some((line) => line.includes("no-colon"))).toBe(false);
+    expect(lines.some((line) => line.includes("garbage"))).toBe(false);
   });
 
   it("evicts expired read-limit keys and stays bounded", () => {

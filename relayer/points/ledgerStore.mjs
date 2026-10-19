@@ -39,11 +39,11 @@ import { MAX_POINTS_PER_ROW, score } from "./rubric.mjs";
  * On-chain rows are unique on (action, tx_hash). schema.sql creates that
  * index on open and does not rewrite rows.
  *
- * Bug reports and security findings already stored are kept. This module
- * does not delete or rewrite ledger rows and does not rebuild the table.
+ * Bug reports, security findings, and wallet sessions already stored are kept.
+ * This module does not delete or rewrite ledger rows and does not rebuild the table.
  * schema.sql installs BEFORE INSERT and BEFORE UPDATE triggers that reject
- * bug_report, security, security_finding, and finding. Reads omit those
- * actions, so a wallet total, its categories, its entries, and the
+ * bug_report, security, security_finding, finding, and wallet_session.
+ * Reads omit those actions, so a wallet total, its categories, its entries, and the
  * leaderboard are sums over the same visible rows.
  */
 export const POINTS_ACTIONS = Object.freeze([
@@ -51,7 +51,6 @@ export const POINTS_ACTIONS = Object.freeze([
   "relayer_job",
   "registry_find_posted",
   "registry_find_claimed",
-  "wallet_session",
 ]);
 
 export { EXCLUDED_POINTS_ACTIONS };
@@ -324,8 +323,7 @@ export function createLedgerStore(opts = {}) {
 
   /**
    * Public write. `score()` chooses the points. A caller `points` value that
-   * is not that rubric total is rejected. `createdAt` and, for a session,
-   * `at` are ignored; both clocks are `now`.
+   * is not that rubric total is rejected. `createdAt` is ignored; the clock is `now`.
    * @param {string} action
    * @param {object} ctx
    */

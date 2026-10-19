@@ -306,7 +306,7 @@ const server = createRelayerApp({
 function confirmPointsReceipt(hash) {
   return publicClient.waitForTransactionReceipt({
     hash,
-    confirmations: pointsMinConfirmations(),
+    confirmations: pointsMinConfirmations(process.env, hash),
     timeout: 20_000,
   });
 }

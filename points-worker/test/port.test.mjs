@@ -20,6 +20,7 @@ describe("schema port", () => {
     assert.match(migration, /CHECK \(action <> 'wallet_session'\)/);
     assert.match(migration, /'wallet_session'/);
     assert.doesNotMatch(migration, /'registry_find_claimed',\s*'wallet_session'/);
+    assert.match(rebuild, /CREATE TABLE points_ledger_archive/);
     assert.match(rebuild, /CREATE TABLE points_ledger_next/);
     assert.match(rebuild, /CHECK \(action <> 'wallet_session'\)/);
     assert.match(rebuild, /ALTER TABLE points_ledger_next RENAME TO points_ledger/);
@@ -82,6 +83,12 @@ describe("action check rebuild", () => {
     assert.equal(keptRows.length, 1);
     assert.equal(keptRows[0].action, "rescue_completed");
     assert.equal(keptRows[0].tx_hash, kept);
+    const archived = db.prepare("SELECT action, tx_hash, wallet, points FROM points_ledger_archive").all();
+    assert.equal(archived.length, 1);
+    assert.equal(archived[0].action, "wallet_session");
+    assert.equal(archived[0].tx_hash, session);
+    assert.equal(archived[0].wallet, wallet);
+    assert.equal(archived[0].points, 10);
     assert.throws(() => {
       db.prepare(
         `INSERT INTO points_ledger (wallet, action, points, tx_hash, metadata, created_at)
@@ -111,6 +118,7 @@ describe("observability config", () => {
     const wrangler = read(new URL("wrangler.jsonc", root));
     const ledger = read(new URL("src/ledger.ts", root));
     assert.match(wrangler, /"logs"\s*:\s*\{[^}]*"head_sampling_rate"\s*:\s*1/s);
+    assert.match(wrangler, /"invocation_logs"\s*:\s*false/);
     assert.match(wrangler, /"traces"\s*:\s*\{[^}]*"enabled"\s*:\s*false/s);
     assert.doesNotMatch(wrangler, /"head_sampling_rate"\s*:\s*0\s*,\s*"logs"/);
     assert.match(ledger, /LIMIT \$\{cap\}/);
@@ -128,6 +136,20 @@ describe("allowlist", () => {
     assert.match(allow, new RegExp(arb[1]));
     assert.match(allow, /84532/);
     assert.match(allow, /421614/);
+  });
+});
+
+describe("heal batch", () => {
+  it("inserts the missing rows in one batch", () => {
+    const ledger = read(new URL("src/ledger.ts", root));
+    const start = ledger.indexOf("const missing = rows.filter");
+    const end = ledger.indexOf("return { duplicate: false };", start);
+    const heal = ledger.slice(start, end);
+    assert.ok(start !== -1 && end > start);
+    assert.match(heal, /db\.batch\(/);
+    assert.equal(heal.match(/db\.batch\(/g).length, 1);
+    assert.doesNotMatch(heal, /for\s*\(\s*const row of missing\s*\)/);
+    assert.doesNotMatch(heal, /insertActivity/);
   });
 });
 

@@ -9,6 +9,13 @@ import { minConfirmations, readRescuedParties, rpcUrlFor } from "./receipt";
 import { parseTokenAllowlist } from "./tokenAllowlist";
 
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/i;
+const LEADERBOARD_MEMO_MS = 30_000;
+
+let leaderboardMemo: { at: number; rows: Array<{ wallet: string; total: number }> } | null = null;
+
+export function resetLeaderboardCache(): void {
+  leaderboardMemo = null;
+}
 const TX_RE = /^0x[0-9a-fA-F]{64}$/;
 const MAX_BODY_BYTES = 4096;
 
@@ -95,15 +102,15 @@ async function walletPoints(request: Request, env: PointsBindings, path: string)
 
 async function leaderboard(request: Request, env: PointsBindings): Promise<Response> {
   if (!allowWalletRead(request)) throw new PointsError(429, "rate_limited");
-  const board = await leaderboardTotals(env.DB);
-  return json(
-    request,
-    200,
-    {
+  const now = Date.now();
+  if (!leaderboardMemo || now - leaderboardMemo.at >= LEADERBOARD_MEMO_MS) {
+    const board = await leaderboardTotals(env.DB);
+    leaderboardMemo = {
+      at: now,
       rows: board.map((row) => ({ wallet: row.wallet, total: row.total })),
-    },
-    WALLET_READ_CACHE,
-  );
+    };
+  }
+  return json(request, 200, { rows: leaderboardMemo.rows }, WALLET_READ_CACHE);
 }
 
 function assertBodyCap(request: Request): void {

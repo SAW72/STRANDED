@@ -12,7 +12,10 @@ export function parseTokenAllowlist(raw: string | undefined): Map<number, Set<st
   if (text.startsWith("{")) {
     try {
       const parsed = JSON.parse(text) as unknown;
-      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return map;
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        warnAllowlist();
+        return map;
+      }
       for (const [chainText, value] of Object.entries(parsed as Record<string, unknown>)) {
         const items = Array.isArray(value) ? value : typeof value === "string" ? value.split(",") : [];
         for (const item of items) {
@@ -20,19 +23,30 @@ export function parseTokenAllowlist(raw: string | undefined): Map<number, Set<st
         }
       }
     } catch {
+      warnAllowlist();
       return map;
     }
     return map;
   }
+  let sawPiece = false;
   for (const part of text.split(";")) {
     const piece = part.trim();
     if (!piece) continue;
+    sawPiece = true;
     const colon = piece.indexOf(":");
-    if (colon < 0) continue;
+    if (colon < 0) {
+      warnAllowlist();
+      continue;
+    }
     const chainText = piece.slice(0, colon).trim();
     for (const addressText of piece.slice(colon + 1).split(",")) addToken(map, chainText, addressText);
   }
+  if (!sawPiece) warnAllowlist();
   return map;
+}
+
+function warnAllowlist(): void {
+  console.warn(JSON.stringify({ event: "points_allowlist_ignored" }));
 }
 
 function addToken(map: Map<number, Set<string>>, chainText: string, addressText: string): void {

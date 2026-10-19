@@ -3,7 +3,7 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import { createLedgerStore, syntheticTxKey } from "../points/ledgerStore.mjs";
+import { createLedgerStore } from "../points/ledgerStore.mjs";
 import {
   FIXED_POINTS,
   MAX_POINTS_PER_ROW,
@@ -14,7 +14,6 @@ import {
   scoreReferral,
   scoreRelayerJob,
   scoreRescue,
-  scoreWalletSession,
 } from "../points/rubric.mjs";
 
 const USER = "0x1111111111111111111111111111111111111111";
@@ -34,15 +33,6 @@ describe("points rubric", () => {
       { action: "relayer_job", points: 50, run: () => scoreRelayerJob({ txHash: TX, operatorId: "op-1" }) },
       { action: "registry_find_posted", points: 30, run: () => score({ action: "registry_find_posted", txHash: TX }) },
       { action: "registry_find_claimed", points: 50, run: () => score({ action: "registry_find_claimed", txHash: TX }) },
-      {
-        action: "wallet_session",
-        points: 10,
-        run: () =>
-          scoreWalletSession(
-            { wallet: USER, at: "2999-01-01T00:00:00.000Z" },
-            () => Date.parse("2026-10-12T15:00:00.000Z"),
-          ),
-      },
     ];
     assert.equal(rows.length, Object.keys(FIXED_POINTS).length);
     for (const row of rows) {
@@ -108,7 +98,7 @@ describe("points rubric", () => {
     }
   });
 
-  it("caps sessions at one per wallet per ISO week", async () => {
+  it("keeps ISO week keys and does not score a wallet session", async () => {
     const weeks = [
       { at: "2019-12-30T00:00:00.000Z", week: "2020-W01" },
       { at: "2020-01-01T12:00:00.000Z", week: "2020-W01" },
@@ -118,45 +108,19 @@ describe("points rubric", () => {
     for (const row of weeks) assert.equal(isoWeekKey(row.at), row.week);
     assert.notEqual(isoWeekKey("2026-10-18T23:00:00.000Z"), isoWeekKey("2026-10-19T00:00:00.000Z"));
     assert.throws(() => isoWeekKey("not-a-date"), rejection("invalid_week"));
+    assert.equal(Object.hasOwn(FIXED_POINTS, "wallet_session"), false);
+    assert.throws(() => pointsForAction("wallet_session"), rejection("invalid_action"));
+    assert.throws(() => score({ action: "wallet_session", wallet: USER }), rejection("invalid_action"));
 
-    const serverNow = () => Date.parse("2026-10-12T15:00:00.000Z");
-    const serverWeek = isoWeekKey(serverNow());
-    const from2999 = scoreWalletSession({ wallet: USER.toUpperCase(), at: "2999-01-01T00:00:00.000Z" }, serverNow);
-    const from1970 = scoreWalletSession({ wallet: USER, at: "1970-01-01T00:00:00.000Z" }, serverNow);
-    const nextWeek = scoreWalletSession({ wallet: USER, at: "1970-01-01T00:00:00.000Z" }, () => Date.parse("2026-10-19T00:00:00.000Z"));
-    const otherWallet = scoreWalletSession({ wallet: OTHER, at: "2999-06-01T00:00:00.000Z" }, serverNow);
-    assert.equal(from2999.points, 10);
-    assert.equal(from2999.wallet, USER);
-    assert.equal(from2999.week, serverWeek);
-    assert.equal(from1970.week, serverWeek);
-    assert.notEqual(from2999.week, isoWeekKey("2999-01-01T00:00:00.000Z"));
-    assert.notEqual(from1970.week, isoWeekKey("1970-01-01T00:00:00.000Z"));
-    assert.equal(from2999.txHash, from1970.txHash);
-    assert.notEqual(from2999.txHash, nextWeek.txHash);
-    assert.notEqual(from2999.txHash, otherWallet.txHash);
-    assert.equal(from2999.txHash, syntheticTxKey("wallet_session", [serverWeek, USER.toUpperCase()]));
-
-    const live2999 = scoreWalletSession({ wallet: USER, at: "2999-12-31T00:00:00.000Z" });
-    const live1970 = scoreWalletSession({ wallet: USER, at: "1970-01-01T00:00:00.000Z" });
-    assert.equal(live2999.week, isoWeekKey(Date.now()));
-    assert.equal(live1970.week, live2999.week);
-    assert.equal(live2999.txHash, live1970.txHash);
-
-    let clock = Date.parse("2026-10-12T15:00:00.000Z");
     const dir = await mkdtemp(join(tmpdir(), "points-week-"));
-    const store = createLedgerStore({ dataDir: dir, now: () => clock });
+    const store = createLedgerStore({ dataDir: dir, now: () => Date.parse("2026-10-12T15:00:00.000Z") });
     try {
       assert.throws(
         () => store.appendScored("wallet_session", { wallet: USER, at: "2999-01-01T00:00:00.000Z" }),
-        /excluded_action/,
-      );
-      assert.throws(
-        () => store.appendScored("wallet_session", { wallet: OTHER, at: "2999-06-01T00:00:00.000Z" }),
-        /excluded_action/,
+        rejection("invalid_action"),
       );
       assert.equal(store.totals(USER).total, 0);
       assert.equal(store.byWallet(USER).length, 0);
-      assert.equal(store.totals(OTHER).total, 0);
     } finally {
       store.close();
     }

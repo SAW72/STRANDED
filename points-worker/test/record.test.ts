@@ -2,8 +2,10 @@ import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import { ledgerErrorCode } from "../src/errors";
 import { LEADERBOARD_LIMIT, leaderboardTotals, recordRescue } from "../src/ledger";
+import { resetLeaderboardCache } from "../src/index";
 import { WALLET_READ_LIMIT } from "../src/readLimit";
 import {
+  EMPTY,
   OTHER_RELAYER,
   OTHER_USER,
   RELAYER,
@@ -175,5 +177,56 @@ describe.sequential("recorded activity", () => {
     }
     expect(last.status).toBe(429);
     expect(await last.json()).toEqual({ ok: false, error: "rate_limited" });
+  });
+
+  it("throws for an invalid relayer and leaves the earlier row on a failed heal", async () => {
+    const before = await ledgerCount();
+    await expect(
+      recordRescue(env.DB, {
+        user: USER,
+        relayer: "not-a-relayer",
+        txHash: txHash("R"),
+        chainId: 84532,
+      }),
+    ).rejects.toBeTruthy();
+    expect(await ledgerCount()).toEqual(before);
+
+    const hash = txHash("S");
+    await env.DB.prepare(
+      `INSERT INTO points_ledger (wallet, action, points, tx_hash, metadata, created_at)
+       VALUES (?, 'rescue_completed', 100, ?, ?, ?)`,
+    )
+      .bind(USER, hash, JSON.stringify({ chainId: 84532 }), "2026-10-19T00:00:00.000Z")
+      .run();
+    await expect(
+      recordRescue(env.DB, {
+        user: USER,
+        relayer: "not-a-relayer",
+        txHash: hash,
+        chainId: 84532,
+      }),
+    ).rejects.toBeTruthy();
+    const left = await env.DB.prepare("SELECT COUNT(*) AS n FROM points_ledger WHERE tx_hash = ?").bind(hash).first<{ n: number }>();
+    expect(Number(left?.n)).toBe(1);
+  });
+
+  it("reuses the leaderboard aggregate until the server cache is reset", async () => {
+    resetLeaderboardCache();
+    const first = await getPoints(secret, "/points/leaderboard");
+    expect(first.status).toBe(200);
+    const cached = await first.json();
+    const hash = txHash("L");
+    await env.DB.prepare(
+      `INSERT INTO points_ledger (wallet, action, points, tx_hash, metadata, created_at)
+       VALUES (?, 'rescue_completed', 100, ?, ?, ?)`,
+    )
+      .bind(EMPTY, hash, JSON.stringify({ chainId: 84532 }), "2026-10-19T00:00:00.000Z")
+      .run();
+    const second = await getPoints(secret, "/points/leaderboard");
+    expect(await second.json()).toEqual(cached);
+    resetLeaderboardCache();
+    const third = await getPoints(secret, "/points/leaderboard");
+    const fresh = (await third.json()) as { rows: Array<{ wallet: string; total: number }> };
+    expect(fresh.rows.some((row) => row.wallet === EMPTY)).toBe(true);
   });
 });

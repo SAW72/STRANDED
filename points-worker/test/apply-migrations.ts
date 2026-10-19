@@ -1,5 +1,6 @@
 import { applyD1Migrations, env } from "cloudflare:test";
 import { beforeAll, beforeEach } from "vitest";
+import { resetLeaderboardCache } from "../src/index";
 import { resetWalletReadLimit } from "../src/readLimit";
 
 beforeAll(async () => {
@@ -8,4 +9,5 @@ beforeAll(async () => {
 
 beforeEach(() => {
   resetWalletReadLimit();
+  resetLeaderboardCache();
 });

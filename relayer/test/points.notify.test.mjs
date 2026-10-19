@@ -11,6 +11,8 @@ import {
   clearPointsRetryTimers,
   deliverPointsNotify,
   flushPointsNotify,
+  notePointsCancel,
+  notePointsReplacement,
   pointsMinConfirmations,
   pointsOutboxPath,
   retryPointsOutbox,
@@ -161,7 +163,7 @@ describe("points push", { concurrency: false }, () => {
     const wait = src.indexOf("waitForTransactionReceipt");
     assert.ok(broadcast !== -1 && consumed > broadcast && logged > consumed && notify > logged);
     assert.ok(wait > logged);
-    assert.match(src, /confirmations: pointsMinConfirmations\(\)/);
+    assert.match(src, /confirmations: pointsMinConfirmations\(process\.env, hash\)/);
     assert.equal(src.includes("confirmations: 1"), false);
     assert.equal(src.slice(broadcast, consumed).includes("schedulePointsNotify"), false);
     assert.equal(src.slice(broadcast, consumed).includes("waitForTransactionReceipt"), false);
@@ -174,7 +176,7 @@ describe("points push", { concurrency: false }, () => {
     const hash = tx();
     let pending = true;
     const fetchImpl = async () => {
-      if (pending) return new Response("missing", { status: 404 });
+      if (pending) return new Response(JSON.stringify({ ok: false, error: "receipt_not_found" }), { status: 404 });
       return new Response("ok", { status: 200 });
     };
     const env = { POINTS_INGEST_SECRET: secret, POINTS_API_URL: "https://points.invalid" };
@@ -261,7 +263,7 @@ describe("points push", { concurrency: false }, () => {
       assert.deepEqual(delays.slice(0, 5), [1000, 2000, 4000, 8000, 16000]);
       assert.equal(delays[5], 30_000);
       assert.ok(delays.every((ms) => ms <= 60_000));
-      assert.ok(logs.includes("points_notify cap"));
+      assert.ok(logs.some((line) => line.startsWith("points_notify cap ") && line.includes(hash)));
       const text = await readFile(pointsOutboxPath(dir), "utf8");
       assert.equal(text.includes('"op":"dropped"'), false);
       assert.match(text, /"op":"enqueue"/);
@@ -465,7 +467,7 @@ describe("points push", { concurrency: false }, () => {
     let posts = 0;
     const fetchImpl = async () => {
       posts += 1;
-      return new Response("missing", { status: 404 });
+      return new Response(JSON.stringify({ ok: false, error: "receipt_not_found" }), { status: 404 });
     };
     const env = { POINTS_INGEST_SECRET: secret, POINTS_API_URL: "https://points.invalid" };
     const scheduleDelay = () => {};
@@ -479,7 +481,7 @@ describe("points push", { concurrency: false }, () => {
       }
       assert.equal(dropped, true);
       assert.equal(posts, 8);
-      assert.ok(logs.includes("points_notify not_found"));
+      assert.ok(logs.some((line) => line.startsWith("points_notify not_found ") && line.includes(hash)));
       const after = posts;
       await retryPointsOutbox({ dataDir: dir, env, fetchImpl, scheduleDelay });
       assert.equal(posts, after);
@@ -539,13 +541,16 @@ describe("points push", { concurrency: false }, () => {
       logs.push(args.join(" "));
     };
     try {
+      const hash = tx();
       assert.equal(pointsMinConfirmations({}), 2);
       assert.equal(logs.length, 0);
-      assert.equal(pointsMinConfirmations({ POINTS_MIN_CONFIRMATIONS: "0" }), 2);
-      assert.equal(pointsMinConfirmations({ POINTS_MIN_CONFIRMATIONS: "nope" }), 2);
-      assert.equal(pointsMinConfirmations({ POINTS_MIN_CONFIRMATIONS: "129" }), 2);
-      assert.equal(pointsMinConfirmations({ POINTS_MIN_CONFIRMATIONS: "4" }), 4);
-      assert.equal(logs.filter((line) => line === "points_notify confirmations").length, 3);
+      assert.equal(pointsMinConfirmations({ POINTS_MIN_CONFIRMATIONS: "0" }, hash), 2);
+      assert.equal(pointsMinConfirmations({ POINTS_MIN_CONFIRMATIONS: "nope" }, hash), 2);
+      assert.equal(pointsMinConfirmations({ POINTS_MIN_CONFIRMATIONS: "129" }, hash), 2);
+      assert.equal(pointsMinConfirmations({ POINTS_MIN_CONFIRMATIONS: "4" }, hash), 4);
+      const lines = logs.filter((line) => line.includes("points_notify confirmations"));
+      assert.equal(lines.length, 3);
+      assert.ok(lines.every((line) => line.includes(hash)));
     } finally {
       console.error = original;
     }
@@ -603,6 +608,337 @@ describe("points push", { concurrency: false }, () => {
       assert.equal(calls.length, 1);
       const done = await readFile(pointsOutboxPath(dir), "utf8");
       assert.match(done, /status_failed/);
+    } finally {
+      clearPointsRetryTimers();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("credits a new rescue while four receipts are stuck", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "points-n2-"));
+    const secret = runtimeSecret();
+    const stuck = [tx(), tx(), tx(), tx()];
+    const fresh = tx();
+    const posts = [];
+    const env = { POINTS_INGEST_SECRET: secret, POINTS_API_URL: "https://points.invalid" };
+    const confirmReceipt = (hash) => {
+      if (stuck.includes(hash)) return new Promise(() => {});
+      return { status: "success", transactionHash: hash };
+    };
+    const base = {
+      chainId: 84532,
+      dataDir: dir,
+      env,
+      fetchImpl: async (_url, init) => {
+        posts.push(JSON.parse(init.body).txHash);
+        return new Response("ok", { status: 200 });
+      },
+      confirmReceipt,
+      confirmWaitMs: 4_000,
+      scheduleDelay: () => {},
+    };
+    const waiting = [];
+    try {
+      for (const hash of stuck) waiting.push(deliverPointsNotify({ ...base, txHash: hash }));
+      const started = Date.now();
+      const result = await deliverPointsNotify({ ...base, txHash: fresh });
+      const elapsed = Date.now() - started;
+      console.log("n2_credit_ms", elapsed);
+      assert.equal(result.sent, 1, `n2_credit_ms ${elapsed}`);
+      assert.ok(elapsed < 2_000, `n2_credit_ms ${elapsed}`);
+      assert.deepEqual(posts, [fresh]);
+    } finally {
+      clearPointsRetryTimers();
+      await Promise.allSettled(waiting);
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("finishes two stuck receipts in one wait", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "points-one-wait-"));
+    const secret = runtimeSecret();
+    const hashes = [tx(), tx()];
+    const env = { POINTS_INGEST_SECRET: secret, POINTS_API_URL: "https://points.invalid" };
+    const file = pointsOutboxPath(dir);
+    await mkdirPending(dir, file, hashes);
+    const waitMs = 250;
+    try {
+      const started = Date.now();
+      const result = await retryPointsOutbox({
+        dataDir: dir,
+        env,
+        fetchImpl: async () => new Response("ok", { status: 200 }),
+        confirmReceipt: () => new Promise(() => {}),
+        confirmWaitMs: waitMs,
+        scheduleDelay: () => {},
+      });
+      const elapsed = Date.now() - started;
+      assert.equal(result.sent, 0);
+      assert.ok(elapsed < waitMs * 1.8, `elapsed ${elapsed}`);
+      assert.ok(elapsed >= waitMs);
+    } finally {
+      clearPointsRetryTimers();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps a speed-up across a restart and credits the new hash once", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "points-speed-"));
+    const secret = runtimeSecret();
+    const originalHash = tx();
+    const replacement = tx();
+    const posts = [];
+    const seen = [];
+    const env = { POINTS_INGEST_SECRET: secret, POINTS_API_URL: "https://points.invalid" };
+    const file = pointsOutboxPath(dir);
+    await mkdirPending(dir, file, [originalHash]);
+    try {
+      await notePointsReplacement({
+        chainId: 84532,
+        txHash: originalHash,
+        replacedBy: replacement,
+        dataDir: dir,
+      });
+      const linked = await readFile(file, "utf8");
+      assert.match(linked, /"op":"replace"/);
+      assert.match(linked, new RegExp(replacement));
+      clearPointsRetryTimers();
+      const result = await retryPointsOutbox({
+        dataDir: dir,
+        env,
+        fetchImpl: async (_url, init) => {
+          posts.push(JSON.parse(init.body).txHash);
+          return new Response("ok", { status: 200 });
+        },
+        confirmReceipt: async (hash) => {
+          seen.push(hash);
+          return { status: "success", transactionHash: hash };
+        },
+        scheduleDelay: () => {},
+      });
+      assert.equal(result.sent, 1);
+      assert.deepEqual(seen, [replacement]);
+      assert.deepEqual(posts, [replacement]);
+    } finally {
+      clearPointsRetryTimers();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps a cancel across a restart and posts nothing", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "points-cancel-"));
+    const secret = runtimeSecret();
+    const hash = tx();
+    const posts = [];
+    const env = { POINTS_INGEST_SECRET: secret, POINTS_API_URL: "https://points.invalid" };
+    const file = pointsOutboxPath(dir);
+    await mkdirPending(dir, file, [hash]);
+    try {
+      await notePointsCancel({ chainId: 84532, txHash: hash, dataDir: dir });
+      clearPointsRetryTimers();
+      const result = await retryPointsOutbox({
+        dataDir: dir,
+        env,
+        fetchImpl: async (_url, init) => {
+          posts.push(JSON.parse(init.body).txHash);
+          return new Response("ok", { status: 200 });
+        },
+        confirmReceipt: async (seen) => ({ status: "success", transactionHash: seen }),
+        scheduleDelay: () => {},
+      });
+      assert.equal(result.sent, 0);
+      assert.deepEqual(posts, []);
+    } finally {
+      clearPointsRetryTimers();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("gives up on a tx that never mines and logs the hash", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "points-unmined-"));
+    const secret = runtimeSecret();
+    const hash = tx();
+    const logs = [];
+    const original = console.error;
+    console.error = (...args) => {
+      logs.push(args.join(" "));
+    };
+    let confirms = 0;
+    const env = { POINTS_INGEST_SECRET: secret, POINTS_API_URL: "https://points.invalid" };
+    const confirmReceipt = () => {
+      confirms += 1;
+      return new Promise(() => {});
+    };
+    try {
+      await deliverPointsNotify({
+        chainId: 84532,
+        txHash: hash,
+        dataDir: dir,
+        env,
+        fetchImpl: async () => new Response("ok", { status: 200 }),
+        confirmReceipt,
+        confirmWaitMs: 5,
+        scheduleDelay: () => {},
+      });
+      let gaveUp = false;
+      for (let i = 0; i < 40 && !gaveUp; i += 1) {
+        await retryPointsOutbox({
+          dataDir: dir,
+          env,
+          fetchImpl: async () => new Response("ok", { status: 200 }),
+          confirmReceipt,
+          confirmWaitMs: 5,
+          scheduleDelay: () => {},
+        });
+        gaveUp = logs.some((line) => line.includes("points_notify not_mined") && line.includes(hash));
+      }
+      assert.equal(gaveUp, true);
+      assert.equal(confirms, 24);
+      assert.ok(logs.some((line) => line.includes("points_notify not_mined") && line.includes(hash)));
+      const after = confirms;
+      const again = await retryPointsOutbox({
+        dataDir: dir,
+        env,
+        fetchImpl: async () => new Response("ok", { status: 200 }),
+        confirmReceipt,
+        confirmWaitMs: 5,
+        scheduleDelay: () => {},
+      });
+      assert.equal(again.sent, 0);
+      assert.equal(confirms, after);
+    } finally {
+      console.error = original;
+      clearPointsRetryTimers();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps an unreachable URL pending and alerts with the hash", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "points-alert-"));
+    const secret = runtimeSecret();
+    const hash = tx();
+    const logs = [];
+    const original = console.error;
+    console.error = (...args) => {
+      logs.push(args.join(" "));
+    };
+    const env = { POINTS_INGEST_SECRET: secret, POINTS_API_URL: "https://points.invalid" };
+    try {
+      await deliverPointsNotify({
+        chainId: 84532,
+        txHash: hash,
+        dataDir: dir,
+        env,
+        fetchImpl: async () => {
+          throw new Error("offline");
+        },
+        scheduleDelay: () => {},
+      });
+      for (let i = 0; i < 30; i += 1) {
+        await retryPointsOutbox({
+          dataDir: dir,
+          env,
+          fetchImpl: async () => new Response("<html>missing</html>", { status: 404 }),
+          scheduleDelay: () => {},
+        });
+      }
+      const text = await readFile(pointsOutboxPath(dir), "utf8");
+      assert.equal(text.includes('"op":"dropped"'), false);
+      assert.match(text, /"op":"enqueue"/);
+      assert.ok(logs.some((line) => line.includes("points_notify alert") && line.includes(hash)));
+      assert.equal(logs.some((line) => line.includes("not_mined")), false);
+    } finally {
+      console.error = original;
+      clearPointsRetryTimers();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("retries 425, 408, and 429, then delivers", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "points-http-"));
+    const secret = runtimeSecret();
+    const env = { POINTS_INGEST_SECRET: secret, POINTS_API_URL: "https://points.invalid" };
+    try {
+      for (const status of [425, 408, 429]) {
+        const hash = tx();
+        let code = status;
+        const fetchImpl = async () => new Response("later", { status: code });
+        const first = await deliverPointsNotify({
+          chainId: 84532,
+          txHash: hash,
+          dataDir: dir,
+          env,
+          fetchImpl,
+          scheduleDelay: () => {},
+        });
+        assert.equal(first.sent, 0);
+        const midway = await readFile(pointsOutboxPath(dir), "utf8");
+        assert.match(midway, new RegExp(`http_${status}`));
+        const parked = midway
+          .split("\n")
+          .filter((line) => line.includes(hash))
+          .map((line) => JSON.parse(line));
+        assert.equal(parked.some((row) => row.op === "dropped"), false);
+        code = 200;
+        const second = await retryPointsOutbox({ dataDir: dir, env, fetchImpl, scheduleDelay: () => {} });
+        assert.equal(second.sent, 1);
+      }
+    } finally {
+      clearPointsRetryTimers();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("caps how many restart items confirm at once", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "points-parallel-"));
+    const secret = runtimeSecret();
+    const hashes = Array.from({ length: 6 }, () => tx());
+    const env = { POINTS_INGEST_SECRET: secret, POINTS_API_URL: "https://points.invalid" };
+    const file = pointsOutboxPath(dir);
+    await mkdirPending(dir, file, hashes);
+    let active = 0;
+    let peak = 0;
+    try {
+      const result = await retryPointsOutbox({
+        dataDir: dir,
+        env,
+        fetchImpl: async () => new Response("ok", { status: 200 }),
+        confirmReceipt: async (hash) => {
+          active += 1;
+          peak = Math.max(peak, active);
+          await new Promise((resolve) => setTimeout(resolve, 40));
+          active -= 1;
+          return { status: "success", transactionHash: hash };
+        },
+        scheduleDelay: () => {},
+      });
+      assert.equal(result.sent, 6);
+      assert.equal(peak, 4);
+    } finally {
+      clearPointsRetryTimers();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("removes a leftover temp file before the next pass", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "points-tmp-"));
+    const secret = runtimeSecret();
+    const hash = tx();
+    const env = { POINTS_INGEST_SECRET: secret, POINTS_API_URL: "https://points.invalid" };
+    const file = pointsOutboxPath(dir);
+    await mkdirPending(dir, file, [hash]);
+    const { writeFile } = await import("node:fs/promises");
+    const leftover = `${file}.9.tmp`;
+    await writeFile(leftover, "partial", { mode: 0o600 });
+    try {
+      await retryPointsOutbox({
+        dataDir: dir,
+        env,
+        fetchImpl: async () => new Response("ok", { status: 200 }),
+        scheduleDelay: () => {},
+      });
+      const names = await readdir(dir);
+      assert.equal(names.some((name) => name.endsWith(".tmp")), false);
     } finally {
       clearPointsRetryTimers();
       await rm(dir, { recursive: true, force: true });

@@ -131,15 +131,15 @@ describe("points ledger", () => {
 
   it("uses a deterministic synthetic key for an off-chain action", async () => {
     await withStore((store) => {
-      const first = syntheticTxKey("wallet_session", ["2026-W41", USER.toUpperCase()]);
-      const again = syntheticTxKey("wallet_session", ["2026-w41", USER]);
+      const first = syntheticTxKey("registry_find_posted", ["2026-W41", USER.toUpperCase()]);
+      const again = syntheticTxKey("registry_find_posted", ["2026-w41", USER]);
       assert.equal(first, again);
-      assert.notEqual(first, syntheticTxKey("wallet_session", ["2026-W42", USER]));
+      assert.notEqual(first, syntheticTxKey("registry_find_posted", ["2026-W42", USER]));
       assert.match(first, /^off:[0-9a-f]{64}$/);
 
       assert.throws(
         () => store.appendScored("wallet_session", { wallet: USER, at: "2999-01-01T00:00:00.000Z" }),
-        /excluded_action/,
+        rejection("invalid_action"),
       );
       assert.equal(store.totals(USER).total, 0);
       assert.equal(store.byWallet(USER).length, 0);
@@ -368,7 +368,7 @@ describe("points ledger", () => {
     for (const action of POINTS_ACTIONS) {
       assert.match(sql, new RegExp(`'${action}'`));
     }
-    assert.equal(POINTS_ACTIONS.length, 5);
+    assert.equal(POINTS_ACTIONS.length, 4);
     assert.equal(POINTS_ACTIONS.includes("bug_report"), false);
     const tableDdl = sql.slice(sql.indexOf("CREATE TABLE IF NOT EXISTS points_ledger"), sql.indexOf(") STRICT;"));
     for (const action of ["bug_report", "security", "security_finding", "finding"]) {
@@ -398,10 +398,6 @@ describe("points ledger", () => {
       const actionOf = db.prepare("SELECT action FROM points_ledger WHERE tx_hash = ?");
       POINTS_ACTIONS.forEach((action, index) => {
         const txHash = txFor(index + 1);
-        if (action === "wallet_session") {
-          assert.throws(() => insert.run(USER, action, txHash), /excluded_action/);
-          return;
-        }
         insert.run(USER, action, txHash);
         assert.equal(actionOf.get(txHash).action, action);
       });
