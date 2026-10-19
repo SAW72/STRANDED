@@ -168,6 +168,9 @@ jobs:
           # Runtime canaries only. Generated here, never printed, never committed.
           export RELAYER_PRIVATE_KEY="$(openssl rand -hex 32)"
           export ADMIN_SECRET="$(openssl rand -hex 32)"
+          export RELAYER_KEY="$(openssl rand -hex 24)"
+          export USER_PRIVATE_KEY="$(openssl rand -hex 32)"
+          export RPC_URL="https://rpc.example.invalid/v2/$(openssl rand -hex 16)"
           npm run build
           node checkDistSecrets.mjs dist
 

@@ -31,6 +31,7 @@ The wallet must be used at https://strandedtoken.trade. https://gas-rescue.onren
 
 | Header | Value |
 |---|---|
+| `X-Content-Type-Options` | `nosniff` |
 | `X-Frame-Options` | `DENY` |
 | `Referrer-Policy` | `strict-origin-when-cross-origin` |
 | `Content-Security-Policy` | `frame-ancestors 'none'` |

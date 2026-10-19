@@ -6,7 +6,7 @@ services:
   - type: web
     name: stranded
     runtime: static
-    buildCommand: npm ci --prefix wallet && npm run build --prefix wallet
+    buildCommand: npm ci --prefix wallet && npm run build --prefix wallet && node wallet/checkDistSecrets.mjs wallet/dist
     # Vite writes the HTML shell into wallet/dist. Publish that folder, not wallet/ or wallet/public.
     staticPublishPath: wallet/dist
     # SPA fallback. Render ignores wallet/public/_redirects.
@@ -22,6 +22,9 @@ services:
         source: /*
         destination: /index.html
     headers:
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
       - path: /*
         name: X-Frame-Options
         value: DENY
