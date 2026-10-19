@@ -16,6 +16,13 @@ import {
 
 const CHAINS = new Set([84532, 421614]);
 
+function resolvableRow(row) {
+  if (!row || !row.txFrom || row.txNonce === undefined || row.txNonce === null || !row.txTo) return false;
+  if (!row.sentBlock) return false;
+  if (row.txInput && String(row.txInput).length >= 10) return true;
+  return Boolean(row.txInputHash && row.txSelector);
+}
+
 export async function runResolve(env = process.env) {
   if (!pointsPushEnabled(env)) {
     console.log("points_resolve disabled");
@@ -38,7 +45,7 @@ export async function runResolve(env = process.env) {
   let resolved = 0;
   for (const row of rows) {
     try {
-      if (!row.txFrom || row.txNonce === undefined || !row.txTo || !row.txInput || row.sentBlock === undefined) {
+      if (!resolvableRow(row)) {
         console.log(`points_resolve unresolved ${row.txHash}`);
         continue;
       }
@@ -48,7 +55,7 @@ export async function runResolve(env = process.env) {
         continue;
       }
       const replacedBy = String(looked.tx.hash).toLowerCase();
-      await backfillPointsRescue({
+      const result = await backfillPointsRescue({
         ...row,
         chainId,
         dataDir,
@@ -61,8 +68,12 @@ export async function runResolve(env = process.env) {
             timeout: 20_000,
           }),
       });
-      resolved += 1;
-      console.log(`points_resolve ${row.txHash} ${replacedBy}`);
+      if (Number(result && result.sent) > 0) {
+        resolved += 1;
+        console.log(`points_resolve ${row.txHash} ${replacedBy}`);
+      } else {
+        console.log(`points_resolve unresolved ${row.txHash}`);
+      }
     } catch {
       console.error("points_resolve", "row", row.txHash);
     }

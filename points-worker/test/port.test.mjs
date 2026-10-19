@@ -193,10 +193,19 @@ describe("action check rebuild", () => {
     const guarded = db.prepare("SELECT id, points, wallet FROM points_ledger_archive WHERE id = 1").get();
     assert.equal(guarded.points, 10);
     assert.equal(guarded.wallet, wallet);
-    const still = db.prepare("SELECT id, tx_hash FROM points_ledger_archive").all();
-    assert.equal(still.length, 1);
+    const freshHash = `0x${"cd".repeat(32)}`;
+    db.prepare(
+      `INSERT INTO points_ledger_archive (id, wallet, action, points, tx_hash, metadata, created_at)
+       VALUES (2, ?, 'wallet_session', 10, ?, NULL, '2026-10-19T00:00:00.000Z')`,
+    ).run(wallet, freshHash);
+    const added = db.prepare("SELECT id, points FROM points_ledger_archive WHERE id = 2").get();
+    assert.equal(added.points, 10);
+    const still = db.prepare("SELECT id, tx_hash FROM points_ledger_archive ORDER BY id").all();
+    assert.equal(still.length, 2);
     assert.equal(still[0].id, 1);
     assert.equal(still[0].tx_hash, session);
+    assert.equal(still[1].id, 2);
+    assert.equal(still[1].tx_hash, freshHash);
     db.close();
   });
 });

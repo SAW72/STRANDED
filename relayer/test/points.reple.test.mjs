@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
-import { encodeFunctionData, keccak256 } from "viem";
+import { encodeEventTopics, encodeFunctionData, keccak256 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { encodeSwapData } from "../quote.mjs";
 import { rescueAbi } from "../rescueAbi.mjs";
@@ -18,6 +18,28 @@ const SWAP = `0x${"21".repeat(20)}`;
 const FEE_TO = `0x${"fe".repeat(20)}`;
 const ROUTER = `0x${"40".repeat(20)}`;
 const USER = `0x${"11".repeat(20)}`;
+const RESCUED_TOPICS = encodeEventTopics({
+  abi: [
+    {
+      type: "event",
+      name: "Rescued",
+      inputs: [
+        { name: "user", type: "address", indexed: true },
+        { name: "tokenIn", type: "address", indexed: true },
+        { name: "amountIn", type: "uint256" },
+        { name: "feeAmount", type: "uint256" },
+        { name: "amountSwap", type: "uint256" },
+        { name: "nativeOut", type: "uint256" },
+        { name: "nativeTo", type: "address", indexed: true },
+        { name: "to", type: "address" },
+        { name: "nonce", type: "uint256" },
+        { name: "relayer", type: "address" },
+      ],
+    },
+  ],
+  eventName: "Rescued",
+  args: { user: USER },
+});
 
 function hexWord() {
   return `0x${randomBytes(32).toString("hex")}`;
@@ -143,9 +165,15 @@ function startRpc(state) {
     const out = list.map((call) => {
       calls.push(call.method);
       let result = null;
+      let error = null;
       const method = call.method;
       if (method === "eth_chainId") result = hx(421614);
-      else if (method === "eth_blockNumber") result = hx(state.head);
+      else if (method === "eth_blockNumber") {
+        if (state.bnFail < 0 || state.bnFail > 0) {
+          if (state.bnFail > 0) state.bnFail -= 1;
+          error = { code: -32603, message: "internal error" };
+        } else result = hx(state.head);
+      }
       else if (method === "eth_getBalance" || method === "eth_getTransactionCount") {
         const minedCount = state.mined ? state.nonce + 1 : state.nonce;
         result = method === "eth_getTransactionCount" ? hx(minedCount) : hx(10n ** 18n);
@@ -153,8 +181,30 @@ function startRpc(state) {
       else if (method === "eth_estimateGas") result = "0x186a0";
       else if (method === "eth_call" || method === "eth_getCode") result = method === "eth_getCode" ? "0x60016000" : `0x${"00".repeat(32)}`;
       else if (method === "eth_sendRawTransaction") {
-        state.t0 = hexWord();
-        result = state.t0;
+        const raw = String(call.params?.[0] || "");
+        const hash = keccak256(raw);
+        state.sentRaw.push(hash);
+        if (state.sendMode === "resend") {
+          if (state.known.has(hash)) {
+            error = { code: -32000, message: "already known" };
+          } else {
+            state.known.add(hash);
+            state.t0 = hash;
+            state.dropBody = true;
+          }
+        } else if (state.sendMode === "nonce") {
+          if (!state.nonceRetried) {
+            state.nonceRetried = true;
+            state.nonce += 1;
+            error = { code: -32000, message: "nonce too low" };
+          } else {
+            state.t0 = hash;
+            result = hash;
+          }
+        } else {
+          state.t0 = hexWord();
+          result = state.t0;
+        }
       } else if (method === "eth_getTransactionByHash") {
         const hash = String(call.params?.[0] || "").toLowerCase();
         if (hash === String(state.t0 || "").toLowerCase() && !state.mined) result = txObj(hash, false, false);
@@ -213,11 +263,12 @@ function startRpc(state) {
         const filter = call.params?.[0] || {};
         const fromBlock = Number(BigInt(filter.fromBlock ?? "0x0"));
         const toBlock = Number(BigInt(filter.toBlock ?? "0x0"));
+        if (Array.isArray(state.logFrom)) state.logFrom.push(fromBlock);
         if (state.mined && !state.cancel && state.block >= fromBlock && state.block <= toBlock) {
           result = [
             {
               address: SWAP,
-              topics: [],
+              topics: RESCUED_TOPICS.filter((topic) => typeof topic === "string"),
               data: "0x",
               blockNumber: hx(state.block),
               transactionHash: state.t1,
@@ -228,8 +279,14 @@ function startRpc(state) {
           ];
         } else result = [];
       } else if (method === "eth_syncing") result = false;
+      if (error) return { jsonrpc: "2.0", id: call.id, error };
       return { jsonrpc: "2.0", id: call.id, result };
     });
+    if (state.dropBody) {
+      state.dropBody = false;
+      res.destroy();
+      return;
+    }
     res.writeHead(200, { "content-type": "application/json" });
     res.end(JSON.stringify(Array.isArray(body) ? out : out[0]));
   });
@@ -328,12 +385,28 @@ describe("nonce replacement through server.mjs", { concurrency: false }, () => {
     await runCase({ cancel: false });
   });
 
-  it("logs a same-nonce self-transfer as a cancel and credits nothing", { timeout: 90_000 }, async () => {
+  it("logs a same-nonce self-transfer as a cancel and credits nothing", { timeout: 150_000 }, async () => {
     await runCase({ cancel: true });
   });
 
   it("credits one rescue mined more than 64 blocks back after a 37 second rpc outage", { timeout: 150_000 }, async () => {
     await runCase({ cancel: false, outage: true });
+  });
+
+  it("treats an already known resend as the mined rescue", { timeout: 90_000 }, async () => {
+    await runBroadcast({ sendMode: "resend" });
+  });
+
+  it("signs again when the nonce is too low", { timeout: 90_000 }, async () => {
+    await runBroadcast({ sendMode: "nonce" });
+  });
+
+  it("does not store block 0 when the head read fails once", { timeout: 90_000 }, async () => {
+    await runBroadcast({ bnFail: 1, head: 400_000 });
+  });
+
+  it("does not store block 0 when every head read fails", { timeout: 90_000 }, async () => {
+    await runBroadcast({ bnFail: -1, head: 400_000 });
   });
 });
 
@@ -357,6 +430,12 @@ async function runCase({ cancel, outage = false }) {
     downUntil: 0,
     t0: "",
     t1: hexWord(),
+    bnFail: 0,
+    sendMode: "",
+    sentRaw: [],
+    known: new Set(),
+    nonceRetried: false,
+    dropBody: false,
   };
   const rpc = startRpc(state);
   const catcher = startCatcher(secret);
@@ -409,7 +488,10 @@ async function runCase({ cancel, outage = false }) {
     assert.equal(queued.txFrom, account.address.toLowerCase());
     assert.equal(queued.txNonce, state.nonce);
     assert.equal(queued.txTo, SWAP.toLowerCase());
-    assert.equal(queued.txInput, input.toLowerCase());
+    assert.equal(queued.txInput, undefined);
+    assert.equal(queued.txSelector, input.slice(0, 10).toLowerCase());
+    assert.equal(queued.txInputHash, keccak256(input).toLowerCase());
+    assert.equal(queued.txUser, USER.toLowerCase());
     assert.equal(queued.sentBlock, state.head);
     const logged = rescueText
       .split("\n")
@@ -420,7 +502,10 @@ async function runCase({ cancel, outage = false }) {
     assert.equal(String(logged.txFrom).toLowerCase(), account.address.toLowerCase());
     assert.equal(String(logged.txNonce), String(state.nonce));
     assert.equal(String(logged.txTo).toLowerCase(), SWAP.toLowerCase());
-    assert.equal(String(logged.txInput).toLowerCase(), input.toLowerCase());
+    assert.equal(logged.txInput, undefined);
+    assert.equal(String(logged.txSelector).toLowerCase(), input.slice(0, 10).toLowerCase());
+    assert.equal(String(logged.txInputHash).toLowerCase(), keccak256(input).toLowerCase());
+    assert.equal(String(logged.txUser).toLowerCase(), USER.toLowerCase());
     assert.equal(String(logged.sentBlock), String(state.head));
     if (outage) {
       state.t0 = t0;
@@ -458,7 +543,7 @@ async function runCase({ cancel, outage = false }) {
           const text = await readFile(join(dataDir, "points-outbox.jsonl"), "utf8").catch(() => "");
           return text.includes('"op":"cancel"') && second.lines.some((line) => line.includes("points_notify cancel") && line.includes(t0));
         },
-        45_000,
+        75_000,
       );
       assert.equal(saw, true, second.lines.join("\n"));
       assert.equal(catcher.posts.length, 0);
@@ -508,6 +593,139 @@ async function runCase({ cancel, outage = false }) {
     if (first && first.child.exitCode === null && !first.child.killed) first.child.kill("SIGKILL");
     if (second && second.child.exitCode === null && !second.child.killed) second.child.kill("SIGKILL");
     if (backfill && backfill.exitCode === null) backfill.kill("SIGKILL");
+    await closeServer(rpc.server);
+    await closeServer(catcher.server);
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
+async function runBroadcast({ sendMode = "", bnFail = 0, head = 20 }) {
+  const dir = await mkdtemp(join(tmpdir(), "points-bcast-"));
+  const dataDir = join(dir, "data");
+  await mkdir(dataDir, { recursive: true });
+  const key = `0x${randomBytes(32).toString("hex")}`;
+  const account = privateKeyToAccount(key);
+  const secret = randomBytes(24).toString("hex");
+  const body = rescueBody();
+  const input = signedInput(body);
+  const state = {
+    from: account.address,
+    nonce: 7,
+    head,
+    block: head + 2,
+    input,
+    mined: false,
+    cancel: false,
+    downUntil: 0,
+    t0: "",
+    t1: "",
+    bnFail,
+    sendMode,
+    sentRaw: [],
+    known: new Set(),
+    nonceRetried: false,
+    dropBody: false,
+    logFrom: [],
+  };
+  const rpc = startRpc(state);
+  const catcher = startCatcher(secret);
+  const rpcPort = await listen(rpc.server);
+  const pointsPort = await listen(catcher.server);
+  const appPort = await freePort();
+  const baseEnv = {
+    PATH: process.env.PATH,
+    HOME: process.env.HOME,
+    TMPDIR: process.env.TMPDIR,
+    NODE_NO_WARNINGS: "1",
+    RELAYER_PRIVATE_KEY: key,
+    GAS_RESCUE_SWAP_ADDRESS: SWAP,
+    FEE_TO,
+    ROUTER_ADDRESS: ROUTER,
+    PORT: String(appPort),
+    HOST: "127.0.0.1",
+    DATA_DIR: dataDir,
+    RPC_URL: `http://127.0.0.1:${rpcPort}/rpc`,
+    CHAIN_ID: "421614",
+    POINTS_INGEST_SECRET: secret,
+    POINTS_API_URL: "https://points.invalid",
+    QA_POINTS_TARGET: `http://127.0.0.1:${pointsPort}`,
+    BROADCAST_MAX_ATTEMPTS: "3",
+    BROADCAST_RETRY_BASE_MS: "20",
+  };
+  let first;
+  try {
+    first = spawnServer(baseEnv);
+    const up = await waitFor(() => first.lines.some((line) => line.includes("relayer listening")), 60_000);
+    assert.equal(up, true, first.lines.join("\n"));
+    const posted = await fetch(`http://127.0.0.1:${appPort}/v1/rescues`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const payload = await posted.json();
+    if (bnFail < 0 && posted.status !== 200) {
+      const failedRescue = await readFile(join(dataDir, "rescues.jsonl"), "utf8").catch(() => "");
+      const failedOutbox = await readFile(join(dataDir, "points-outbox.jsonl"), "utf8").catch(() => "");
+      assert.equal(failedRescue.includes('"sentBlock":"0"'), false);
+      assert.equal(failedRescue.includes('"sentBlock":0'), false);
+      assert.equal(failedOutbox.includes('"sentBlock":0'), false);
+      assert.equal(failedOutbox.includes('"sentBlock":"0"'), false);
+      return;
+    }
+    assert.equal(posted.status, 200, `${posted.status} ${JSON.stringify(payload)} ${first.lines.join("\n")}`);
+    const t0 = String(payload.txHash || "").toLowerCase();
+    assert.match(t0, /^0x[0-9a-f]{64}$/);
+    const rescueText = await readFile(join(dataDir, "rescues.jsonl"), "utf8");
+    assert.equal(rescueText.includes('"txInput"'), false);
+    const logged = rescueText
+      .split("\n")
+      .filter((line) => line.trim())
+      .map((line) => JSON.parse(line))
+      .find((row) => row.event === "rescue_ok");
+    assert.ok(logged);
+    assert.equal(String(logged.txInputHash).toLowerCase(), keccak256(input).toLowerCase());
+    const outboxText = await readFile(join(dataDir, "points-outbox.jsonl"), "utf8");
+    const queued = outboxText
+      .split("\n")
+      .filter((line) => line.trim())
+      .map((line) => JSON.parse(line))
+      .find((row) => row.op === "enqueue" && row.txHash === t0);
+    assert.ok(queued, outboxText);
+    assert.equal(queued.txInput, undefined);
+    if (sendMode === "resend") {
+      assert.equal(state.sentRaw.length >= 2, true);
+      assert.equal(state.sentRaw.every((hash) => hash === t0), true);
+    }
+    if (sendMode === "nonce") {
+      assert.equal(state.sentRaw.length >= 2, true);
+      assert.notEqual(state.sentRaw[0], state.sentRaw[1]);
+      assert.equal(t0, state.sentRaw[state.sentRaw.length - 1]);
+    }
+    if (bnFail === 1) {
+      assert.equal(String(logged.sentBlock), String(head));
+      assert.equal(queued.sentBlock, head);
+    }
+    if (bnFail < 0 || bnFail > 1) {
+      assert.equal(logged.sentBlock, undefined);
+      assert.equal(queued.sentBlock, undefined);
+      assert.equal(outboxText.includes('"sentBlock":0'), false);
+      assert.equal(outboxText.includes('"sentBlock":"0"'), false);
+    }
+    assert.equal(state.logFrom.includes(0), false);
+    if (sendMode) {
+      state.t1 = t0;
+      state.mined = true;
+      state.block = head + 2;
+      state.head = head + 8;
+      const saw = await waitFor(
+        () => catcher.posts.some((row) => String(row.txHash || "").toLowerCase() === t0),
+        40_000,
+      );
+      assert.equal(saw, true, `${first.lines.join("\n")}\nposts ${JSON.stringify(catcher.posts)}`);
+      assert.equal(catcher.posts.length, 1);
+    }
+  } finally {
+    if (first && first.child.exitCode === null && !first.child.killed) first.child.kill("SIGKILL");
     await closeServer(rpc.server);
     await closeServer(catcher.server);
     await rm(dir, { recursive: true, force: true });

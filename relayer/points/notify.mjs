@@ -1,7 +1,7 @@
 import { createHmac, randomBytes } from "node:crypto";
 import { appendFile, mkdir, open, readdir, readFile, rename, rm } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
-import { decodeFunctionData, encodeEventTopics } from "viem";
+import { decodeFunctionData, keccak256 } from "viem";
 import { rescueAbi } from "../rescueAbi.mjs";
 
 const TX_RE = /^0x[0-9a-f]{64}$/;
@@ -15,7 +15,7 @@ const MAX_FAST_ATTEMPTS = 6;
 const NOT_FOUND_ATTEMPTS = 8;
 /** Give up after this many real not-mined receipt waits. Outages do not count. */
 const MAX_MINE_ATTEMPTS = 24;
-/** Give up after this many unresolved scans, then keep a durable record. Outages do not count. */
+/** Give up after this many unresolved scans, then keep a durable record. Lookup failures count. A worker outage does not. */
 const MAX_UNRESOLVED = 8;
 const MAX_PARALLEL = 4;
 const PERMANENT_REJECTIONS = new Set([
@@ -36,6 +36,9 @@ const CONFIRM_WAIT_MS = 20_000;
 const COMPACT_AFTER_LINES = 6;
 const DEFAULT_MIN_CONFIRMATIONS = 2;
 const LOG_CHUNK_BLOCKS = 2_000n;
+const LOG_CHUNK_FLOOR = 10n;
+/** Empty logs before the head has moved this far are not a cancel. */
+const ABSENT_HEAD_GAP = 2n;
 const ADDR_RE = /^0x[0-9a-f]{40}$/;
 const RESCUED_EVENT = {
   type: "event",
@@ -277,13 +280,16 @@ export function notePointsReceiptReplacement(opts, response) {
     const current = folded.pending.get(item.txHash) || folded.pending.get(folded.follow(item.txHash));
     const candidate = tx || { hash: next, to: receipt && receipt.to, input: "" };
     const cand = candidateFromTx({ ...candidate, hash: next });
+    const digest = cand && cand.input ? callDigest(cand.input) : {};
     if (!current || !hasCallIdentity(current) || !cand || !cand.to || cand.input.length < 10) {
       await writeRecord(file, {
         op: "observe",
         txHash: item.txHash,
         replacedBy: next,
         txTo: cand && cand.to ? cand.to : undefined,
-        txInput: cand && cand.input ? cand.input : undefined,
+        txSelector: digest.txSelector,
+        txInputHash: digest.txInputHash,
+        txInput: current && current.txInput && !current.txInputHash ? cand.input : undefined,
         at: stamp(opts),
       });
       return { observed: true };
@@ -382,6 +388,8 @@ async function startDelivery(opts) {
     }
     const fresh = picked.find((row) => row.txHash === item.txHash) || picked.find((row) => row.txHash === dest);
     const rest = picked.filter((row) => row !== fresh);
+    // A new rescue does not take a retry slot. Boot and timer retries stay capped.
+    if (fresh) fresh.arrival = true;
     return fresh ? [fresh, ...rest] : picked;
   });
   return launchCapped(file, opts, items);
@@ -480,7 +488,8 @@ async function confirmIfNeeded(opts, item) {
   const waitMs = Number.isFinite(Number(opts.confirmWaitMs)) ? Number(opts.confirmWaitMs) : CONFIRM_WAIT_MS;
   let receipt;
   let confirmError;
-  await acquireConfirm();
+  const bypass = item.arrival === true;
+  if (!bypass) await acquireConfirm();
   try {
     try {
       receipt = await withTimeout(Promise.resolve().then(() => opts.confirmReceipt(item.txHash)), waitMs);
@@ -488,7 +497,7 @@ async function confirmIfNeeded(opts, item) {
       confirmError = err;
     }
   } finally {
-    releaseConfirm();
+    if (!bypass) releaseConfirm();
   }
   if (receipt && receiptAccepted(receipt)) {
     const next = itemForReceipt(item, receipt);
@@ -501,7 +510,7 @@ async function confirmIfNeeded(opts, item) {
   const looked = await lookupMinedReplacement(opts, item);
   if (looked) return looked;
   if (confirmError && confirmError.message !== "confirm_timeout") {
-    return { gate: "pending", item, error: "rpc_error", kind: "outage", alert: true };
+    return { gate: "pending", item, error: "rpc_error", kind: "unresolved", alert: true };
   }
   return { gate: "pending", item, error: "receipt_pending", kind: "mine" };
 }
@@ -570,11 +579,19 @@ async function lookupMinedReplacement(opts, item) {
   let looked;
   try {
     looked = await opts.lookupNonce(item.txFrom, item.txNonce, item);
-  } catch {
-    return { gate: "pending", item, error: "rpc_error", kind: "outage", alert: true };
+  } catch (err) {
+    const range = isRangeError(err);
+    return { gate: "pending", item, error: range ? "log_range" : "rpc_error", kind: "unresolved", alert: true };
   }
   if (!looked || looked.status === "pending") return null;
-  if (looked.status === "mismatch" || looked.status === "absent") return { gate: "cancelled", item };
+  if (looked.status === "mismatch") return { gate: "cancelled", item };
+  if (looked.status === "absent") {
+    const passes = Number(item.absentPasses) || 0;
+    if (passes < 1) {
+      return { gate: "pending", item, error: "absent", kind: "unresolved", alert: true };
+    }
+    return { gate: "cancelled", item };
+  }
   if (looked.status !== "found" || !looked.tx) {
     return { gate: "pending", item, error: "unresolved", kind: "unresolved", alert: true };
   }
@@ -591,16 +608,18 @@ async function lookupMinedReplacement(opts, item) {
 
 function replacementItem(item, tx) {
   const cand = candidateFromTx(tx);
-  return {
+  const next = {
     ...identityFrom(item),
     chainId: item.chainId,
     txHash: cand.hash,
-    txTo: cand.to || item.txTo,
-    txInput: cand.input || item.txInput,
     attempts: 0,
     mineAttempts: 0,
     notFound: 0,
+    absentPasses: 0,
   };
+  if (cand.to) next.txTo = cand.to;
+  if (!next.txInputHash && cand.input) next.txInput = cand.input;
+  return next;
 }
 
 async function applyOutcome(file, opts, outcome) {
@@ -656,6 +675,7 @@ async function takeReady(file, opts, outcome) {
         mineAttempts: item.mineAttempts || 0,
         notFound: item.notFound || 0,
         unresolvedAttempts: item.unresolvedAttempts || 0,
+        absentPasses: item.absentPasses || 0,
         ...identityFrom(item),
       });
     }
@@ -708,6 +728,7 @@ async function noteAttempt(file, opts, item, error, kind) {
   const mineAttempts = (current?.mineAttempts || 0) + (kind === "mine" ? 1 : 0);
   const notFound = (current?.notFound || 0) + (kind === "missing" ? 1 : 0);
   const unresolvedAttempts = (current?.unresolvedAttempts || 0) + (kind === "unresolved" ? 1 : 0);
+  const absentPasses = (current?.absentPasses || 0) + (error === "absent" ? 1 : 0);
   await writeRecord(file, {
     op: "attempt",
     txHash: item.txHash,
@@ -717,8 +738,9 @@ async function noteAttempt(file, opts, item, error, kind) {
     mineAttempts,
     notFound,
     unresolvedAttempts,
+    absentPasses,
   });
-  return { attempts, mineAttempts, notFound, unresolvedAttempts };
+  return { attempts, mineAttempts, notFound, unresolvedAttempts, absentPasses };
 }
 
 function scheduleBackoff(opts, txHash, attempts) {
@@ -925,6 +947,8 @@ async function maybeCompact(file) {
     if (folded.links.has(hash) || folded.cancelled.has(hash)) continue;
     const row = { op: "observe", txHash: hash, replacedBy: obs.replacedBy, at };
     if (obs.txTo) row.txTo = obs.txTo;
+    if (obs.txSelector) row.txSelector = obs.txSelector;
+    if (obs.txInputHash) row.txInputHash = obs.txInputHash;
     if (obs.txInput) row.txInput = obs.txInput;
     kept.push(row);
   }
@@ -1029,11 +1053,19 @@ function foldText(text) {
   };
   const consider = (hash) => {
     const obs = observed.get(hash);
-    if (!obs || !obs.txTo || !obs.txInput || obs.txInput.length < 10) return;
+    if (!obs || !obs.txTo) return;
     const current = pending.get(hash);
     if (!current || !hasCallIdentity(current)) return;
-    const fake = { hash: obs.replacedBy, to: obs.txTo, input: obs.txInput };
-    if (matchesRescue(current, fake)) {
+    const hashed = current.txInputHash && obs.txInputHash;
+    const sameHash =
+      hashed &&
+      obs.txTo === String(current.txTo || "").toLowerCase() &&
+      obs.txInputHash === current.txInputHash &&
+      (!current.txSelector || !obs.txSelector || obs.txSelector === current.txSelector);
+    const fake = { hash: obs.replacedBy, to: obs.txTo, input: obs.txInput || "0x" };
+    const sameCall = sameHash || (obs.txInput && obs.txInput.length >= 10 && matchesRescue(current, fake));
+    if (!sameHash && !(obs.txInput && obs.txInput.length >= 10) && !hashed) return;
+    if (sameCall) {
       if (!links.has(hash)) links.set(hash, obs.replacedBy);
       observed.delete(hash);
       movePending();
@@ -1076,6 +1108,7 @@ function foldText(text) {
           mineAttempts: Number(row.mineAttempts ?? row.attempts) || 0,
           notFound: Number(row.notFound) || 0,
           unresolvedAttempts: Number(row.unresolvedAttempts) || 0,
+          absentPasses: Number(row.absentPasses) || 0,
           ...ident,
         });
       } else {
@@ -1088,7 +1121,15 @@ function foldText(text) {
         current.attempts += 1;
         if (row.error === "receipt_pending") current.mineAttempts += 1;
         if (row.error === "http_404") current.notFound += 1;
-        if (row.error === "unresolved") current.unresolvedAttempts += 1;
+        if (
+          row.error === "unresolved" ||
+          row.error === "rpc_error" ||
+          row.error === "log_range" ||
+          row.error === "absent"
+        ) {
+          current.unresolvedAttempts += 1;
+        }
+        if (row.error === "absent") current.absentPasses = (current.absentPasses || 0) + 1;
       }
     } else if (row.op === "replace") {
       const next = String(row.replacedBy || "").trim().toLowerCase();
@@ -1099,7 +1140,13 @@ function foldText(text) {
       const next = String(row.replacedBy || "").trim().toLowerCase();
       if (!TX_RE.test(next) || next === hash) continue;
       const seen = identityFrom(row);
-      observed.set(hash, { replacedBy: next, txTo: seen.txTo || "", txInput: seen.txInput || "" });
+      observed.set(hash, {
+        replacedBy: next,
+        txTo: seen.txTo || "",
+        txInput: seen.txInput || "",
+        txInputHash: seen.txInputHash || "",
+        txSelector: seen.txSelector || "",
+      });
       consider(hash);
     } else if (row.op === "cancel") {
       cancelled.add(hash);
@@ -1111,6 +1158,10 @@ function foldText(text) {
     } else if (row.op === "delivered") {
       delivered.add(hash);
       pending.delete(hash);
+      unresolved.delete(hash);
+      for (const source of [...unresolved.keys()]) {
+        if (follow(source) === hash) unresolved.delete(source);
+      }
     } else if (row.op === "dropped") {
       dropped.add(hash);
       if (row.error) dropErrors.set(hash, String(row.error));
@@ -1147,6 +1198,7 @@ function compactEnqueue(item, at) {
     mineAttempts: item.mineAttempts || 0,
     notFound: item.notFound || 0,
     unresolvedAttempts: item.unresolvedAttempts || 0,
+    absentPasses: item.absentPasses || 0,
   };
   const ident = identityFrom(item);
   return { ...row, ...ident };
@@ -1192,9 +1244,26 @@ function identityFrom(source) {
   if (ADDR_RE.test(to)) out.txTo = to;
   const input = String(source.txInput || source.input || "").trim().toLowerCase();
   if (/^0x[0-9a-f]*$/.test(input) && input.length >= 2) out.txInput = input;
+  const selector = String(source.txSelector || "").trim().toLowerCase();
+  if (/^0x[0-9a-f]{8}$/.test(selector)) out.txSelector = selector;
+  const inputHash = String(source.txInputHash || "").trim().toLowerCase();
+  if (TX_RE.test(inputHash)) out.txInputHash = inputHash;
+  if (!out.txInputHash && out.txInput && out.txInput.length >= 10) {
+    const digest = callDigest(out.txInput);
+    if (!out.txSelector && digest.txSelector) out.txSelector = digest.txSelector;
+    if (digest.txInputHash) out.txInputHash = digest.txInputHash;
+  }
+  const user = String(source.txUser || "").trim().toLowerCase();
+  if (ADDR_RE.test(user)) out.txUser = user;
   const block = readNonce(source.sentBlock);
-  if (block !== null) out.sentBlock = block;
+  if (block !== null && block > 0) out.sentBlock = block;
   return out;
+}
+
+function callDigest(input) {
+  const data = String(input || "").trim().toLowerCase();
+  if (!/^0x[0-9a-f]+$/.test(data) || data.length < 10) return {};
+  return { txSelector: data.slice(0, 10), txInputHash: keccak256(data) };
 }
 
 function readNonce(value) {
@@ -1211,11 +1280,13 @@ function hasNonceIdentity(item) {
 }
 
 function hasCallIdentity(item) {
-  return Boolean(item && item.txTo && item.txInput && item.txInput.length >= 10);
+  if (!item || !item.txTo) return false;
+  if (item.txInput && item.txInput.length >= 10) return true;
+  return Boolean(item.txInputHash && TX_RE.test(item.txInputHash) && item.txSelector && item.txSelector.length === 10);
 }
 
 function hasResolvableIdentity(item) {
-  return hasNonceIdentity(item) && hasCallIdentity(item) && Number.isSafeInteger(item && item.sentBlock) && item.sentBlock >= 0;
+  return hasNonceIdentity(item) && hasCallIdentity(item) && Number.isSafeInteger(item && item.sentBlock) && item.sentBlock > 0;
 }
 
 function senderAndNonceMatch(item, tx) {
@@ -1238,7 +1309,16 @@ function matchesRescue(item, tx) {
   const cand = candidateFromTx(tx);
   if (!cand || !hasCallIdentity(item)) return false;
   if (!cand.to || cand.to !== String(item.txTo).toLowerCase()) return false;
-  if (cand.input.slice(0, 10) !== String(item.txInput).toLowerCase().slice(0, 10)) return false;
+  const selector = String(item.txSelector || (item.txInput ? String(item.txInput).slice(0, 10) : "")).toLowerCase();
+  if (selector && cand.input.slice(0, 10) !== selector) return false;
+  if (item.txInputHash && TX_RE.test(String(item.txInputHash).toLowerCase())) {
+    try {
+      return keccak256(cand.input).toLowerCase() === String(item.txInputHash).toLowerCase();
+    } catch {
+      return false;
+    }
+  }
+  if (!item.txInput || String(item.txInput).length < 10) return false;
   try {
     const left = decodeFunctionData({ abi: rescueAbi, data: item.txInput });
     const right = decodeFunctionData({ abi: rescueAbi, data: cand.input });
@@ -1295,8 +1375,9 @@ function rescueUser(input) {
  * Finds the mined rescue at sender+nonce.
  * `pending` means that nonce is still unused.
  * `found` is a Rescued log whose transaction matches the sender, nonce, and call.
- * `mismatch` and `absent` mean the nonce was consumed by a different call.
- * `unresolved` means the scan could not decide. RPC failures throw.
+ * `mismatch` means the nonce was consumed by a different call.
+ * `absent` means the scan finished, the nonce is consumed, and no matching log was found after the head moved.
+ * `unresolved` means the scan could not decide. A range that stays too wide throws.
  * @param {import("viem").PublicClient} client
  * @param {string} from
  * @param {number|string|bigint} nonce
@@ -1314,32 +1395,55 @@ export async function findTxAtNonce(client, from, nonce, hint = {}) {
   const contract = String(hint.txTo || "").trim().toLowerCase();
   const input = String(hint.txInput || "").trim().toLowerCase();
   const sent = readNonce(hint.sentBlock);
-  if (!ADDR_RE.test(contract) || input.length < 10 || sent === null) return { status: "unresolved" };
-  const user = rescueUser(input);
+  const probe = {
+    txTo: contract,
+    txInput: input,
+    txSelector: hint.txSelector,
+    txInputHash: hint.txInputHash,
+    txUser: hint.txUser,
+  };
+  if (!hasCallIdentity(probe) || sent === null || sent <= 0) return { status: "unresolved" };
+  const hinted = String(hint.txUser || "").trim().toLowerCase();
+  const user = ADDR_RE.test(hinted) ? hinted : rescueUser(input);
   if (!ADDR_RE.test(user)) return { status: "unresolved" };
   const head = await client.getBlockNumber();
   const start = BigInt(sent);
   if (start > head) return { status: "unresolved" };
-  const topics = encodeEventTopics({
-    abi: [RESCUED_EVENT],
-    eventName: "Rescued",
-    args: { user: /** @type {`0x${string}`} */ (user) },
-  });
-  const probe = { txTo: contract, txInput: input };
+  let chunk = LOG_CHUNK_BLOCKS;
   let cursor = start;
   let incomplete = false;
   while (cursor <= head) {
-    const end = cursor + LOG_CHUNK_BLOCKS - 1n > head ? head : cursor + LOG_CHUNK_BLOCKS - 1n;
-    const logs = await client.getLogs({
-      address: /** @type {`0x${string}`} */ (contract),
-      topics,
-      fromBlock: cursor,
-      toBlock: end,
-    });
+    const end = cursor + chunk - 1n > head ? head : cursor + chunk - 1n;
+    let logs;
+    try {
+      logs = await client.getLogs({
+        address: /** @type {`0x${string}`} */ (contract),
+        event: RESCUED_EVENT,
+        args: { user: /** @type {`0x${string}`} */ (user) },
+        fromBlock: cursor,
+        toBlock: end,
+      });
+    } catch (err) {
+      if (isRangeError(err) && chunk > LOG_CHUNK_FLOOR) {
+        const next = chunk / 2n;
+        chunk = next < LOG_CHUNK_FLOOR ? LOG_CHUNK_FLOOR : next;
+        continue;
+      }
+      throw err;
+    }
     for (const log of logs || []) {
       const hash = log && (log.transactionHash || log.hash);
       if (!hash) continue;
-      const tx = await client.getTransaction({ hash });
+      let tx;
+      try {
+        tx = await client.getTransaction({ hash });
+      } catch (err) {
+        if (isNotFoundError(err)) {
+          incomplete = true;
+          continue;
+        }
+        throw err;
+      }
       if (!tx) {
         incomplete = true;
         continue;
@@ -1347,14 +1451,31 @@ export async function findTxAtNonce(client, from, nonce, hint = {}) {
       if (String(tx.from || "").toLowerCase() !== address) continue;
       if (readNonce(tx.nonce) !== parsed) continue;
       const seen = { ...tx, hash: tx.hash || hash };
-      if (matchesRescue(probe, seen)) return { status: "found", tx: seen };
-      return { status: "mismatch", tx: seen };
+      if (matchesRescue(probe, seen)) return { status: "found", tx: seen, head };
+      return { status: "mismatch", tx: seen, head };
     }
     if (end >= head) break;
     cursor = end + 1n;
   }
   if (incomplete) return { status: "unresolved" };
-  return { status: "absent" };
+  if (head < start + ABSENT_HEAD_GAP) return { status: "unresolved" };
+  return { status: "absent", head };
+}
+
+function isRangeError(err) {
+  const text = `${err && err.message ? err.message : ""} ${err && err.details ? err.details : ""} ${err && err.shortMessage ? err.shortMessage : ""}`.toLowerCase();
+  return (
+    text.includes("range") ||
+    text.includes("too large") ||
+    text.includes("too many blocks") ||
+    text.includes("response size") ||
+    text.includes("32602")
+  );
+}
+
+function isNotFoundError(err) {
+  const text = `${err && err.name ? err.name : ""} ${err && err.message ? err.message : ""} ${err && err.shortMessage ? err.shortMessage : ""}`.toLowerCase();
+  return text.includes("not found") || text.includes("notfound");
 }
 
 function isClosed(folded, hash) {
@@ -1414,7 +1535,10 @@ export async function backfillPointsRescue(opts) {
     txFrom: ident.txFrom,
     txNonce: ident.txNonce,
     txTo: cand.to || ident.txTo,
-    txInput: cand.input || ident.txInput,
+    txSelector: ident.txSelector,
+    txInputHash: ident.txInputHash,
+    txUser: ident.txUser,
+    txInput: ident.txInput,
     sentBlock: ident.sentBlock,
     dataDir: opts.dataDir,
     env,

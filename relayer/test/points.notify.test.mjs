@@ -217,6 +217,11 @@ describe("points push", { concurrency: false }, () => {
     assert.equal(src.slice(broadcast, consumed).includes("notePointsReceiptReplacement"), false);
     assert.equal(src.slice(broadcast, consumed).includes("waitForTransactionReceipt"), false);
     assert.equal(src.slice(broadcast, consumed).includes("pointsOutbox"), false);
+    assert.match(src, /if \(queued\.durable\) await queued\.durable/);
+    assert.match(src, /isAlreadyKnownError/);
+    assert.match(src, /isNonceRetryError/);
+    assert.equal(src.includes('sentBlock = "0"'), false);
+    assert.equal(src.includes("txInput,"), false);
   });
 
   it("retries a 404 receipt_not_found instead of dropping it (O5)", async () => {
@@ -747,19 +752,18 @@ describe("points push", { concurrency: false }, () => {
     }
   });
 
-  it("keeps the fifth receipt wait behind a cap of four", async () => {
+  it("credits a new rescue while four receipt waits are stuck", async () => {
     const dir = await mkdtemp(join(tmpdir(), "points-n2-cap-"));
     const secret = runtimeSecret();
     const stuck = [tx(), tx(), tx(), tx()];
     const fresh = tx();
+    const posts = [];
     const env = { POINTS_INGEST_SECRET: secret, POINTS_API_URL: "https://points.invalid" };
     let active = 0;
     let peak = 0;
-    const seen = [];
     const confirmReceipt = (hash) => {
       active += 1;
       peak = Math.max(peak, active);
-      seen.push(hash);
       if (stuck.includes(hash)) return new Promise(() => {});
       active -= 1;
       return { status: "success", transactionHash: hash };
@@ -768,7 +772,10 @@ describe("points push", { concurrency: false }, () => {
       chainId: 84532,
       dataDir: dir,
       env,
-      fetchImpl: async () => new Response("ok", { status: 200 }),
+      fetchImpl: async (_url, init) => {
+        posts.push(JSON.parse(init.body).txHash);
+        return new Response("ok", { status: 200 });
+      },
       confirmReceipt,
       confirmWaitMs: 4_000,
       scheduleDelay: () => {},
@@ -780,14 +787,12 @@ describe("points push", { concurrency: false }, () => {
       while (peak < 4 && Date.now() < opened) await new Promise((resolve) => setImmediate(resolve));
       assert.equal(peak, 4);
       const started = Date.now();
-      const queued = schedulePointsNotify({ ...base, txHash: fresh });
-      await queued.durable;
-      const durableMs = Date.now() - started;
-      console.log("n2_queue_ms", durableMs);
-      assert.ok(durableMs < 1_000, `n2_queue_ms ${durableMs}`);
-      await new Promise((resolve) => setTimeout(resolve, 50));
-      assert.equal(peak, 4);
-      assert.equal(seen.includes(fresh), false);
+      const result = await deliverPointsNotify({ ...base, txHash: fresh });
+      const elapsed = Date.now() - started;
+      console.log("n2_queue_ms", elapsed);
+      assert.equal(result.sent, 1, `n2_queue_ms ${elapsed}`);
+      assert.ok(elapsed < 1_000, `n2_queue_ms ${elapsed}`);
+      assert.deepEqual(posts, [fresh]);
     } finally {
       clearPointsRetryTimers();
       await Promise.allSettled(waiting);
@@ -1401,7 +1406,7 @@ describe("points push", { concurrency: false }, () => {
         lookupNonce: pendingLookup,
         scheduleDelay: () => {},
       });
-      for (let i = 0; i < 30; i += 1) {
+      for (let i = 0; i < 3; i += 1) {
         await retryPointsOutbox({
           dataDir: dir,
           env,
@@ -1413,8 +1418,16 @@ describe("points push", { concurrency: false }, () => {
       }
       const parked = await readFile(pointsOutboxPath(dir), "utf8");
       assert.equal(parked.includes('"op":"dropped"'), false);
+      assert.equal(parked.includes('"op":"unresolved"'), false);
       assert.equal(parked.includes("receipt_not_found"), false);
       assert.equal(logs.some((line) => line.includes("not_mined")), false);
+      const attempts = parked
+        .split("\n")
+        .filter((line) => line.includes('"op":"attempt"'))
+        .map((line) => JSON.parse(line));
+      assert.ok(attempts.length >= 3);
+      assert.equal(attempts.every((row) => row.mineAttempts === 0), true);
+      assert.ok(attempts.some((row) => row.unresolvedAttempts >= 3));
       mode = "timeout";
       await retryPointsOutbox({
         dataDir: dir,

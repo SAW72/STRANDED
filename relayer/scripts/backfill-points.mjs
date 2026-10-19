@@ -46,8 +46,15 @@ export function rescueTxsFromJsonl(text, defaultChainId) {
     if (/^0x[0-9a-f]{40}$/.test(txTo)) rowOut.txTo = txTo;
     const txInput = String(row.txInput || "").trim().toLowerCase();
     if (/^0x[0-9a-f]*$/.test(txInput) && txInput.length >= 10) rowOut.txInput = txInput;
+    const txSelector = String(row.txSelector || "").trim().toLowerCase();
+    if (/^0x[0-9a-f]{8}$/.test(txSelector)) rowOut.txSelector = txSelector;
+    const txInputHash = String(row.txInputHash || "").trim().toLowerCase();
+    if (/^0x[0-9a-f]{64}$/.test(txInputHash)) rowOut.txInputHash = txInputHash;
+    const txUser = String(row.txUser || "").trim().toLowerCase();
+    if (/^0x[0-9a-f]{40}$/.test(txUser)) rowOut.txUser = txUser;
     if (row.sentBlock !== undefined && row.sentBlock !== null && /^\d+$/.test(String(row.sentBlock).trim())) {
-      rowOut.sentBlock = Number(row.sentBlock);
+      const sentBlock = Number(row.sentBlock);
+      if (sentBlock > 0) rowOut.sentBlock = sentBlock;
     }
     out.push(rowOut);
   }

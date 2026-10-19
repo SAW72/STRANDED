@@ -26,7 +26,14 @@ import {
 } from "./points/notify.mjs";
 import { createRescueLog, orderLogSummary } from "./rescueLog.mjs";
 import { createRescueLimiter, parseRescueLimitConfig } from "./rescueLimit.mjs";
-import { DEFAULT_BASE_DELAY_MS, DEFAULT_MAX_ATTEMPTS, withBroadcastRetry } from "./retry.mjs";
+import {
+  DEFAULT_BASE_DELAY_MS,
+  DEFAULT_MAX_ATTEMPTS,
+  isAlreadyKnownError,
+  isNonceRetryError,
+  isUnderpricedError,
+  withBroadcastRetry,
+} from "./retry.mjs";
 
 if (process.env.RELAYER_KEY_FILE || process.env.RELAYER_PRIVATE_KEY_FILE) {
   console.error("Key files are forbidden. Export RELAYER_PRIVATE_KEY in the process environment only.");
@@ -184,6 +191,37 @@ function asOrder(raw) {
   }
 }
 
+async function readSentBlock() {
+  for (let i = 0; i < 3; i += 1) {
+    try {
+      const head = await publicClient.getBlockNumber();
+      if (typeof head === "bigint" && head > 0n) return head.toString();
+    } catch {
+      /* the next try, or leave the block unset */
+    }
+  }
+  return "";
+}
+
+async function signRescue(txData) {
+  const request = await walletClient.prepareTransactionRequest({
+    account,
+    to: /** @type {`0x${string}`} */ (SWAP),
+    data: txData,
+  });
+  const serialized = await walletClient.signTransaction(request);
+  const parsed = parseTransaction(serialized);
+  return { serialized, parsed, hash: keccak256(serialized) };
+}
+
+function callDigest(txData, user) {
+  return {
+    txSelector: txData.slice(0, 10),
+    txInputHash: keccak256(txData),
+    txUser: String(user || "").toLowerCase(),
+  };
+}
+
 function retryLog(info) {
   console.error(
     "broadcast_retry",
@@ -228,24 +266,20 @@ async function submitRescue(body) {
       logSimulationFailure(err);
       throw simulationFailure(err);
     }
-    let sentBlock = "0";
-    try {
-      sentBlock = (await publicClient.getBlockNumber()).toString();
-    } catch {
-      sentBlock = "0";
-    }
+    const sentBlock = await readSentBlock();
     const txData = encodeFunctionData({ abi: rescueAbi, functionName: "rescueWithPermit", args });
-    const request = await walletClient.prepareTransactionRequest({
-      account,
-      to: /** @type {`0x${string}`} */ (SWAP),
-      data: txData,
-    });
-    const serialized = await walletClient.signTransaction(request);
-    const parsed = parseTransaction(serialized);
+    let signed = null;
     const txHash = await withBroadcastRetry(
       async (attempt) => {
         attempts = attempt;
-        return walletClient.sendRawTransaction({ serializedTransaction: serialized });
+        if (!signed) signed = await signRescue(txData);
+        try {
+          return await walletClient.sendRawTransaction({ serializedTransaction: signed.serialized });
+        } catch (err) {
+          if (isAlreadyKnownError(err)) return signed.hash;
+          if (isNonceRetryError(err) || isUnderpricedError(err)) signed = null;
+          throw err;
+        }
       },
       {
         maxAttempts: BROADCAST_MAX_ATTEMPTS,
@@ -254,10 +288,11 @@ async function submitRescue(body) {
       },
     );
     nonceStore.markConsumed(order.user, order.nonce);
+    const parsed = signed.parsed;
     const txFrom = String(parsed.from || account.address);
     const txNonce = parsed.nonce === undefined || parsed.nonce === null ? undefined : parsed.nonce.toString();
     const txTo = parsed.to ? String(parsed.to) : String(SWAP);
-    const txInput = typeof parsed.data === "string" && parsed.data.length > 2 ? parsed.data : txData;
+    const call = callDigest(txData, order.user);
     await rescueLog.append({
       event: "rescue_ok",
       ...summary,
@@ -265,8 +300,8 @@ async function submitRescue(body) {
       txFrom,
       txNonce,
       txTo,
-      txInput,
-      sentBlock,
+      ...call,
+      ...(sentBlock ? { sentBlock } : {}),
       attempts,
       ms: Date.now() - started,
     });
@@ -279,8 +314,8 @@ async function submitRescue(body) {
         txFrom,
         txNonce,
         txTo,
-        txInput,
-        sentBlock,
+        ...call,
+        ...(sentBlock ? { sentBlock } : {}),
         dataDir: DATA_DIR,
         env: process.env,
         confirmReceipt: confirmPointsReceipt,
