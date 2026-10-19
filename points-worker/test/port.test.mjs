@@ -183,6 +183,16 @@ describe("action check rebuild", () => {
     assert.ok(Number(next.lastInsertRowid) > Number(archived.id));
     assert.throws(() => db.exec("UPDATE points_ledger_archive SET points = 1"));
     assert.throws(() => db.exec("DELETE FROM points_ledger_archive"));
+    db.exec(read(new URL("migrations/0003_archive_insert_guard.sql", root)));
+    assert.throws(() =>
+      db.exec(
+        `INSERT OR REPLACE INTO points_ledger_archive (id, wallet, action, points, tx_hash, metadata, created_at)
+         VALUES (1, '0x${"22".repeat(20)}', 'wallet_session', 99, '${"ab".repeat(32)}', NULL, '2026-10-19T00:00:00.000Z')`,
+      ),
+    );
+    const guarded = db.prepare("SELECT id, points, wallet FROM points_ledger_archive WHERE id = 1").get();
+    assert.equal(guarded.points, 10);
+    assert.equal(guarded.wallet, wallet);
     const still = db.prepare("SELECT id, tx_hash FROM points_ledger_archive").all();
     assert.equal(still.length, 1);
     assert.equal(still[0].id, 1);

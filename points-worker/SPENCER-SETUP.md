@@ -28,6 +28,20 @@ The Worker caps reads of `GET /points` and `GET /points/leaderboard` inside one 
 
 DECISION FOR SPENCER: points are recorded for the relayer hot wallet (`relayer_job`, 50 per rescue) and that wallet is included on the leaderboard. Leave this as it is, or decide later that those rows should be hidden. This setup does not change that behavior.
 
-`relayer/scripts/backfill-points.mjs` can replay `txHash` values from `rescues.jsonl` after step 9. Agents did not run it.
+Stop the relayer before you run a backfill or the resolver. Those scripts and the relayer write the same outbox file, and that file is not locked. A live relayer and either script can write it at the same time.
+
+`relayer/scripts/backfill-points.mjs` replays `rescue_ok` rows from `rescues.jsonl` after step 9. Set `CHAIN_ID` to 84532 or 421614 and set `RPC_URL` in the environment. The script posts only rows for that chain. Agents did not run it.
+
+Rows from this relayer store the sender, the nonce, the contract, the calldata, and the head block at broadcast. The lookup reads `Rescued` logs for that contract and user from the stored block to the head, in chunks. It posts when the sender, the nonce, and every call argument match. When the mined transaction is the row's own hash, it posts that hash. A replacement with the same call posts the new hash once. A different call is cancelled and posts nothing.
+
+Older rows that only have `txHash` still replay. If that hash is not already delivered, cancelled, or waiting in the outbox, and its receipt is mined, the script posts it. A dropped row is included. A row that is still waiting keeps its attempt counters. One bad row is logged and the rest of the run continues. The worker unique index refuses a second credit for the same action and hash.
+
+Give-up caps, per outbox row. An outage does not count toward any of them:
+- A transaction that never mines is dropped after 24 receipt waits. The log is `not_mined`.
+- A worker `receipt_not_found` response is dropped after 8. The log is `http_404`.
+- A row whose replacement cannot be resolved is kept after 8 scans. The log is `unresolved`, and the outbox keeps that record. `relayer/scripts/resolve-points.mjs` reads those records and posts a match when the chain can show one. Set `CHAIN_ID` and `RPC_URL` for it. It has no default RPC URL. A legacy row with no sender or nonce is stored the same way, for that script, instead of being dropped.
+- HTTP 400 and HTTP 403 stay pending. They are logged and do not give up.
+
+The relayer asks for the receipt at 1 confirmation so a same-process replacement is recorded, then waits until `POINTS_MIN_CONFIRMATIONS` (default 2) on that transaction, inside the same 20 second budget. The durable old-hash to new-hash line is written when the receipt hash differs, and also when a restart finds the mined call. The same-process hook writes that line when it runs.
 
 Points are recorded for activity. The points disclaimer in the wallet is unchanged.
