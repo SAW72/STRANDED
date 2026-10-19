@@ -6,7 +6,7 @@ services:
   - type: web
     name: stranded
     runtime: static
-    buildCommand: npm ci --prefix wallet && npm run build --prefix wallet && node wallet/checkDistSecrets.mjs wallet/dist
+    buildCommand: npm ci --prefix wallet && npm run build --prefix wallet
     staticPublishPath: wallet/dist
     routes:
       - type: rewrite

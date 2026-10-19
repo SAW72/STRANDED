@@ -264,6 +264,7 @@ h1 {
   color: var(--muted);
   font-size: 0.85rem;
   line-height: 1.4;
+  overflow-wrap: anywhere;
 }
 
 .chain-switch {

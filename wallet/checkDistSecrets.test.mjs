@@ -1,11 +1,11 @@
 import { randomBytes } from "node:crypto";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { after, test } from "node:test";
 import assert from "node:assert/strict";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   bundleShapeFindings,
   formatFinding,
@@ -54,6 +54,13 @@ function rules(findings) {
 
 function rendered(findings) {
   return findings.map((finding) => formatFinding(finding)).join("\n");
+}
+
+function exampleValue(name) {
+  const text = fs.readFileSync(path.join(here, ".env.example"), "utf8");
+  const line = text.split(/\n/).find((item) => item.startsWith(`${name}=`));
+  assert.ok(line, name);
+  return line.slice(name.length + 1).trim();
 }
 
 test("passes a bundle that only mentions public VITE_ relayer names", () => {
@@ -403,45 +410,145 @@ test("flags bare path keys, query keys, wss, and userinfo", () => {
   assert.equal(text.includes("abcdefghijklm"), false);
 });
 
-test("compares every rpc url env value", () => {
+test("compares an rpc url only when it carries a key", () => {
   const pub = "https://public.example.invalid/rpc";
+  const base = exampleValue("VITE_BASE_SEPOLIA_RPC_URL");
+  const arb = exampleValue("VITE_ARB_SEPOLIA_RPC_URL");
   assert.equal(isKeyLikeRpc(pub), false);
-  const dir = writeDist({ "assets/app.js": `${JSON.stringify(pub)}\n` });
-  const findings = scanDist(dir, { knownRoots: [], env: { BASE_RPC_URL: pub } });
+  assert.equal(isKeyLikeRpc(base), false);
+  assert.equal(isKeyLikeRpc(arb), false);
+  const dir = writeDist({
+    "assets/app.js": [pub, base, arb].map((item) => JSON.stringify(item)).join("\n"),
+  });
+  assert.deepEqual(
+    scanDist(dir, {
+      knownRoots: [],
+      env: {
+        VITE_BASE_SEPOLIA_RPC_URL: base,
+        VITE_ARB_SEPOLIA_RPC_URL: arb,
+        RPC_URL: pub,
+      },
+    }),
+    [],
+  );
+  const key = randomBytes(16).toString("hex");
+  const keyed = `https://rpc.example.invalid/v2/${key}`;
+  const keyedDir = writeDist({ "assets/app.js": `${JSON.stringify(keyed)}\n` });
+  const findings = scanDist(keyedDir, { knownRoots: [], env: { VITE_BASE_SEPOLIA_RPC_URL: keyed } });
   assert.ok(rules(findings).includes("forbidden-value"));
-  assert.equal(rendered(findings).includes(pub), false);
+  assert.equal(rendered(findings).includes(key), false);
+  assert.equal(rendered(findings).includes(keyed), false);
+});
+
+test("a keyed url does not fail when only its public host is already bundled", () => {
+  const host = "https://public.example.invalid";
+  const key = randomBytes(16).toString("hex");
+  const keyed = `${host}/v2/${key}`;
+  const dir = writeDist({ "assets/app.js": `${JSON.stringify(`${host}/rpc`)}\n` });
+  const findings = scanDist(dir, { knownRoots: [], env: { VITE_BASE_SEPOLIA_RPC_URL: keyed } });
+  assert.equal(findings.some((finding) => finding.rule === "forbidden-value"), false);
+  assert.equal(findings.some((finding) => finding.rule === "forbidden-split"), false);
+  assert.equal(rendered(findings).includes(key), false);
 });
 
 test("flags a bip39 phrase and a bare jwt without printing them", () => {
   const phrase = `${"abandon ".repeat(11)}abandon`;
+  const fifteen = `${"abandon ".repeat(14)}abandon`;
+  const eighteen = `${"zoo ".repeat(17)}zoo`;
+  const twentyOne = `${"zoo ".repeat(20)}zoo`;
   const longer = `${"zoo ".repeat(23)}zoo`;
+  const newlines = `${"abandon\n".repeat(14)}abandon`;
+  const wordArray = `[${'"abandon",'.repeat(17)}"abandon"]`;
+  const tooShort = `${"abandon ".repeat(10)}abandon`;
+  const uneven = `${"abandon ".repeat(15)}abandon`;
   const header = Buffer.from('{"alg":"none"}').toString("base64url");
   const payload = Buffer.from('{"sub":"demo"}').toString("base64url");
   const sig = Buffer.from("not-a-real-signature").toString("base64url");
   const jwt = `${header}.${payload}.${sig}`;
   const prose = "reports and security findings are not points actions and are not shown";
-  const dir = writeDist({
-    "assets/app.js": [phrase, longer, jwt, prose].map((item) => JSON.stringify(item)).join("\n"),
+  for (const body of [phrase, fifteen, eighteen, twentyOne, longer, newlines, wordArray]) {
+    const dir = writeDist({ "assets/app.js": `${body}\n` });
+    const findings = scanDist(dir, { knownRoots: [], env: {} });
+    assert.equal(findings.some((finding) => finding.rule === "mnemonic"), true);
+    const text = rendered(findings);
+    assert.equal(text.includes("abandon"), false);
+    assert.equal(text.includes("zoo"), false);
+  }
+  const jwtDir = writeDist({
+    "assets/app.js": `${JSON.stringify(jwt)}\n${JSON.stringify(prose)}\n`,
   });
-  const findings = scanDist(dir, { knownRoots: [], env: {} });
-  assert.ok(rules(findings).includes("mnemonic"));
-  assert.ok(rules(findings).includes("jwt"));
-  const text = rendered(findings);
-  assert.equal(text.includes("abandon"), false);
-  assert.equal(text.includes("zoo"), false);
-  assert.equal(text.includes(jwt), false);
-  assert.equal(text.includes(prose), false);
+  const jwtFindings = scanDist(jwtDir, { knownRoots: [], env: {} });
+  assert.ok(rules(jwtFindings).includes("jwt"));
+  assert.equal(rules(jwtFindings).includes("mnemonic"), false);
+  const jwtText = rendered(jwtFindings);
+  assert.equal(jwtText.includes(jwt), false);
+  assert.equal(jwtText.includes(prose), false);
+  const missed = writeDist({
+    "assets/app.js": `${JSON.stringify(tooShort)}\n${JSON.stringify(uneven)}\n${JSON.stringify(prose)}\n`,
+  });
+  assert.equal(scanDist(missed, { knownRoots: [], env: {} }).some((finding) => finding.rule === "mnemonic"), false);
+  const source = scanHexText("plant.ts", `${newlines}\n`);
+  assert.equal(source.some((finding) => finding.rule === "mnemonic"), true);
+  assert.equal(formatFinding(source[0]).includes("abandon"), false);
+  const switches = Array.from({ length: 24 }, (_, index) => `case ${index}:`).join("");
+  const switched = writeDist({ "assets/app.js": switches });
+  assert.equal(
+    scanDist(switched, { knownRoots: [], env: {} }).some((finding) => finding.rule === "mnemonic"),
+    false,
+  );
 });
 
-test("does not treat a public address as secret material", () => {
+test("an unlisted address fails and a listed address passes", () => {
   const addr = `0x${randomBytes(20).toString("hex")}`;
   const dir = writeDist({
     "assets/app.js": `const name = "VITE_TOKEN_ADDRESS"; const v = "${addr}";\n`,
   });
-  assert.deepEqual(
-    scanDist(dir, { knownRoots: [], env: { VITE_TOKEN_ADDRESS: addr, FOO_TOKEN_V2: addr } }),
-    [],
-  );
+  const open = scanDist(dir, { knownRoots: [], env: { VITE_TOKEN_ADDRESS: addr, FOO_TOKEN_V2: addr } });
+  assert.ok(rules(open).includes("forbidden-value"));
+  assert.equal(rendered(open).includes(addr), false);
+  const listed = scanDist(dir, {
+    knownRoots: [],
+    env: { VITE_TOKEN_ADDRESS: addr, FOO_TOKEN_V2: addr },
+    allowlist: new Set([addr]),
+  });
+  assert.deepEqual(listed, []);
+});
+
+test("a non-address value passes only when its exact value is listed", () => {
+  const symbol = "demo-symbol";
+  const dir = writeDist({ "assets/app.js": `const v = ${JSON.stringify(symbol)};\n` });
+  const open = scanDist(dir, { knownRoots: [], env: { FOO_TOKEN_V2: symbol } });
+  assert.ok(rules(open).includes("forbidden-value"));
+  assert.equal(rendered(open).includes(symbol), false);
+  const listed = scanDist(dir, {
+    knownRoots: [],
+    env: { FOO_TOKEN_V2: symbol },
+    allowlist: new Set([symbol]),
+  });
+  assert.deepEqual(listed, []);
+});
+
+test("allows a relayer lookalike only by an exact name entry", () => {
+  const dir = writeDist({
+    "assets/app.js": "const RELAYER_FETCH_TIMEOUT_MS = 1;\nconst RELAYER_OTHER_NAME = 2;\n",
+  });
+  const open = scanDist(dir, { knownRoots: [], env: {} });
+  assert.equal(open.filter((finding) => finding.rule === "relayer-env-key").length, 2);
+  const listed = scanDist(dir, {
+    knownRoots: [],
+    env: {},
+    allowlist: new Set(["RELAYER_FETCH_TIMEOUT_MS"]),
+  });
+  assert.equal(listed.filter((finding) => finding.rule === "relayer-env-key").length, 1);
+  assert.equal(rendered(listed).includes("RELAYER_FETCH_TIMEOUT_MS"), false);
+  assert.equal(rendered(listed).includes("RELAYER_OTHER_NAME"), false);
+  const keyDir = writeDist({ "assets/app.js": "const RELAYER_PRIVATE_KEY = 1;\n" });
+  const still = scanDist(keyDir, {
+    knownRoots: [],
+    env: {},
+    allowlist: new Set(["RELAYER_PRIVATE_KEY"]),
+  });
+  assert.ok(rules(still).includes("relayer-private-key"));
 });
 
 test("rejects a wildcard or an uncommented allowlist entry", () => {
@@ -454,7 +561,14 @@ test("rejects a wildcard or an uncommented allowlist entry", () => {
   assert.equal(bare.errors[0].rule, "allowlist");
   const reviewed = parseAllowlist(fs.readFileSync(path.join(here, "secretScanAllowlist.txt"), "utf8"));
   assert.deepEqual(reviewed.errors, []);
-  assert.equal(reviewed.values.size, 0);
+  assert.equal(reviewed.values.has(exampleValue("VITE_TOKEN_ADDRESS")), true);
+  assert.equal(reviewed.values.has(exampleValue("VITE_TOKEN_ADDRESS_ARB_SEPOLIA")), true);
+  const placeholder = parseAllowlist(
+    fs.readFileSync(path.join(here, "secretScanPlaceholderAllowlist.txt"), "utf8"),
+    "secretScanPlaceholderAllowlist.txt",
+  );
+  assert.deepEqual(placeholder.errors, []);
+  assert.equal(placeholder.values.size, 0);
   const body = hex64();
   const dir = writeDist({ "assets/app.js": `${JSON.stringify(body)}\n` });
   assert.equal(
@@ -469,18 +583,94 @@ test("rejects a wildcard or an uncommented allowlist entry", () => {
   );
 });
 
-test("skips unbundled test files in the source hex check", () => {
+test("scans test files with a placeholder allowlist", () => {
   const hidden = hex64();
   const visible = hex64();
   const root = tempDir();
   fs.writeFileSync(path.join(root, "plant.test.ts"), `export const X = "0x${hidden}";\n`);
-  fs.writeFileSync(path.join(root, "plant.test.tsx"), `export const Z = "0x${hidden}";\n`);
+  fs.writeFileSync(path.join(root, "plant.test.tsx"), `export const Z = "0x${visible}";\n`);
   fs.writeFileSync(path.join(root, "plant.ts"), `export const Y = "0x${visible}";\n`);
-  const findings = scanHexLiterals([root]);
-  assert.equal(findings.length, 1);
-  assert.equal(findings[0].rule, "hex64-literal");
-  assert.equal(formatFinding(findings[0]).includes(hidden), false);
-  assert.equal(formatFinding(findings[0]).includes(visible), false);
+  const open = scanHexLiterals([root], { placeholderAllowlist: new Set() });
+  assert.equal(open.length, 3);
+  assert.ok(open.every((finding) => finding.rule === "hex64-literal"));
+  const covered = scanHexLiterals([root], { placeholderAllowlist: new Set([hidden]) });
+  assert.equal(covered.length, 2);
+  assert.ok(covered.every((finding) => !finding.file.endsWith("plant.test.ts")));
+  assert.equal(covered.map((finding) => formatFinding(finding)).join("\n").includes(hidden), false);
+  assert.equal(covered.map((finding) => formatFinding(finding)).join("\n").includes(visible), false);
+});
+
+test("allowlist covers a public query key and an explorer tx link", () => {
+  const banner = "https://cdn.example.invalid/app?key=hero-banner-2026";
+  const txHash = `0x${"c".repeat(64)}`;
+  const tx = `https://explorer.example.invalid/tx/${txHash}`;
+  assert.equal(isKeyLikeRpc(banner), true);
+  assert.equal(isKeyLikeRpc(tx), true);
+  const dir = writeDist({
+    "assets/app.js": `${JSON.stringify(banner)}\n${JSON.stringify(tx)}\n`,
+  });
+  const open = scanDist(dir, { knownRoots: [], env: {} });
+  assert.equal(open.filter((finding) => finding.rule === "rpc-url").length, 2);
+  const listed = scanDist(dir, { knownRoots: [], env: {}, allowlist: new Set([banner, tx]) });
+  assert.equal(listed.some((finding) => finding.rule === "rpc-url"), false);
+  assert.equal(rendered(listed).includes("hero-banner-2026"), false);
+  assert.equal(rendered(listed).includes(txHash), false);
+});
+
+test("SIGTERM guard exits without reporting a pass", async () => {
+  const scriptUrl = pathToFileURL(path.join(here, "checkDistSecrets.mjs")).href;
+  const child = spawn(
+    process.execPath,
+    [
+      "--input-type=module",
+      "-e",
+      [
+        `import { registerSigtermGuard } from ${JSON.stringify(scriptUrl)};`,
+        "registerSigtermGuard();",
+        "process.stdout.write('ready\\n');",
+        "setInterval(() => {}, 1000);",
+      ].join("\n"),
+    ],
+    { stdio: ["ignore", "pipe", "pipe"] },
+  );
+  let stdout = "";
+  let stderr = "";
+  child.stdout.setEncoding("utf8");
+  child.stderr.setEncoding("utf8");
+  child.stdout.on("data", (chunk) => {
+    stdout += chunk;
+  });
+  child.stderr.on("data", (chunk) => {
+    stderr += chunk;
+  });
+  await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("ready timeout")), 5000);
+    const onData = () => {
+      if (!stdout.includes("ready")) return;
+      clearTimeout(timer);
+      child.stdout.off("data", onData);
+      resolve();
+    };
+    child.stdout.on("data", onData);
+    child.once("exit", () => {
+      clearTimeout(timer);
+      reject(new Error("exited before ready"));
+    });
+  });
+  child.kill("SIGTERM");
+  const code = await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      child.kill("SIGKILL");
+      reject(new Error("SIGTERM timeout"));
+    }, 5000);
+    child.once("exit", (status) => {
+      clearTimeout(timer);
+      resolve(status);
+    });
+  });
+  assert.equal(code, 143);
+  assert.equal(stdout.includes("passed"), false);
+  assert.match(stderr, /bundle secret check interrupted/);
 });
 
 test("follows an inside symlink and fails a link that leaves the root", () => {

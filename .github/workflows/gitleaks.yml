@@ -6,6 +6,7 @@ on:
     branches: [main]
   schedule:
     - cron: "17 6 * * 1"
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -73,7 +74,7 @@ jobs:
 
   gitleaks-history:
     name: gitleaks full history
-    if: github.event_name == 'schedule'
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -104,4 +105,4 @@ jobs:
       - name: Scan full history
         run: |
           set -euo pipefail
-          "$RUNNER_TEMP/gitleaks" detect --redact --no-banner --exit-code 1 --log-opts="--diff-merges=first-parent"
+          "$RUNNER_TEMP/gitleaks" detect --redact --no-banner --exit-code 1 --log-opts="--all --full-history --diff-merges=first-parent"
