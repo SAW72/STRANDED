@@ -4,15 +4,18 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-10-19",
   "compatibility_flags": ["nodejs_compat"],
+  // Logs stay on. Traces stay off so RPC URLs are not exported.
+  // A root head_sampling_rate of 0 would drop logs as well as traces.
   "observability": {
     "enabled": true,
-    "head_sampling_rate": 0,
     "logs": {
       "enabled": true,
+      "head_sampling_rate": 1,
       "invocation_logs": true
     },
     "traces": {
-      "enabled": false
+      "enabled": false,
+      "head_sampling_rate": 0
     }
   },
   // database_id is a placeholder. Replace it with the id printed by

@@ -94,10 +94,16 @@ async function walletPoints(request: Request, env: PointsBindings, path: string)
 }
 
 async function leaderboard(request: Request, env: PointsBindings): Promise<Response> {
+  if (!allowWalletRead(request)) throw new PointsError(429, "rate_limited");
   const board = await leaderboardTotals(env.DB);
-  return json(request, 200, {
-    rows: board.map((row) => ({ wallet: row.wallet, total: row.total })),
-  });
+  return json(
+    request,
+    200,
+    {
+      rows: board.map((row) => ({ wallet: row.wallet, total: row.total })),
+    },
+    WALLET_READ_CACHE,
+  );
 }
 
 function assertBodyCap(request: Request): void {

@@ -43,8 +43,8 @@ import { MAX_POINTS_PER_ROW, score } from "./rubric.mjs";
  * does not delete or rewrite ledger rows and does not rebuild the table.
  * schema.sql installs BEFORE INSERT and BEFORE UPDATE triggers that reject
  * bug_report, security, security_finding, and finding. Reads omit those
- * actions, so a wallet total, its categories, its entries, its rank, and
- * the leaderboard are sums over the same visible rows.
+ * actions, so a wallet total, its categories, its entries, and the
+ * leaderboard are sums over the same visible rows.
  */
 export const POINTS_ACTIONS = Object.freeze([
   "rescue_completed",
@@ -316,6 +316,7 @@ export function createLedgerStore(opts = {}) {
       return mapRow(byId.get(info.lastInsertRowid));
     } catch (err) {
       if (isDuplicateError(err)) throw fail("duplicate");
+      if (String(err && err.message ? err.message : "").includes("excluded_action")) throw fail("excluded_action");
       if (String(err?.code || "").includes("CONSTRAINT")) throw fail("invalid_ledger_row");
       throw err;
     }
@@ -372,13 +373,13 @@ export function createLedgerStore(opts = {}) {
     const rows = totals().wallets
       .filter((row) => row.total > 0)
       .sort((a, b) => b.total - a.total || (a.wallet < b.wallet ? -1 : a.wallet > b.wallet ? 1 : 0))
-      .map((row, index) => ({ rank: index + 1, wallet: row.wallet, total: row.total }));
+      .map((row) => ({ wallet: row.wallet, total: row.total }));
     return { rows };
   }
 
   /**
-   * One wallet's visible points. total, categories, entries, and rank all
-   * come from the rows byWallet() returns.
+   * One wallet's visible points. total, categories, and entries all come
+   * from the rows byWallet() returns.
    */
   function walletPoints(wallet) {
     assertOpen();
@@ -387,11 +388,9 @@ export function createLedgerStore(opts = {}) {
     const categories = categoriesFor(entries);
     let total = 0;
     for (const entry of entries) total = addPoints(total, entry.points);
-    const ranked = leaderboard().rows.find((row) => row.wallet === key);
     return {
       wallet: key,
       total,
-      rank: ranked ? ranked.rank : null,
       categories,
       entries,
     };

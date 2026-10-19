@@ -1,6 +1,8 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import { ledgerErrorCode } from "../src/errors";
+import { LEADERBOARD_LIMIT, leaderboardTotals, recordRescue } from "../src/ledger";
+import { WALLET_READ_LIMIT } from "../src/readLimit";
 import {
   OTHER_RELAYER,
   OTHER_USER,
@@ -70,6 +72,7 @@ describe.sequential("recorded activity", () => {
         { wallet: RELAYER, total: 50 },
       ],
     });
+    expect(board.headers.get("cache-control")).toBe("public, max-age=30");
     expect(JSON.stringify(boardBody)).not.toContain('"rank"');
   });
 
@@ -125,5 +128,52 @@ describe.sequential("recorded activity", () => {
     expect(ledgerErrorCode(updated)).toBe("append-only");
     expect(ledgerErrorCode(deleted)).toBe("append-only");
     expect(await ledgerCount()).toEqual(before);
+  });
+
+  it("heals a partial rescue in one batch", async () => {
+    const hash = txHash("H");
+    await env.DB.prepare(
+      `INSERT INTO points_ledger (wallet, action, points, tx_hash, metadata, created_at)
+       VALUES (?, 'rescue_completed', 100, ?, ?, ?)`,
+    )
+      .bind(USER, hash, JSON.stringify({ chainId: 84532 }), "2026-10-19T00:00:00.000Z")
+      .run();
+    const healed = await recordRescue(env.DB, {
+      user: USER,
+      relayer: RELAYER,
+      txHash: hash,
+      chainId: 84532,
+    });
+    expect(healed.duplicate).toBe(false);
+    const rows = await env.DB.prepare(`SELECT action FROM points_ledger WHERE tx_hash = ? ORDER BY action`)
+      .bind(hash)
+      .all<{ action: string }>();
+    expect((rows.results || []).map((row) => row.action)).toEqual(["relayer_job", "rescue_completed"]);
+    const again = await recordRescue(env.DB, {
+      user: USER,
+      relayer: RELAYER,
+      txHash: hash,
+      chainId: 84532,
+    });
+    expect(again.duplicate).toBe(true);
+  });
+
+  it("limits and caches the leaderboard", async () => {
+    const capped = await leaderboardTotals(env.DB, 1);
+    const full = await leaderboardTotals(env.DB, LEADERBOARD_LIMIT);
+    expect(capped.length).toBe(Math.min(1, full.length));
+    if (full.length > 0) expect(capped[0]).toEqual(full[0]);
+    for (let i = 1; i < full.length; i += 1) {
+      const prev = full[i - 1];
+      const row = full[i];
+      expect(prev.total > row.total || (prev.total === row.total && prev.wallet <= row.wallet)).toBe(true);
+    }
+    let last = await getPoints(secret, "/points/leaderboard");
+    expect(last.headers.get("cache-control")).toBe("public, max-age=30");
+    for (let i = 0; i < WALLET_READ_LIMIT; i += 1) {
+      last = await getPoints(secret, "/points/leaderboard");
+    }
+    expect(last.status).toBe(429);
+    expect(await last.json()).toEqual({ ok: false, error: "rate_limited" });
   });
 });

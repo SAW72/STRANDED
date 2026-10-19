@@ -137,15 +137,12 @@ describe("points ledger", () => {
       assert.notEqual(first, syntheticTxKey("wallet_session", ["2026-W42", USER]));
       assert.match(first, /^off:[0-9a-f]{64}$/);
 
-      const row = store.appendScored("wallet_session", { wallet: USER, at: "2999-01-01T00:00:00.000Z" });
-      assert.match(row.txHash, /^off:[0-9a-f]{64}$/);
-      assert.notEqual(row.txHash, first);
       assert.throws(
-        () => store.appendScored("wallet_session", { wallet: USER, at: "1970-01-01T00:00:00.000Z" }),
-        rejection("duplicate"),
+        () => store.appendScored("wallet_session", { wallet: USER, at: "2999-01-01T00:00:00.000Z" }),
+        /excluded_action/,
       );
-      assert.equal(store.totals(USER).total, 10);
-      assert.equal(store.byWallet(USER).length, 1);
+      assert.equal(store.totals(USER).total, 0);
+      assert.equal(store.byWallet(USER).length, 0);
     });
   });
 
@@ -401,6 +398,10 @@ describe("points ledger", () => {
       const actionOf = db.prepare("SELECT action FROM points_ledger WHERE tx_hash = ?");
       POINTS_ACTIONS.forEach((action, index) => {
         const txHash = txFor(index + 1);
+        if (action === "wallet_session") {
+          assert.throws(() => insert.run(USER, action, txHash), /excluded_action/);
+          return;
+        }
         insert.run(USER, action, txHash);
         assert.equal(actionOf.get(txHash).action, action);
       });
@@ -874,17 +875,18 @@ describe("points ledger", () => {
       assert.equal(view.entries[0].action, "rescue_completed");
       assert.equal(view.entries[0].points, 100);
       assert.equal(view.categories.length, 1);
-      assert.equal(view.rank, 2);
+      assert.equal(Object.hasOwn(view, "rank"), false);
       const board = store.leaderboard();
       assert.deepEqual(
-        board.rows.map((row) => ({ wallet: row.wallet, total: row.total, rank: row.rank })),
+        board.rows.map((row) => ({ wallet: row.wallet, total: row.total })),
         [
-          { wallet: OTHER, total: 230, rank: 1 },
-          { wallet: USER, total: 100, rank: 2 },
+          { wallet: OTHER, total: 230 },
+          { wallet: USER, total: 100 },
         ],
       );
+      assert.equal(board.rows.some((row) => Object.hasOwn(row, "rank")), false);
       assert.equal(board.rows.some((row) => row.total === 600), false);
-      assert.equal(store.walletPoints(OTHER).rank, 1);
+      assert.equal(Object.hasOwn(store.walletPoints(OTHER), "rank"), false);
       assert.equal(store.totals().total, 330);
     } finally {
       store.close();
@@ -918,7 +920,7 @@ describe("points ledger", () => {
     const again = open();
     try {
       assert.equal(again.walletPoints(USER).total, 100);
-      assert.equal(again.walletPoints(USER).rank, 2);
+      assert.equal(Object.hasOwn(again.walletPoints(USER), "rank"), false);
       assert.equal(again.byWallet(USER).length, 1);
     } finally {
       again.close();

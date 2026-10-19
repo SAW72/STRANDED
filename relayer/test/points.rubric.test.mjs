@@ -146,18 +146,17 @@ describe("points rubric", () => {
     const dir = await mkdtemp(join(tmpdir(), "points-week-"));
     const store = createLedgerStore({ dataDir: dir, now: () => clock });
     try {
-      const row = store.appendScored("wallet_session", { wallet: USER, at: "2999-01-01T00:00:00.000Z" });
-      assert.equal(row.txHash, from2999.txHash);
       assert.throws(
-        () => store.appendScored("wallet_session", { wallet: USER, at: "1970-01-01T00:00:00.000Z" }),
-        rejection("duplicate"),
+        () => store.appendScored("wallet_session", { wallet: USER, at: "2999-01-01T00:00:00.000Z" }),
+        /excluded_action/,
       );
-      store.appendScored("wallet_session", { wallet: OTHER, at: "2999-06-01T00:00:00.000Z" });
-      clock = Date.parse("2026-10-19T00:00:00.000Z");
-      store.appendScored("wallet_session", { wallet: USER, at: "1970-01-01T00:00:00.000Z" });
-      assert.equal(store.totals(USER).total, 20);
-      assert.equal(store.byWallet(USER).length, 2);
-      assert.equal(store.totals(OTHER).total, 10);
+      assert.throws(
+        () => store.appendScored("wallet_session", { wallet: OTHER, at: "2999-06-01T00:00:00.000Z" }),
+        /excluded_action/,
+      );
+      assert.equal(store.totals(USER).total, 0);
+      assert.equal(store.byWallet(USER).length, 0);
+      assert.equal(store.totals(OTHER).total, 0);
     } finally {
       store.close();
     }

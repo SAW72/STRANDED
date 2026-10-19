@@ -36,11 +36,22 @@ export function parseTokenAllowlist(raw: string | undefined): Map<number, Set<st
 }
 
 function addToken(map: Map<number, Set<string>>, chainText: string, addressText: string): void {
-  if (!/^[0-9]+$/.test(chainText)) return;
-  const chainId = Number(chainText);
-  if (!Number.isSafeInteger(chainId) || chainId <= 0) return;
+  const chain = chainText.trim();
   const address = addressText.trim().toLowerCase();
-  if (!ADDRESS_RE.test(address)) return;
+  if (!chain && !address) return;
+  if (!/^[0-9]+$/.test(chain)) {
+    console.log(JSON.stringify({ event: "points_allowlist_ignored" }));
+    return;
+  }
+  const chainId = Number(chain);
+  if (!Number.isSafeInteger(chainId) || chainId <= 0) {
+    console.log(JSON.stringify({ event: "points_allowlist_ignored" }));
+    return;
+  }
+  if (!ADDRESS_RE.test(address)) {
+    if (address) console.log(JSON.stringify({ event: "points_allowlist_ignored" }));
+    return;
+  }
   let set = map.get(chainId);
   if (!set) {
     set = new Set();

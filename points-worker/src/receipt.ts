@@ -22,9 +22,16 @@ export const DEFAULT_MIN_CONFIRMATIONS = 2;
 
 export function minConfirmations(raw: string | undefined): number {
   const text = String(raw ?? "").trim();
-  if (!/^[1-9][0-9]{0,2}$/.test(text)) return DEFAULT_MIN_CONFIRMATIONS;
+  if (!text) return DEFAULT_MIN_CONFIRMATIONS;
+  if (!/^[1-9][0-9]{0,2}$/.test(text)) {
+    console.log(JSON.stringify({ event: "points_confirmations_invalid" }));
+    return DEFAULT_MIN_CONFIRMATIONS;
+  }
   const value = Number(text);
-  if (value < 1 || value > 128) return DEFAULT_MIN_CONFIRMATIONS;
+  if (value < 1 || value > 128) {
+    console.log(JSON.stringify({ event: "points_confirmations_invalid" }));
+    return DEFAULT_MIN_CONFIRMATIONS;
+  }
   return value;
 }
 

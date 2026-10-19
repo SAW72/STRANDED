@@ -2,8 +2,9 @@ import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 import worker from "../src/index";
 import { ledgerErrorCode } from "../src/errors";
-import { WALLET_READ_LIMIT } from "../src/readLimit";
-import { rpcClient } from "../src/receipt";
+import { allowWalletRead, WALLET_READ_LIMIT, WALLET_READ_MAX_KEYS, walletReadBucketCount } from "../src/readLimit";
+import { minConfirmations, rpcClient } from "../src/receipt";
+import { parseTokenAllowlist } from "../src/tokenAllowlist";
 import {
   EMPTY,
   TOKEN_IN,
@@ -311,6 +312,75 @@ describe.sequential("ingest hardening", () => {
     const broken = await getPoints(secret, "/points/%E0%A4%A");
     expect(broken.status).toBe(400);
     expect(await broken.json()).toEqual({ ok: false, error: "invalid_address" });
+  });
+
+  it("logs an invalid confirmation depth and still waits for 2", async () => {
+    const lines: string[] = [];
+    const original = console.log;
+    console.log = (line?: unknown) => {
+      lines.push(String(line));
+    };
+    try {
+      expect(minConfirmations(undefined)).toBe(2);
+      expect(minConfirmations("")).toBe(2);
+      expect(lines).toEqual([]);
+      expect(minConfirmations("0")).toBe(2);
+      expect(minConfirmations("nope")).toBe(2);
+      expect(minConfirmations("129")).toBe(2);
+      expect(minConfirmations("16")).toBe(16);
+    } finally {
+      console.log = original;
+    }
+    expect(lines).toHaveLength(3);
+    expect(lines.every((line) => line.includes("points_confirmations_invalid"))).toBe(true);
+
+    const shallow = bindings(secret);
+    shallow.POINTS_MIN_CONFIRMATIONS = "0";
+    installReceipt(rescuedReceipt({ chainId: 84532, blockNumber: "0x5" }), { head: "0x5" });
+    const waiting = await postSigned(shallow, { chainId: 84532, txHash: txHash("z") });
+    expect(waiting.status).toBe(425);
+    expect(await waiting.json()).toEqual({ ok: false, error: "awaiting_confirmations" });
+  });
+
+  it("logs a bad allowlist entry and keeps a valid address", () => {
+    const lines: string[] = [];
+    const original = console.log;
+    console.log = (line?: unknown) => {
+      lines.push(String(line));
+    };
+    try {
+      const map = parseTokenAllowlist(`84532:${TOKEN_IN},not-an-address;nope:${TOKEN_IN}`);
+      expect(map?.get(84532)?.has(TOKEN_IN)).toBe(true);
+      expect(parseTokenAllowlist(undefined)).toBeNull();
+    } finally {
+      console.log = original;
+    }
+    expect(lines.some((line) => line.includes("points_allowlist_ignored"))).toBe(true);
+    expect(lines.some((line) => line.includes("not-an-address"))).toBe(false);
+  });
+
+  it("evicts expired read-limit keys and stays bounded", () => {
+    const now = 1_000_000;
+    for (let i = 0; i < WALLET_READ_MAX_KEYS; i += 1) {
+      const request = new Request("https://points.invalid/points/leaderboard", {
+        headers: { "cf-connecting-ip": `old-${i}` },
+      });
+      expect(allowWalletRead(request, now)).toBe(true);
+    }
+    expect(walletReadBucketCount()).toBe(WALLET_READ_MAX_KEYS);
+    const later = new Request("https://points.invalid/points/leaderboard", {
+      headers: { "cf-connecting-ip": "fresh" },
+    });
+    expect(allowWalletRead(later, now + 60_000)).toBe(true);
+    expect(walletReadBucketCount()).toBe(1);
+    const freshNow = now + 120_000;
+    for (let i = 0; i < WALLET_READ_MAX_KEYS + 25; i += 1) {
+      const request = new Request("https://points.invalid/points/leaderboard", {
+        headers: { "cf-connecting-ip": `live-${i}` },
+      });
+      allowWalletRead(request, freshNow);
+    }
+    expect(walletReadBucketCount()).toBeLessThanOrEqual(WALLET_READ_MAX_KEYS);
   });
 
   it("stops wallet reads after the per-caller cap", async () => {

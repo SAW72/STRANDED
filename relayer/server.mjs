@@ -17,7 +17,7 @@ import { createKillSwitch, parseEnvFlag } from "./killSwitch.mjs";
 import { createNonceStore } from "./nonceStore.mjs";
 import { createBuildQuote, encodeSwapData } from "./quote.mjs";
 import { rescueAbi } from "./rescueAbi.mjs";
-import { schedulePointsNotify, schedulePointsRetry } from "./points/notify.mjs";
+import { pointsMinConfirmations, schedulePointsNotify, schedulePointsRetry } from "./points/notify.mjs";
 import { createRescueLog, orderLogSummary } from "./rescueLog.mjs";
 import { createRescueLimiter, parseRescueLimitConfig } from "./rescueLimit.mjs";
 import { DEFAULT_BASE_DELAY_MS, DEFAULT_MAX_ATTEMPTS, withBroadcastRetry } from "./retry.mjs";
@@ -306,8 +306,8 @@ const server = createRelayerApp({
 function confirmPointsReceipt(hash) {
   return publicClient.waitForTransactionReceipt({
     hash,
-    confirmations: 1,
-    timeout: 120_000,
+    confirmations: pointsMinConfirmations(),
+    timeout: 20_000,
   });
 }
 

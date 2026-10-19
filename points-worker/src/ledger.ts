@@ -96,7 +96,7 @@ export async function recordRescue(
     const have = new Set((existing.results || []).map((row) => row.action));
     const missing = rows.filter((row) => !have.has(row.action));
     if (missing.length === 0) return { duplicate: true };
-    for (const row of missing) await insertActivity(db, row);
+    await db.batch([db.prepare("PRAGMA recursive_triggers = ON"), ...missing.map((row) => insertStatement(db, row))]);
     return { duplicate: false };
   }
 }
@@ -115,9 +115,13 @@ export async function rowsForWallet(db: D1Database, wallet: string): Promise<Led
   return result.results || [];
 }
 
+export const LEADERBOARD_LIMIT = 100;
+
 export async function leaderboardTotals(
   db: D1Database,
+  limit = LEADERBOARD_LIMIT,
 ): Promise<Array<{ wallet: string; total: number }>> {
+  const cap = Number.isInteger(limit) && limit > 0 && limit <= LEADERBOARD_LIMIT ? limit : LEADERBOARD_LIMIT;
   const result = await db
     .prepare(
       `SELECT wallet, SUM(points) AS total
@@ -125,7 +129,8 @@ export async function leaderboardTotals(
        WHERE action NOT IN (${HIDDEN_SQL})
        GROUP BY wallet
        HAVING SUM(points) > 0
-       ORDER BY SUM(points) DESC, wallet ASC`,
+       ORDER BY SUM(points) DESC, wallet ASC
+       LIMIT ${cap}`,
     )
     .all<{ wallet: string; total: number }>();
   return (result.results || []).map((row) => ({ wallet: row.wallet, total: Number(row.total) }));
