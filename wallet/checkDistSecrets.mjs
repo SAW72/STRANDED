@@ -13,9 +13,10 @@
  *   A 0x plus 40 hex shape is not an exemption.
  * - rpc-url: provider-style http(s) or ws(s) URLs with a key-like path, query, or userinfo.
  *   An exact allowlist entry skips that URL.
- * - mnemonic: a 12, 15, 18, 21, or 24-word BIP39 English phrase, including newline-joined
- *   phrases and word arrays.
- * - jwt: a bare three-part JWT.
+ * - mnemonic: a 12, 15, 18, 21, or 24-word BIP39 English phrase with a valid checksum,
+ *   including a sliding window inside a longer run. Newlines, repeated spaces, title case,
+ *   and quoted arrays count. Approved separators are whitespace, quotes, commas, and brackets.
+ * - jwt: a bare three-part JWT, including parts joined by a dot in source.
  * - hex64: a standalone 64-hex value in dist that is not a repeated nibble, not an exact
  *   allowlist entry, and not already present under node_modules.
  * - hex64-literal: the same shape committed under client source, shared/, or tests.
@@ -27,6 +28,7 @@
  *
  * Deliberate obfuscation is out of scope. See DEPLOY.md.
  */
+import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
@@ -42,6 +44,7 @@ const PHRASE_LENGTHS = new Set([12, 15, 18, 21, 24]);
 const HEX64 = /(?<![A-Za-z0-9])(?:0x)?([0-9a-fA-F]{64})(?![A-Za-z0-9])/gi;
 const RELAYER_NAME = /(?<![A-Za-z0-9_])RELAYER_[A-Z0-9_]+(?![A-Za-z0-9_])/g;
 const JWT = /(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{8,}(?![A-Za-z0-9_-])/g;
+const JWT_DOT_JOIN = /eyJ[A-Za-z0-9_-]{10,}(?:["']\s*\+\s*["']\.["']\s*\+\s*["']|\.)[A-Za-z0-9_-]{10,}(?:["']\s*\+\s*["']\.["']\s*\+\s*["']|\.)[A-Za-z0-9_-]{8,}/g;
 const SECRET_NAME = /(?:SECRET|PRIVATE|(?:^|_)KEY$|(?:^|_)PK$|PASSWD|PASSWORD|CREDENTIAL|API_KEY|APIKEY|MNEMONIC|SEED|PHRASE|TOKEN)/;
 const ALWAYS_NAMES = ["RELAYER_PRIVATE_KEY", "ADMIN_SECRET"];
 const QUERY_KEY = /^(?:api[_-]?key|apikey|key|access[_-]?key|dkey|token)$/i;
@@ -77,11 +80,40 @@ export function isKeyLikeRpc(value) {
   }
   if (!/^(?:https?|wss?):$/.test(url.protocol)) return false;
   if (url.password) return true;
+  if (url.username.length >= 8) return true;
   for (const [key, val] of url.searchParams) {
     if (QUERY_KEY.test(key) && String(val).length >= 12) return true;
   }
+  const ankrHost = url.hostname.split(".").includes("ankr");
   for (const segment of url.pathname.split("/")) {
-    if (segment && isKeySegment(segment)) return true;
+    if (!segment) continue;
+    if (isKeySegment(segment)) return true;
+    if (ankrHost && isShortAnkrKey(segment)) return true;
+  }
+  return fragmentHasKey(url.hash);
+}
+
+function isShortAnkrKey(segment) {
+  return segment.length >= 8 && segment.length < 16 && /[0-9]/.test(segment) && /^[A-Za-z0-9]+$/.test(segment);
+}
+
+function fragmentHasKey(hash) {
+  const body = hash.startsWith("#") ? hash.slice(1) : hash;
+  if (!body) return false;
+  const params = new URLSearchParams(body);
+  for (const [key, val] of params) {
+    if (QUERY_KEY.test(key) && String(val).length >= 12) return true;
+    if (isKeySegment(val) || isKeySegment(key)) return true;
+  }
+  for (const segment of body.split(/[/?&]/)) {
+    const bare = segment.includes("=") ? segment.slice(segment.indexOf("=") + 1) : segment;
+    let decoded = bare;
+    try {
+      decoded = decodeURIComponent(bare);
+    } catch {
+      decoded = bare;
+    }
+    if (isKeySegment(decoded)) return true;
   }
   return false;
 }
@@ -340,40 +372,72 @@ function findWindow(text, value, hex) {
   return -1;
 }
 
-let bip39;
+let bip39Index;
 
-function bip39Words() {
-  if (bip39) return bip39;
+function bip39Indexes() {
+  if (bip39Index) return bip39Index;
   const words = fs.readFileSync(WORDLIST_FILE, "utf8").trim().split(/\s+/);
   if (words.length !== 2048) throw new Error("BIP39 english wordlist must contain 2048 words");
-  bip39 = new Set(words);
-  return bip39;
+  bip39Index = new Map(words.map((word, index) => [word, index]));
+  return bip39Index;
+}
+
+function phraseChecksumOk(indexes) {
+  const checksumBits = indexes.length / 3;
+  if (!Number.isInteger(checksumBits)) return false;
+  let bits = "";
+  for (const index of indexes) bits += index.toString(2).padStart(11, "0");
+  const entropyBits = bits.slice(0, bits.length - checksumBits);
+  const checksum = bits.slice(bits.length - checksumBits);
+  if (entropyBits.length % 8 !== 0) return false;
+  const entropy = Buffer.alloc(entropyBits.length / 8);
+  for (let i = 0; i < entropy.length; i += 1) {
+    entropy[i] = Number.parseInt(entropyBits.slice(i * 8, i * 8 + 8), 2);
+  }
+  const hash = createHash("sha256").update(entropy).digest();
+  let hashBits = "";
+  for (const byte of hash) hashBits += byte.toString(2).padStart(8, "0");
+  return hashBits.startsWith(checksum);
+}
+
+function mnemonicWindow(parts) {
+  if (parts.length < 12) return -1;
+  for (const size of PHRASE_LENGTHS) {
+    if (parts.length < size) continue;
+    for (let i = 0; i + size <= parts.length; i += 1) {
+      const window = parts.slice(i, i + size);
+      if (phraseChecksumOk(window.map((part) => part.wordIndex))) return window[0].at;
+    }
+  }
+  return -1;
 }
 
 function mnemonicIndex(text) {
-  const words = bip39Words();
-  const re = /(?<![a-z])[a-z]{3,8}(?![a-z])/g;
+  const indexes = bip39Indexes();
+  const re = /(?<![A-Za-z])[A-Za-z]{3,8}(?![A-Za-z])/g;
   const gapOk = /^[\s,\[\]"'`\\]+$/;
-  let parts = [];
-  let start = -1;
+  const parts = [];
   let end = -1;
-  const finish = () => {
-    if (start < 0 || !PHRASE_LENGTHS.has(parts.length)) return -1;
-    if (!parts.every((word) => words.has(word))) return -1;
-    return start;
+  const flush = () => {
+    const hit = mnemonicWindow(parts);
+    parts.length = 0;
+    return hit;
   };
   for (const match of text.matchAll(re)) {
     if (end >= 0 && !gapOk.test(text.slice(end, match.index))) {
-      const hit = finish();
+      const hit = flush();
       if (hit >= 0) return hit;
-      parts = [];
-      start = -1;
     }
-    if (start < 0) start = match.index;
-    parts.push(match[0]);
     end = match.index + match[0].length;
+    const wordIndex = indexes.get(match[0].toLowerCase());
+    if (wordIndex === undefined) {
+      const hit = flush();
+      if (hit >= 0) return hit;
+      continue;
+    }
+    parts.push({ wordIndex, at: match.index });
   }
-  const hit = finish();
+  const hit = flush();
   return hit >= 0 ? hit : -1;
 }
 
@@ -411,9 +475,11 @@ function contentFindings(file, text, options, secrets) {
   const phraseAt = mnemonicIndex(text);
   if (phraseAt >= 0) pushFinding(findings, seen, at(file, text, phraseAt, "mnemonic"));
 
-  JWT.lastIndex = 0;
-  for (const match of text.matchAll(JWT)) {
-    pushFinding(findings, seen, at(file, text, match.index, "jwt"));
+  for (const re of [JWT, JWT_DOT_JOIN]) {
+    re.lastIndex = 0;
+    for (const match of text.matchAll(re)) {
+      pushFinding(findings, seen, at(file, text, match.index, "jwt"));
+    }
   }
 
   for (const secret of secrets) {
@@ -530,14 +596,16 @@ export function scanHexText(file, text, options = {}) {
         rule: "hex64-literal",
       });
     }
-    JWT.lastIndex = 0;
-    for (const match of lineText.matchAll(JWT)) {
-      pushFinding(findings, seen, {
-        file,
-        line: i + 1,
-        column: match.index + 1,
-        rule: "jwt",
-      });
+    for (const re of [JWT, JWT_DOT_JOIN]) {
+      re.lastIndex = 0;
+      for (const match of lineText.matchAll(re)) {
+        pushFinding(findings, seen, {
+          file,
+          line: i + 1,
+          column: match.index + 1,
+          rule: "jwt",
+        });
+      }
     }
   }
   const phraseAt = mnemonicIndex(text);

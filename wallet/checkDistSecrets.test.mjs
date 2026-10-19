@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -54,6 +54,22 @@ function rules(findings) {
 
 function rendered(findings) {
   return findings.map((finding) => formatFinding(finding)).join("\n");
+}
+
+function bip39Phrase(count) {
+  const words = fs.readFileSync(path.join(here, "bip39-english.txt"), "utf8").trim().split(/\s+/);
+  const checksumBits = count / 3;
+  const entropy = randomBytes((count * 11 - checksumBits) / 8);
+  const hash = createHash("sha256").update(entropy).digest();
+  let bits = "";
+  for (const byte of entropy) bits += byte.toString(2).padStart(8, "0");
+  bits += [...hash].map((byte) => byte.toString(2).padStart(8, "0")).join("");
+  bits = bits.slice(0, count * 11);
+  const phrase = [];
+  for (let i = 0; i < count; i += 1) {
+    phrase.push(words[Number.parseInt(bits.slice(i * 11, i * 11 + 11), 2)]);
+  }
+  return phrase;
 }
 
 function exampleValue(name) {
@@ -451,51 +467,106 @@ test("a keyed url does not fail when only its public host is already bundled", (
   assert.equal(rendered(findings).includes(key), false);
 });
 
-test("flags a bip39 phrase and a bare jwt without printing them", () => {
-  const phrase = `${"abandon ".repeat(11)}abandon`;
-  const fifteen = `${"abandon ".repeat(14)}abandon`;
-  const eighteen = `${"zoo ".repeat(17)}zoo`;
-  const twentyOne = `${"zoo ".repeat(20)}zoo`;
-  const longer = `${"zoo ".repeat(23)}zoo`;
-  const newlines = `${"abandon\n".repeat(14)}abandon`;
-  const wordArray = `[${'"abandon",'.repeat(17)}"abandon"]`;
-  const tooShort = `${"abandon ".repeat(10)}abandon`;
-  const uneven = `${"abandon ".repeat(15)}abandon`;
+function assertMnemonic(body) {
+  const dir = writeDist({ "assets/app.js": `${body}\n` });
+  const findings = scanDist(dir, { knownRoots: [], env: {} });
+  assert.equal(findings.some((finding) => finding.rule === "mnemonic"), true);
+  assert.equal(rendered(findings).includes(body), false);
+}
+
+test("flags a checksummed phrase and a bare jwt without printing them", () => {
+  for (const count of [12, 15, 18, 21, 24]) {
+    const words = bip39Phrase(count);
+    assertMnemonic(words.join(" "));
+    assertMnemonic(words.join("\n"));
+    assertMnemonic(words.join("  "));
+    assertMnemonic(words.map((word) => word[0].toUpperCase() + word.slice(1)).join(" "));
+    assertMnemonic(`[${words.map((word) => JSON.stringify(word)).join(",")}]`);
+  }
   const header = Buffer.from('{"alg":"none"}').toString("base64url");
   const payload = Buffer.from('{"sub":"demo"}').toString("base64url");
   const sig = Buffer.from("not-a-real-signature").toString("base64url");
   const jwt = `${header}.${payload}.${sig}`;
-  const prose = "reports and security findings are not points actions and are not shown";
-  for (const body of [phrase, fifteen, eighteen, twentyOne, longer, newlines, wordArray]) {
-    const dir = writeDist({ "assets/app.js": `${body}\n` });
-    const findings = scanDist(dir, { knownRoots: [], env: {} });
-    assert.equal(findings.some((finding) => finding.rule === "mnemonic"), true);
-    const text = rendered(findings);
-    assert.equal(text.includes("abandon"), false);
-    assert.equal(text.includes("zoo"), false);
-  }
+  const prose = "you can enjoy any coffee day before work again only during summer";
+  const older = "reports and security findings are not points actions and are not shown";
   const jwtDir = writeDist({
-    "assets/app.js": `${JSON.stringify(jwt)}\n${JSON.stringify(prose)}\n`,
+    "assets/app.js": `${JSON.stringify(jwt)}\n${prose}\n${older}\n`,
   });
   const jwtFindings = scanDist(jwtDir, { knownRoots: [], env: {} });
   assert.ok(rules(jwtFindings).includes("jwt"));
   assert.equal(rules(jwtFindings).includes("mnemonic"), false);
   const jwtText = rendered(jwtFindings);
   assert.equal(jwtText.includes(jwt), false);
-  assert.equal(jwtText.includes(prose), false);
-  const missed = writeDist({
-    "assets/app.js": `${JSON.stringify(tooShort)}\n${JSON.stringify(uneven)}\n${JSON.stringify(prose)}\n`,
-  });
-  assert.equal(scanDist(missed, { knownRoots: [], env: {} }).some((finding) => finding.rule === "mnemonic"), false);
-  const source = scanHexText("plant.ts", `${newlines}\n`);
-  assert.equal(source.some((finding) => finding.rule === "mnemonic"), true);
-  assert.equal(formatFinding(source[0]).includes("abandon"), false);
+  assert.equal(jwtText.includes(header), false);
+  for (const body of [
+    `${"abandon ".repeat(11)}abandon`,
+    `${"abandon ".repeat(15)}abandon`,
+    prose,
+    older,
+  ]) {
+    const dir = writeDist({ "assets/app.js": `${body}\n` });
+    assert.equal(scanDist(dir, { knownRoots: [], env: {} }).some((finding) => finding.rule === "mnemonic"), false);
+  }
   const switches = Array.from({ length: 24 }, (_, index) => `case ${index}:`).join("");
   const switched = writeDist({ "assets/app.js": switches });
   assert.equal(
     scanDist(switched, { knownRoots: [], env: {} }).some((finding) => finding.rule === "mnemonic"),
     false,
   );
+});
+
+test("finds a checksummed phrase inside a longer word run and an inlined array", () => {
+  const words = bip39Phrase(12);
+  const wrapped = ["you", ...words, "zoo"].join(" ");
+  assertMnemonic(wrapped);
+  const array = JSON.stringify(words);
+  const dir = writeDist({ "assets/app.js": `const list = ${array};\n` });
+  const findings = scanDist(dir, { knownRoots: [], env: { VITE_MNEMONIC: array } });
+  assert.ok(rules(findings).includes("mnemonic"));
+  assert.equal(rendered(findings).includes(words[0]), false);
+  const source = scanHexText("plant.ts", `${words.join("\n")}\n`);
+  assert.equal(source.some((finding) => finding.rule === "mnemonic"), true);
+  assert.equal(formatFinding(source[0]).includes(words[0]), false);
+});
+
+test("flags a jwt whose parts are joined at the dots", () => {
+  const header = Buffer.from('{"alg":"none"}').toString("base64url");
+  const payload = Buffer.from('{"sub":"demo"}').toString("base64url");
+  const sig = Buffer.from("not-a-real-signature").toString("base64url");
+  const joined = `${JSON.stringify(header)} + "." + ${JSON.stringify(payload)} + "." + ${JSON.stringify(sig)}`;
+  const dir = writeDist({ "assets/app.js": `const value = ${joined};\n` });
+  const findings = scanDist(dir, { knownRoots: [], env: {} });
+  assert.ok(rules(findings).includes("jwt"));
+  const text = rendered(findings);
+  assert.equal(text.includes(header), false);
+  assert.equal(text.includes(payload), false);
+  assert.equal(text.includes(sig), false);
+});
+
+test("flags username-only userinfo, a short ankr key, and a fragment key", () => {
+  const user = randomBytes(6).toString("hex");
+  let ankrKey = randomBytes(5).toString("hex");
+  if (!/[0-9]/.test(ankrKey)) ankrKey = `a1${ankrKey.slice(2)}`;
+  const fragmentKey = randomBytes(16).toString("hex");
+  const userUrl = `https://${user}@rpc.example.invalid/rpc`;
+  const ankrUrl = `https://rpc.ankr.example.invalid/eth/${ankrKey}`;
+  const fragmentUrl = `https://rpc.example.invalid/eth#${fragmentKey}`;
+  const queryFragment = `https://rpc.example.test/eth#dkey=${fragmentKey}`;
+  assert.equal(isKeyLikeRpc(userUrl), true);
+  assert.equal(isKeyLikeRpc("https://ab@rpc.example.invalid/rpc"), false);
+  assert.equal(isKeyLikeRpc(ankrUrl), true);
+  assert.equal(isKeyLikeRpc("https://rpc.ankr.example.invalid/eth"), false);
+  assert.equal(isKeyLikeRpc(fragmentUrl), true);
+  assert.equal(isKeyLikeRpc(queryFragment), true);
+  const dir = writeDist({
+    "assets/app.js": [userUrl, ankrUrl, fragmentUrl, queryFragment].map((item) => JSON.stringify(item)).join("\n"),
+  });
+  const findings = scanDist(dir, { knownRoots: [], env: {} });
+  assert.equal(findings.filter((finding) => finding.rule === "rpc-url").length, 4);
+  const text = rendered(findings);
+  assert.equal(text.includes(user), false);
+  assert.equal(text.includes(ankrKey), false);
+  assert.equal(text.includes(fragmentKey), false);
 });
 
 test("an unlisted address fails and a listed address passes", () => {
