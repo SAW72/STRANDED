@@ -134,6 +134,33 @@ function exampleValue(name) {
   return line.slice(name.length + 1).trim();
 }
 
+function digestHex(label) {
+  return createHash("sha256").update(label).digest("hex");
+}
+
+function digitRun(label, length) {
+  const raw = digestHex(label).replace(/[a-f]/g, "");
+  return `${raw}7654321987654321`.slice(0, length);
+}
+
+function hexLetterRun(label, length) {
+  return digestHex(label).replace(/[0-9]/g, "a").slice(0, length);
+}
+
+function mixedUser(label) {
+  return `g${digestHex(label).slice(0, 6)}Z9`;
+}
+
+function hexUuid(label) {
+  const raw = digestHex(label);
+  return `${raw.slice(0, 8)}-${raw.slice(8, 12)}-${raw.slice(12, 16)}-${raw.slice(16, 20)}-${raw.slice(20, 32)}`;
+}
+
+function hexHyphen(label) {
+  const raw = digestHex(label);
+  return `${raw.slice(0, 4)}-${raw.slice(4, 8)}-${raw.slice(8, 14)}`;
+}
+
 test("passes a bundle that only mentions public VITE_ relayer names", () => {
   const dir = writeDist({
     "index.html": "<!doctype html>",
@@ -1186,4 +1213,170 @@ test("follows an inside symlink and fails a link that leaves the root", () => {
   assert.equal(text.includes("RELAYER_BASE_URL"), false);
   assert.match(text, /assets\/out\.js:1:1 symlink/);
   assert.match(text, /assets\/broken\.js:1:1 symlink/);
+});
+
+test("parseAllowlist rejects a uuid or hex-only hyphenated apikey", () => {
+  for (const value of [hexUuid("FAKE-K4-UUID"), hexHyphen("FAKE-K4-HYPHEN")]) {
+    assert.equal(/[g-z]/i.test(value), false);
+    const parsed = parseAllowlist(`https://rpc.example.invalid/rpc?apikey=${value} # reviewed\n`);
+    assert.equal(parsed.values.size, 0);
+    assert.equal(parsed.errors.length, 1);
+    assert.equal(parsed.errors[0].detail, "keyed provider URL");
+  }
+});
+
+test("parseAllowlist rejects a userinfo-keyed provider url", () => {
+  const user = mixedUser("FAKE-K6");
+  const parsed = parseAllowlist(`https://${user}@rpc.example.invalid/ # reviewed\n`);
+  assert.equal(parsed.values.size, 0);
+  assert.equal(parsed.errors[0].detail, "keyed provider URL");
+  assert.equal(rendered(parsed.errors).includes(user), false);
+});
+
+test("parseAllowlist rejects a fragment-keyed url", () => {
+  const key = digestHex("FAKE-K7").slice(0, 20);
+  const parsed = parseAllowlist(`https://rpc.example.invalid/rpc#key=${key} # reviewed\n`);
+  assert.equal(parsed.values.size, 0);
+  assert.equal(parsed.errors[0].detail, "keyed provider URL");
+  assert.equal(rendered(parsed.errors).includes(key), false);
+});
+
+test("treats short hex, mixed, and long letter usernames as key-like", () => {
+  const digits = digitRun("FAKE-Q2-DIGITS", 11);
+  const hexLetters = hexLetterRun("FAKE-Q2-HEX", 12);
+  const mixed = mixedUser("FAKE-Q3");
+  const letters = "notasecretusername";
+  assert.equal(/^[0-9]{8,15}$/.test(digits), true);
+  assert.equal(/^[a-f]{8,15}$/.test(hexLetters), true);
+  assert.equal(/^[A-Za-z0-9]{8,15}$/.test(mixed), true);
+  assert.equal(/[g-z]/i.test(mixed) && /[0-9]/.test(mixed), true);
+  assert.equal(/^[a-z]{16,}$/.test(letters), true);
+  assert.equal(/[g-z]/.test(letters), true);
+  assert.equal(isKeyLikeRpc(`https://${digits}@rpc.example.invalid/`), true);
+  assert.equal(isKeyLikeRpc(`https://${hexLetters}@rpc.example.invalid/`), true);
+  assert.equal(isKeyLikeRpc(`https://${mixed}@rpc.example.invalid/`), true);
+  assert.equal(isKeyLikeRpc(`https://${letters}@rpc.example.invalid/`), true);
+  assert.equal(isKeyLikeRpc("https://shortname@rpc.example.invalid/"), false);
+});
+
+test("flags a key inside a git+https url", () => {
+  const user = mixedUser("FAKE-R2");
+  const text = `git+https://${user}@rpc.example.invalid/rpc`;
+  const dir = writeDist({ "assets/app.js": `${JSON.stringify(text)}\n` });
+  const findings = scanDist(dir, { knownRoots: [], env: {} });
+  assert.ok(rules(findings).includes("rpc-url"));
+  assert.equal(rendered(findings).includes(user), false);
+});
+
+test("a name with PK inside another word stays allowlistable", () => {
+  const value = "upkeep-public-label";
+  const name = "VITE_UPKEEP_TOKEN";
+  assert.equal(isSecretLikeName(name), true);
+  assert.equal(isSecretLikeName("VITE_SPKR"), false);
+  const dir = writeDist({ "assets/app.js": `${JSON.stringify(value)}\n` });
+  const open = scanDist(dir, { knownRoots: [], env: { [name]: value } });
+  assert.ok(rules(open).includes("forbidden-value"));
+  const listed = scanDist(dir, {
+    knownRoots: [],
+    env: { [name]: value },
+    allowlist: new Set([value]),
+  });
+  assert.deepEqual(listed, []);
+});
+
+test("an allowlist set passed to scanDist cannot exempt a keyed url", () => {
+  const key = digestHex("FAKE-LITERAL-URL").slice(0, 32);
+  const keyed = `https://rpc.example.invalid/v2/${key}`;
+  const dir = writeDist({ "assets/app.js": `${JSON.stringify(keyed)}\n` });
+  const findings = scanDist(dir, { knownRoots: [], env: {}, allowlist: new Set([keyed]) });
+  assert.ok(rules(findings).includes("rpc-url"));
+  assert.equal(rendered(findings).includes(key), false);
+});
+
+test("flags a keyed url after escape text, percent encoding, or a glued prefix", () => {
+  const key = digestHex("FAKE-I22").slice(0, 32);
+  const url = `https://rpc.example.invalid/v2/${key}`;
+  const id = digestHex("FAKE-S3-CONTROL").slice(0, 32);
+  const dir = writeDist({
+    "qa.json": `{"rpc":"Node:\\n${url}"}`,
+    "assets/app.js": [
+      `const tabbed = "pre\\t${url}";`,
+      `const returned = "pre\\r${url}";`,
+      `const encoded = "pre%20${url}";`,
+      `const glued = "endpoint${url}";`,
+      `const digit = "9${url}";`,
+      `const s3 = "s3://bucket.example.invalid/${id}";`,
+      `const ipfs = "ipfs://ipfs/${id}";`,
+      `const team = "//support-team@rpc.example.invalid/";`,
+    ].join("\n"),
+  });
+  const findings = scanDist(dir, { knownRoots: [], env: {} });
+  assert.equal(findings.filter((finding) => finding.rule === "rpc-url").length, 6);
+  const text = rendered(findings);
+  assert.equal(text.includes(key), false);
+  assert.equal(text.includes(id), false);
+});
+
+test("flags a keyed url at the end of a template literal", () => {
+  const key = digestHex("FAKE-I23").slice(0, 32);
+  const url = `https://rpc.example.invalid/v2/${key}`;
+  const source = [
+    "export const rpc = `" + url + "`;",
+    "export const wrapped = `Node:\\n" + url + "`;",
+  ].join("\n");
+  const dir = writeDist({ "plant.ts": `${source}\n` });
+  const findings = scanDist(dir, { knownRoots: [], env: {} });
+  assert.equal(findings.filter((finding) => finding.rule === "rpc-url").length, 2);
+  assert.equal(rendered(findings).includes(key), false);
+});
+
+test("credential names cannot be allowlisted when the value is not 64 hex", () => {
+  const value = `qa-${digestHex("FAKE-I19R").slice(0, 16)}`;
+  for (const name of [
+    "VITE_INFURA_KEY",
+    "VITE_GITHUB_TOKEN",
+    "VITE_ETHERSCAN_APIKEY",
+    "VITE_AUTH_TOKEN_V2",
+    "VITE_SESSION_TOKEN",
+    "VITE_privKey",
+    "VITE_signerKey",
+    "VITE_PRIVKEY",
+    "VITE_SIGNER",
+    "VITE_SIGNER_KEY_V2",
+    "VITE_PK_HEX",
+    "VITE_RELAYER_KEY_HEX",
+  ]) {
+    const dir = writeDist({ "assets/app.js": `${JSON.stringify(value)}\n` });
+    const hits = scanDist(dir, {
+      knownRoots: [],
+      env: { [name]: value },
+      allowlist: new Set([value]),
+    });
+    assert.ok(rules(hits).includes("forbidden-value"), name);
+    assert.equal(rendered(hits).includes(value), false, name);
+  }
+});
+
+test("an explorer tx hash must be listed and an address link cannot be listed", () => {
+  let body = digestHex("FAKE-TX-HASH");
+  if (/^([0-9a-f])\1{63}$/i.test(body)) body = `a${body.slice(1)}`;
+  const hash = `0x${body}`;
+  const tx = `https://explorer.example.invalid/tx/${hash}`;
+  const address = `0x${digestHex("FAKE-ADDR").slice(0, 40)}`;
+  const addrUrl = `https://explorer.example.invalid/address/${address}`;
+  const rejected = parseAllowlist(`${addrUrl} # public address\n`);
+  assert.equal(rejected.values.size, 0);
+  assert.equal(rejected.errors[0].detail, "keyed provider URL");
+  const dir = writeDist({ "assets/app.js": `${JSON.stringify(tx)}\n` });
+  const urlOnly = scanDist(dir, { knownRoots: [], env: {}, allowlist: new Set([tx]) });
+  assert.ok(rules(urlOnly).includes("hex64"));
+  assert.equal(rules(urlOnly).includes("rpc-url"), false);
+  const both = scanDist(dir, {
+    knownRoots: [],
+    env: {},
+    allowlist: new Set([tx, body, hash]),
+  });
+  assert.equal(both.some((finding) => finding.rule === "hex64" || finding.rule === "rpc-url"), false);
+  assert.equal(rendered(urlOnly).includes(body), false);
+  assert.equal(rendered(rejected.errors).includes(address), false);
 });

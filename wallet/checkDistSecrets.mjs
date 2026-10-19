@@ -11,15 +11,19 @@
  *   when it is key-like: the full value, and the key part of that URL. Exact allowlist
  *   values are skipped only after the name gate. A keyed RPC URL is never skipped.
  *   The value list also never skips RELAYER_PRIVATE_KEY, ADMIN_SECRET, a protected
- *   name (API_KEY, ACCESS_TOKEN, PASSWD, PASSWORD, CREDENTIAL, PHRASE, MNEMONIC,
- *   SEED, PRIVATE, PRIV_KEY, SIGNER_KEY, RELAYER_KEY, SECRET, or PK as its own name part),
- *   or a 64-hex value under any secret-like name.
+ *   name (API_KEY, APIKEY, ACCESS_TOKEN, PASSWD, PASSWORD, CREDENTIAL, PHRASE,
+ *   MNEMONIC, SEED, PRIVATE, PRIV_KEY, PRIVKEY, SIGNER_KEY, SIGNER, RELAYER_KEY,
+ *   SECRET, KEY as its own name part, or PK as its own name part), a camelCase part
+ *   such as privKey or signerKey, AUTH_TOKEN, SESSION_TOKEN, GITHUB_TOKEN, or a
+ *   64-hex value under any secret-like name.
  * - rpc-url: http(s) or ws(s) URLs with a key-like path, query, userinfo, or fragment.
- *   The scheme match is case-insensitive. A // inside another scheme, such as s3 or
- *   ipfs, is not a provider URL. A common or short user word is not a key part. A
- *   password, or high-entropy userinfo, is. An exact allowlist entry can skip a
- *   listed public URL such as an explorer link or a public query slug. A keyed
- *   provider URL cannot be listed.
+ *   The scheme match is case-insensitive. It also matches git+https and a scheme glued
+ *   to escape text, a percent-encoding, or a letter or digit. A backtick ends the match.
+ *   A // inside another scheme, such as s3 or ipfs, is not a provider URL. A common or
+ *   short user word is not a key part. A password, or high-entropy userinfo, is. An exact
+ *   allowlist entry can skip a listed public URL such as an explorer link or a public
+ *   query slug. A keyed provider URL cannot be listed, and an allowlist Set passed to
+ *   the scan cannot skip one either.
  * - mnemonic: a 12, 15, 18, 21, or 24-word BIP39 English phrase with a valid checksum,
  *   including a sliding window inside a longer run. Newlines, repeated spaces, title case,
  *   quoted arrays, and the escape text \n, \t, and \r count. Approved separators are
@@ -54,13 +58,38 @@ const RELAYER_NAME = /(?<![A-Za-z0-9_])RELAYER_[A-Z0-9_]+(?![A-Za-z0-9_])/g;
 const JWT = /(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{8,}(?![A-Za-z0-9_-])/g;
 const JWT_DOT_JOIN = /eyJ[A-Za-z0-9_-]{10,}(?:["']\s*\+\s*["']\.["']\s*\+\s*["']|\.)[A-Za-z0-9_-]{10,}(?:["']\s*\+\s*["']\.["']\s*\+\s*["']|\.)[A-Za-z0-9_-]{8,}/g;
 const SECRET_NAME = /(?:SECRET|PRIVATE|(?:^|_)KEY$|(?:^|_)PK$|PASSWD|PASSWORD|CREDENTIAL|API_KEY|APIKEY|MNEMONIC|SEED|PHRASE|TOKEN)/i;
-const PROTECTED_NAME = /API_KEY|ACCESS_TOKEN|PASSWD|PASSWORD|CREDENTIAL|PHRASE|MNEMONIC|SEED|PRIVATE|PRIV_KEY|SIGNER_KEY|RELAYER_KEY|SECRET|(?:^|_)PK(?:_|$)/i;
+const PROTECTED_NAME = /API_KEY|APIKEY|ACCESS_TOKEN|PASSWD|PASSWORD|CREDENTIAL|PHRASE|MNEMONIC|SEED|PRIVATE|PRIV_?KEY|SIGNER_KEY|(?:^|_)SIGNER(?:_|$)|RELAYER_KEY|SECRET|(?:^|_)KEY(?:_|$)|(?:^|_)PK(?:_|$)/i;
 const ALWAYS_NAMES = ["RELAYER_PRIVATE_KEY", "ADMIN_SECRET"];
+// TOKEN after one of these prefixes is a credential. Other TOKEN names stay
+// allowlistable so a public address, symbol, or id can be listed. PK stays its
+// own part, so a name such as VITE_UPKEEP_TOKEN is not protected.
+const CREDENTIAL_TOKEN_PREFIX = new Set(["ACCESS", "AUTH", "GITHUB", "SESSION"]);
 const QUERY_KEY = /^(?:api[_-]?key|apikey|key|access[_-]?key|access[_-]?token|dkey|token|auth|x-api-key)$/i;
 const COMMON_USERINFO = new Set(["anonymous", "password", "credentials", "username", "guest"]);
 
+function normalizeName(name) {
+  return String(name)
+    .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1_$2");
+}
+
+function matchesName(re, name) {
+  if (re.test(name)) return true;
+  const normalized = normalizeName(name);
+  return normalized !== name && re.test(normalized);
+}
+
+function credentialTokenName(name) {
+  const parts = normalizeName(name).split(/[^A-Za-z0-9]+/).filter(Boolean);
+  for (let i = 1; i < parts.length; i += 1) {
+    if (parts[i].toUpperCase() !== "TOKEN") continue;
+    if (CREDENTIAL_TOKEN_PREFIX.has(parts[i - 1].toUpperCase())) return true;
+  }
+  return false;
+}
+
 export function isSecretLikeName(name) {
-  return typeof name === "string" && SECRET_NAME.test(name);
+  return typeof name === "string" && (matchesName(SECRET_NAME, name) || matchesName(PROTECTED_NAME, name));
 }
 
 export function isRpcName(name) {
@@ -332,7 +361,7 @@ function addValueVariants(variants, text) {
 
 function valueAllowlisted(name, value, options) {
   if (ALWAYS_NAMES.includes(name)) return false;
-  if (PROTECTED_NAME.test(name)) return false;
+  if (matchesName(PROTECTED_NAME, name) || credentialTokenName(name)) return false;
   const body = hexBody(value);
   if (isSecretLikeName(name) && body && body.length === 64) return false;
   return allowlistHas(options, value);
@@ -542,11 +571,11 @@ function contentFindings(file, text, options, secrets) {
     pushFinding(findings, seen, at(file, text, match.index, "hex64"));
   }
 
-  const urlRe = /(?:(?<![A-Za-z0-9+.-])(?:https?|wss?):\/\/|(?<![A-Za-z0-9:])\/\/)[^\s"'<>]+/gi;
+  const urlRe = /(?:(?:https?|wss?):\/\/|(?<![A-Za-z0-9:])\/\/)[^\s"'<>`]+/gi;
   for (const match of text.matchAll(urlRe)) {
     const candidate = match[0].replace(/[),.;]+$/, "");
     if (!isKeyLikeRpc(candidate)) continue;
-    if (allowlistHas(options, candidate)) continue;
+    if (allowlistHas(options, candidate) && !isKeyedProviderUrl(candidate)) continue;
     pushFinding(findings, seen, at(file, text, match.index, "rpc-url"));
   }
 
