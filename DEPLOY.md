@@ -25,6 +25,21 @@ The Arb Sepolia Relayer is the web service `stranded-relayer-arb` at https://str
 
 The wallet must be used at https://strandedtoken.trade. https://gas-rescue.onrender.com is the Render origin host only.
 
+### Response headers
+
+`render.yaml` lists these headers for the static site `stranded` on `path: /*`:
+
+| Header | Value |
+|---|---|
+| `X-Frame-Options` | `DENY` |
+| `Referrer-Policy` | `strict-origin-when-cross-origin` |
+| `Content-Security-Policy` | `frame-ancestors 'none'` |
+| `Strict-Transport-Security` | `max-age=31536000; includeSubDomains` |
+
+`Content-Security-Policy` in that file is only `frame-ancestors 'none'`. It does not set `default-src` or any other directive.
+
+These `render.yaml` headers are not live until the Render Blueprint is synced. The live site currently serves only `X-Content-Type-Options: nosniff`. Syncing the Blueprint, or adding the headers on the static site in the dashboard, is Spencer's step. A git push does not apply them.
+
 ## 3. Secrets (dashboard only)
 
 On **stranded-relayer-arb**:
@@ -58,6 +73,8 @@ On **stranded** (static site):
 - If you change the Relayer URL later, **rebuild** the static site.
 
 Optional Base Sepolia live quotes: set `VITE_RELAYER_URL` to your existing Base Relayer origin and rebuild.
+
+The wallet build reads only variables whose names start with `VITE_`. `VITE_RELAYER_URL` is the Base Relayer origin. `VITE_RELAYER_BASE_URL` is the only alias for that same Base origin. `RELAYER_BASE_URL` is no longer read. Do not put an unprefixed `RELAYER_` name on the static site: a Vite `envPrefix` of `RELAYER_` copies every `RELAYER_*` value from the build environment into the public bundle, including `RELAYER_PRIVATE_KEY`.
 
 ## 4. Custom domain
 

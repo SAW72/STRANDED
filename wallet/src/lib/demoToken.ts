@@ -10,11 +10,10 @@ export const LIVE_ARB_GRTT = "0x5649fF51123D534044aA7E6cBc8762698Ffed713" as con
 
 /** Env override, or live GRTT when unset or not an address. */
 export function liveDemoToken(): Address {
-  const raw = readEnv("VITE_TOKEN_ADDRESS_ARB_SEPOLIA");
+  const raw = envString(import.meta.env.VITE_TOKEN_ADDRESS_ARB_SEPOLIA);
   return raw && isAddress(raw) ? raw : LIVE_ARB_GRTT;
 }
 
-function readEnv(name: string): string {
-  const value = (import.meta.env as Record<string, unknown>)[name];
+function envString(value: string | undefined): string {
   return typeof value === "string" ? value.trim() : "";
 }

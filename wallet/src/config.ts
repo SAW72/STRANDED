@@ -14,8 +14,7 @@ export {
   type SupportedChainId,
 };
 
-function readEnv(name: keyof ImportMetaEnv): string {
-  const value = import.meta.env[name];
+function envString(value: string | undefined): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
@@ -26,14 +25,16 @@ function optionalAddress(raw: string): Address | null {
 /**
  * Public Relayer origin for the selected testnet.
  * Arb uses only VITE_RELAYER_URL_ARB_SEPOLIA (empty → sample quotes).
+ * Base uses VITE_RELAYER_URL, then VITE_RELAYER_BASE_URL.
  * Never fall back to the Base Relayer origin — that host is a different chain.
+ * Unprefixed RELAYER_BASE_URL is not read. See DEPLOY.md.
  */
 export function relayerUrl(chainId?: SupportedChainId): string {
   if (chainId === ARB_SEPOLIA_CHAIN_ID) {
-    return readEnv("VITE_RELAYER_URL_ARB_SEPOLIA").replace(/\/$/, "");
+    return envString(import.meta.env.VITE_RELAYER_URL_ARB_SEPOLIA).replace(/\/$/, "");
   }
   const raw =
-    readEnv("VITE_RELAYER_URL") || readEnv("RELAYER_BASE_URL") || readEnv("VITE_RELAYER_BASE_URL");
+    envString(import.meta.env.VITE_RELAYER_URL) || envString(import.meta.env.VITE_RELAYER_BASE_URL);
   return raw.replace(/\/$/, "");
 }
 
@@ -44,21 +45,21 @@ export function relayerBaseUrl(): string {
 
 export function gasRescueAddress(chainId: SupportedChainId = BASE_SEPOLIA_CHAIN_ID): Address | null {
   if (chainId === ARB_SEPOLIA_CHAIN_ID) {
-    return optionalAddress(readEnv("VITE_GAS_RESCUE_ADDRESS_ARB_SEPOLIA"));
+    return optionalAddress(envString(import.meta.env.VITE_GAS_RESCUE_ADDRESS_ARB_SEPOLIA));
   }
-  return optionalAddress(readEnv("VITE_GAS_RESCUE_ADDRESS"));
+  return optionalAddress(envString(import.meta.env.VITE_GAS_RESCUE_ADDRESS));
 }
 
 /** Optional. Empty until Spencer broadcasts `DeployGasRescueLens` on Arb Sepolia. */
 export function gasRescueLensAddress(): Address | null {
-  return optionalAddress(readEnv("VITE_GAS_RESCUE_LENS_ADDRESS"));
+  return optionalAddress(envString(import.meta.env.VITE_GAS_RESCUE_LENS_ADDRESS));
 }
 
 export function tokenAddress(chainId: SupportedChainId = BASE_SEPOLIA_CHAIN_ID): Address | null {
   if (chainId === ARB_SEPOLIA_CHAIN_ID) {
-    return optionalAddress(readEnv("VITE_TOKEN_ADDRESS_ARB_SEPOLIA"));
+    return optionalAddress(envString(import.meta.env.VITE_TOKEN_ADDRESS_ARB_SEPOLIA));
   }
-  return optionalAddress(readEnv("VITE_TOKEN_ADDRESS"));
+  return optionalAddress(envString(import.meta.env.VITE_TOKEN_ADDRESS));
 }
 
 /**
@@ -66,14 +67,14 @@ export function tokenAddress(chainId: SupportedChainId = BASE_SEPOLIA_CHAIN_ID):
  * Empty unless VITE_POINTS_API_URL is set — the dashboard then uses labelled example data.
  */
 export function pointsApiUrl(): string {
-  return readEnv("VITE_POINTS_API_URL").replace(/\/$/, "");
+  return envString(import.meta.env.VITE_POINTS_API_URL).replace(/\/$/, "");
 }
 
 export function rpcUrl(chainId: SupportedChainId): string {
   if (chainId === ARB_SEPOLIA_CHAIN_ID) {
-    return readEnv("VITE_ARB_SEPOLIA_RPC_URL") || DEFAULT_RPC[ARB_SEPOLIA_CHAIN_ID];
+    return envString(import.meta.env.VITE_ARB_SEPOLIA_RPC_URL) || DEFAULT_RPC[ARB_SEPOLIA_CHAIN_ID];
   }
-  return readEnv("VITE_BASE_SEPOLIA_RPC_URL") || DEFAULT_RPC[BASE_SEPOLIA_CHAIN_ID];
+  return envString(import.meta.env.VITE_BASE_SEPOLIA_RPC_URL) || DEFAULT_RPC[BASE_SEPOLIA_CHAIN_ID];
 }
 
 export function baseSepoliaRpcUrl(): string {
