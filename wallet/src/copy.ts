@@ -63,6 +63,7 @@ export const QUOTE_ERROR = "Couldn’t load rescue details. Try again.";
 
 export const QUOTE_IDLE_CONNECT =
   "Connect on Base Sepolia or Arb Sepolia and enter an amount to see the rescue plan.";
+export const QUOTE_CONNECT_TO_REVIEW = "Connect a wallet to see the rescue quote.";
 export const QUOTE_IDLE_AMOUNT = "Enter an amount to see the rescue plan.";
 export const QUOTE_IDLE_UNAVAILABLE = "Rescue details aren’t available yet.";
 
@@ -117,8 +118,13 @@ export const SWITCH_TO_PREFIX = "Switch to";
 /** Points page. Off-chain scores only — no cash amounts and no promised payout. */
 export const POINTS_TITLE = "Points";
 export const POINTS_NAV_LABEL = "Points";
-export const POINTS_BACK_LABEL = "Back";
+export const POINTS_BACK_LABEL = "Back to home";
 export const POINTS_INTRO = "Enter a wallet address to see recorded activity by category.";
+export const POINTS_HOW_HEADING = "How to earn points";
+export const POINTS_HOW_BODY =
+  "Points come from completed rescues, relayer jobs, registry finds posted or claimed, and 10 per week for an active wallet session.";
+export const POINTS_HOW_STATUS =
+  "Points are off-chain, have no value, are not a token, and are not transferable.";
 export const POINTS_DISCLAIMER =
   "Points are an off-chain record of activity only. They are not a token, have no cash value, can't be sold, transferred or redeemed, may be adjusted or cancelled at any time, and do not convert to anything.";
 export const POINTS_ADDRESS_LABEL = "Wallet address";

@@ -82,17 +82,22 @@ describe("review-screen copy", () => {
 });
 
 describe("points copy", () => {
-  const pointsCopy = Object.entries(copy)
-    .filter(([key, value]) => key.startsWith("POINTS_") && typeof value === "string")
-    .map(([, value]) => value);
+  const pointsCopy = Object.entries(copy).filter(
+    ([key, value]) => key.startsWith("POINTS_") && typeof value === "string",
+  );
 
   it("fails if points copy contains $, reward, or token value", () => {
     expect(pointsCopy.length).toBeGreaterThan(0);
-    for (const line of pointsCopy) {
+    for (const [key, line] of pointsCopy) {
+      if (typeof line !== "string") continue;
       expect(line).not.toMatch(/\$/);
       expect(line.toLowerCase()).not.toContain("reward");
       expect(line.toLowerCase()).not.toContain("token value");
       expect(line.toLowerCase()).not.toContain("airdrop");
+      if (key === "POINTS_HOW_HEADING") {
+        expect(line).toBe("How to earn points");
+        continue;
+      }
       expect(line.toLowerCase()).not.toMatch(/\bearn\b/);
     }
   });
@@ -105,6 +110,18 @@ describe("points copy", () => {
 
   it("introduces recorded activity by category", () => {
     expect(copy.POINTS_INTRO).toBe("Enter a wallet address to see recorded activity by category.");
+  });
+
+  it("describes how points are recorded without a final rescue number", () => {
+    expect(copy.POINTS_HOW_BODY).toMatch(/completed rescues/i);
+    expect(copy.POINTS_HOW_BODY).toMatch(/relayer jobs/i);
+    expect(copy.POINTS_HOW_BODY).toMatch(/registry finds posted or claimed/i);
+    expect(copy.POINTS_HOW_BODY).toMatch(/10 per week/);
+    expect(copy.POINTS_HOW_BODY).not.toMatch(/\b100\b/);
+    expect(copy.POINTS_HOW_STATUS).toBe(
+      "Points are off-chain, have no value, are not a token, and are not transferable.",
+    );
+    expect(copy.POINTS_BACK_LABEL).toBe("Back to home");
   });
 
   it("keeps the registry claim label", () => {

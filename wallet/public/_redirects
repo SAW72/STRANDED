@@ -1,1 +1,5 @@
-/*    /index.html   200
+# SPA fallback for hosts that read _redirects (Cloudflare Pages, Netlify).
+# Render static sites ignore this file. render.yaml routes and points/index.html cover Render.
+/points    /index.html   200
+/points/   /index.html   200
+/*         /index.html   200

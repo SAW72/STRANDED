@@ -371,6 +371,26 @@ describe("Points page", () => {
     expect(points).not.toMatch(/POINTS_TOTAL_LABEL|POINTS_RANK_LABEL|POINTS_UNRANKED/);
   });
 
+  it("explains how points are recorded and links back home", async () => {
+    const view = await render(<Points />);
+    const how = view.container.querySelector("[data-testid='points-how']");
+    expect(how?.textContent).toMatch(/How to earn points/);
+    expect(how?.textContent).toMatch(/completed rescues/);
+    expect(how?.textContent).toMatch(/relayer jobs/);
+    expect(how?.textContent).toMatch(/registry finds posted or claimed/);
+    expect(how?.textContent).toMatch(/10 per week for an active wallet session/);
+    expect(how?.textContent).toMatch(/off-chain/);
+    expect(how?.textContent).toMatch(/no value/);
+    expect(how?.textContent).toMatch(/not a token/);
+    expect(how?.textContent).toMatch(/not transferable/);
+    expect(how?.textContent).not.toMatch(/\b100\b/);
+    expect(how?.textContent).not.toMatch(/placeholder/i);
+    const home = view.container.querySelector("[data-testid='points-home']");
+    expect(home?.getAttribute("href")).toBe("/");
+    expect(home?.textContent).toBe("Back to home");
+    await view.unmount();
+  });
+
   it("uses the example client from the page default without a baked URL", async () => {
     expect(createPointsClient().source).toBe("example");
     const view = await render(<Points />);

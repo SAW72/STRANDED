@@ -63,7 +63,10 @@ const COPY_SOURCES = [
 ];
 
 function bannedWordsIn(text: string): string[] {
-  const stripped = text.replace(/\bno value\b/gi, " ").replace(/\bno cash value\b/gi, " ");
+  const stripped = text
+    .replace(/\bno value\b/gi, " ")
+    .replace(/\bno cash value\b/gi, " ")
+    .replace(/\bHow to earn points\b/g, " ");
   return BANNED.filter((word) => new RegExp(`\\b${word}\\b`, "i").test(stripped));
 }
 
@@ -101,6 +104,8 @@ describe("token disclosure", () => {
     expect(demoBannerText("GRTT")).toBe(GRTT_BANNER);
     expect(demoBannerText(null)).toBe(UNKNOWN_DEMO_BANNER);
     expect(demoBannerText("")).toBe(UNKNOWN_DEMO_BANNER);
+    expect(UNKNOWN_DEMO_BANNER).toBe(SDEMO_BANNER);
+    expect(UNKNOWN_DEMO_BANNER).not.toMatch(/this token/i);
   });
 });
 

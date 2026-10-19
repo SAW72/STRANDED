@@ -1,12 +1,23 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { defineConfig } from "vite";
+import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
+import { publishPointsShell } from "./spaFallback";
 
 const configDir = path.dirname(fileURLToPath(import.meta.url));
 
+function pointsShellPlugin(): Plugin {
+  return {
+    name: "stranded-points-shell",
+    apply: "build",
+    closeBundle() {
+      publishPointsShell(path.resolve(configDir, "dist"));
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), pointsShellPlugin()],
   // RELAYER_BASE_URL is a public Relayer origin, not a secret.
   envPrefix: ["VITE_", "RELAYER_"],
   server: {

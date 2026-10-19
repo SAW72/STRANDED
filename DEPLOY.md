@@ -75,6 +75,26 @@ curl -sS https://stranded-relayer-arb.onrender.com/health
 
 Expect `ok: true`, `chainId: 421614`, `swap: 0x65e7…`. Then open https://strandedtoken.trade, pick **Arb Sepolia**, connect, quote, sign. Do not use https://gas-rescue.onrender.com for a rescue; the relayer will not send `Access-Control-Allow-Origin` for that host.
 
+## 6. Points route
+
+`/points` is a client route. A direct load needs the SPA shell from the static host.
+
+Render does not read `wallet/public/_redirects`. That file is published as a static asset and is not a rewrite. `render.yaml` rewrites `/points` and `/*` to `/index.html`. Those Blueprint routes are not applied by a git auto-deploy of the files alone. The wallet build also writes `wallet/dist/points/index.html`, a copy of the shell. Render serves that directory index at `/points` and `/points/`.
+
+After merge to `main`, the static site **stranded** auto-deploys. No dashboard rewrite is required for `/points`.
+
+| | |
+|---|---|
+| Host | Render static site `stranded` |
+| Origin | https://gas-rescue.onrender.com |
+| Custom domain | https://strandedtoken.trade |
+| Build | `npm ci --prefix wallet && npm run build --prefix wallet` |
+| Publish directory | `wallet/dist` |
+
+https://stranded.onrender.com is not this service. The service name is `stranded` and the onrender.com slug is `gas-rescue`, so that hostname has no server and its root is Render's plain-text Not Found.
+
+Syncing the Blueprint (or adding Rewrite `/*` → `/index.html` under the static site's Redirects/Rewrites) installs the general SPA fallback from `render.yaml`. The published `points/index.html` does not depend on that sync.
+
 ## Do not
 
 - Put `RELAYER_PRIVATE_KEY` or owner keys in `render.yaml` or git

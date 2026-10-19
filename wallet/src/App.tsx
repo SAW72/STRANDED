@@ -24,6 +24,7 @@ import {
   CONNECT_LABEL,
   CONNECTING_LABEL,
   POINTS_NAV_LABEL,
+  QUOTE_CONNECT_TO_REVIEW,
   DEADLINE_HELPER,
   DEADLINE_LABEL,
   FEE_HELPER,
@@ -581,7 +582,7 @@ function RescueApp() {
       <p className="points-nav">
         <a href="/points">{POINTS_NAV_LABEL}</a>
       </p>
-      <p className="demo-banner" role="note">
+      <p className="demo-banner" role="note" data-testid="demo-banner">
         {demoBannerText(demoSymbol)}
       </p>
       <StrandedCelebration kind={celebration} onDone={() => setCelebration(null)} />
@@ -693,7 +694,9 @@ function RescueApp() {
         <button className="btn" type="button" disabled={tokenBalance === undefined || useFixture} onClick={() => void fillMax()}>
           Use full balance
         </button>
-        <p className="token-disclosure">{tokenDisclosure(demoSymbol)}</p>
+        <p className="token-disclosure" data-testid="token-disclosure">
+          {tokenDisclosure(demoSymbol)}
+        </p>
       </section>
 
       {receipt ? (
@@ -706,7 +709,6 @@ function RescueApp() {
       <section className="card">
         <h2>4. {REVIEW_TITLE}</h2>
         <p className="subtitle">{REVIEW_SUBTITLE}</p>
-        <p className="token-disclosure">{tokenDisclosure(demoSymbol)}</p>
 
         {quoteSource === "fixture" && (
           <div className="banner banner-sample" role="status">
@@ -715,6 +717,8 @@ function RescueApp() {
           </div>
         )}
 
+        {isConnected ? (
+        <div data-testid="rescue-quote-fields">
         <h3 className="review-heading">What happens to your tokens</h3>
         <div className="review-list">
           <ReviewRow
@@ -835,6 +839,12 @@ function RescueApp() {
             help={NONCE_HELPER}
           />
         </div>
+        </div>
+        ) : (
+          <p className="muted" data-testid="rescue-quote-collapsed">
+            {QUOTE_CONNECT_TO_REVIEW}
+          </p>
+        )}
 
         {quoteStatus.kind === "loading" && (
           <div className="banner" role="status">
