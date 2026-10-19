@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { describe, it } from "node:test";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { encodeFunctionData } from "viem";
+import { encodeFunctionData, keccak256 } from "viem";
 import { rescueAbi } from "../rescueAbi.mjs";
 import { rescueTxsFromJsonl } from "../scripts/backfill-points.mjs";
 import {
@@ -1728,7 +1728,7 @@ describe("replacement lookup and backfill", () => {
       count: fields.txNonce + 1,
       head: 300,
       fromBlocks,
-      logs: [{ transactionHash: mined, blockNumber: 90 }],
+      logs: [{ transactionHash: mined, blockNumber: 90, address: fields.txTo }],
       txs: { [mined]: txBody },
     });
     try {
@@ -1782,7 +1782,7 @@ describe("replacement lookup and backfill", () => {
       const client = logClient({
         count: fields.txNonce + 1,
         head: 50,
-        logs: [{ transactionHash: other, blockNumber: 4 }],
+        logs: [{ transactionHash: other, blockNumber: 4, address: fields.txTo }],
         txs: { [other]: body },
       });
       try {
@@ -2182,6 +2182,84 @@ describe("replacement lookup and backfill", () => {
 });
 
 describe("backfill parser", () => {
+  it("drops legacy permit calldata instead of copying it into the outbox", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "points-legacy-input-"));
+    const permitR = tx();
+    const permitS = tx();
+    const signature = tx();
+    const user = `0x${"11".repeat(20)}`;
+    const order = {
+      user,
+      tokenIn: user,
+      amountIn: 1n,
+      feeAmount: 1n,
+      feeTo: user,
+      amountSwap: 1n,
+      minAmountOut: 1n,
+      to: user,
+      nativeTo: user,
+      router: user,
+      pathHash: tx(),
+      chainId: 84532n,
+      deadline: 1n,
+      nonce: 1n,
+    };
+    const txInput = encodeFunctionData({
+      abi: rescueAbi,
+      functionName: "rescueWithPermit",
+      args: [order, signature, 27, permitR, permitS, "0xabcd"],
+    });
+    const hash = tx();
+    const from = `0x${"33".repeat(20)}`;
+    const to = `0x${"22".repeat(20)}`;
+    const legacy = {
+      event: "rescue_ok",
+      chainId: 84532,
+      txHash: hash,
+      txFrom: from,
+      txNonce: 7,
+      txTo: to,
+      txInput,
+      sentBlock: 10,
+    };
+    const parsed = rescueTxsFromJsonl(`${JSON.stringify(legacy)}\n`, 84532);
+    assert.equal(parsed.length, 1);
+    assert.equal(Object.hasOwn(parsed[0], "txInput"), false);
+    const parsedText = JSON.stringify(parsed);
+    assert.equal(parsedText.includes(permitR.slice(2)), false);
+    assert.equal(parsedText.includes(permitS.slice(2)), false);
+    assert.equal(parsedText.includes(signature.slice(2)), false);
+    assert.equal(parsedText.includes('"txInput"'), false);
+    assert.equal(parsed[0].txInputHash, keccak256(txInput).toLowerCase());
+    const secret = runtimeSecret();
+    const env = { POINTS_INGEST_SECRET: secret, POINTS_API_URL: "https://points.invalid", CHAIN_ID: "84532" };
+    try {
+      const result = await backfillPointsRescue({
+        ...parsed[0],
+        txInput,
+        dataDir: dir,
+        env,
+        fetchImpl: async () => new Response("ok", { status: 200 }),
+        confirmReceipt: async () => ({ status: "success", transactionHash: hash }),
+        lookupNonce: async () => ({
+          status: "found",
+          tx: { hash, from, nonce: 7, to, input: txInput },
+        }),
+        scheduleDelay: () => {},
+      });
+      assert.equal(result.sent, 1);
+      const outbox = await readFile(pointsOutboxPath(dir), "utf8");
+      assert.equal(outbox.includes(permitR.slice(2)), false);
+      assert.equal(outbox.includes(permitS.slice(2)), false);
+      assert.equal(outbox.includes(signature.slice(2)), false);
+      assert.equal(outbox.includes('"txInput"'), false);
+      assert.match(outbox, /"txInputHash":/);
+    } finally {
+      clearPointsRetryTimers();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("replays rescue_ok tx hashes and skips other lines", () => {
     const hash = tx();
     const text = [

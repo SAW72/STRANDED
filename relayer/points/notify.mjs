@@ -289,7 +289,6 @@ export function notePointsReceiptReplacement(opts, response) {
         txTo: cand && cand.to ? cand.to : undefined,
         txSelector: digest.txSelector,
         txInputHash: digest.txInputHash,
-        txInput: current && current.txInput && !current.txInputHash ? cand.input : undefined,
         at: stamp(opts),
       });
       return { observed: true };
@@ -618,7 +617,11 @@ function replacementItem(item, tx) {
     absentPasses: 0,
   };
   if (cand.to) next.txTo = cand.to;
-  if (!next.txInputHash && cand.input) next.txInput = cand.input;
+  if (!next.txInputHash && cand.input) {
+    const digest = callDigest(cand.input);
+    if (!next.txSelector && digest.txSelector) next.txSelector = digest.txSelector;
+    if (digest.txInputHash) next.txInputHash = digest.txInputHash;
+  }
   return next;
 }
 
@@ -949,7 +952,6 @@ async function maybeCompact(file) {
     if (obs.txTo) row.txTo = obs.txTo;
     if (obs.txSelector) row.txSelector = obs.txSelector;
     if (obs.txInputHash) row.txInputHash = obs.txInputHash;
-    if (obs.txInput) row.txInput = obs.txInput;
     kept.push(row);
   }
   for (const item of folded.pending.values()) {
@@ -1143,7 +1145,6 @@ function foldText(text) {
       observed.set(hash, {
         replacedBy: next,
         txTo: seen.txTo || "",
-        txInput: seen.txInput || "",
         txInputHash: seen.txInputHash || "",
         txSelector: seen.txSelector || "",
       });
@@ -1233,7 +1234,7 @@ export async function readUnresolvedPoints(dataDir) {
   return [...folded.unresolved.values()];
 }
 
-function identityFrom(source) {
+export function identityFrom(source) {
   const out = {};
   if (!source || typeof source !== "object") return out;
   const from = String(source.txFrom || "").trim().toLowerCase();
@@ -1242,18 +1243,20 @@ function identityFrom(source) {
   if (nonce !== null) out.txNonce = nonce;
   const to = String(source.txTo || "").trim().toLowerCase();
   if (ADDR_RE.test(to)) out.txTo = to;
-  const input = String(source.txInput || source.input || "").trim().toLowerCase();
-  if (/^0x[0-9a-f]*$/.test(input) && input.length >= 2) out.txInput = input;
   const selector = String(source.txSelector || "").trim().toLowerCase();
   if (/^0x[0-9a-f]{8}$/.test(selector)) out.txSelector = selector;
   const inputHash = String(source.txInputHash || "").trim().toLowerCase();
   if (TX_RE.test(inputHash)) out.txInputHash = inputHash;
-  if (!out.txInputHash && out.txInput && out.txInput.length >= 10) {
-    const digest = callDigest(out.txInput);
+  // Legacy rows still carry the full calldata. Use it to fill the hash, then drop it.
+  const input = String(source.txInput || source.input || "").trim().toLowerCase();
+  const inputOk = /^0x[0-9a-f]+$/.test(input) && input.length >= 10;
+  if (inputOk && !out.txInputHash) {
+    const digest = callDigest(input);
     if (!out.txSelector && digest.txSelector) out.txSelector = digest.txSelector;
     if (digest.txInputHash) out.txInputHash = digest.txInputHash;
   }
-  const user = String(source.txUser || "").trim().toLowerCase();
+  let user = String(source.txUser || "").trim().toLowerCase();
+  if (!ADDR_RE.test(user) && inputOk) user = rescueUser(input);
   if (ADDR_RE.test(user)) out.txUser = user;
   const block = readNonce(source.sentBlock);
   if (block !== null && block > 0) out.sentBlock = block;
@@ -1432,7 +1435,10 @@ export async function findTxAtNonce(client, from, nonce, hint = {}) {
       throw err;
     }
     for (const log of logs || []) {
-      const hash = log && (log.transactionHash || log.hash);
+      if (!log || log.removed) continue;
+      const logAddress = String(log.address || "").trim().toLowerCase();
+      if (!ADDR_RE.test(logAddress) || logAddress !== contract) continue;
+      const hash = log.transactionHash || log.hash;
       if (!hash) continue;
       let tx;
       try {
@@ -1538,7 +1544,6 @@ export async function backfillPointsRescue(opts) {
     txSelector: ident.txSelector,
     txInputHash: ident.txInputHash,
     txUser: ident.txUser,
-    txInput: ident.txInput,
     sentBlock: ident.sentBlock,
     dataDir: opts.dataDir,
     env,

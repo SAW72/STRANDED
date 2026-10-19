@@ -117,8 +117,8 @@ describe("round 7 lookup and ledger", { concurrency: false }, () => {
       count: fields.txNonce + 1,
       head: 1100,
       logs: [
-        { transactionHash: wrong, blockNumber: 1010 },
-        { transactionHash: right, blockNumber: 1020 },
+        { transactionHash: wrong, blockNumber: 1010, address: fields.txTo },
+        { transactionHash: right, blockNumber: 1020, address: fields.txTo },
       ],
       txs: {
         [wrong]: { hash: wrong, from: otherSender, nonce: fields.txNonce, to: fields.txTo, input: otherInput },
@@ -134,8 +134,8 @@ describe("round 7 lookup and ledger", { concurrency: false }, () => {
       count: 9,
       head: 1100,
       logs: [
-        { transactionHash: early, blockNumber: 1010 },
-        { transactionHash: right, blockNumber: 1020 },
+        { transactionHash: early, blockNumber: 1010, address: fields.txTo },
+        { transactionHash: right, blockNumber: 1020, address: fields.txTo },
       ],
       txs: {
         [early]: { hash: early, from: fields.txFrom, nonce: 6, to: fields.txTo, input: otherInput },
@@ -147,13 +147,76 @@ describe("round 7 lookup and ledger", { concurrency: false }, () => {
     assert.equal(byNonce.tx.hash, right);
   });
 
+  it("skips a removed log and a log from a different contract", async () => {
+    const fields = rescueCall();
+    const removedHash = tx();
+    const wrongAddress = tx();
+    const right = tx();
+    const otherContract = `0x${"55".repeat(20)}`;
+    const client = logClient({
+      count: fields.txNonce + 1,
+      head: 1100,
+      logs: [
+        { transactionHash: removedHash, blockNumber: 1010, removed: true, address: fields.txTo },
+        { transactionHash: wrongAddress, blockNumber: 1012, removed: false, address: otherContract },
+        { transactionHash: right, blockNumber: 1020, removed: false, address: fields.txTo },
+      ],
+      txs: {
+        [removedHash]: {
+          hash: removedHash,
+          from: fields.txFrom,
+          nonce: fields.txNonce,
+          to: fields.txTo,
+          input: fields.txInput,
+        },
+        [wrongAddress]: {
+          hash: wrongAddress,
+          from: fields.txFrom,
+          nonce: fields.txNonce,
+          to: fields.txTo,
+          input: fields.txInput,
+        },
+        [right]: {
+          hash: right,
+          from: fields.txFrom,
+          nonce: fields.txNonce,
+          to: fields.txTo,
+          input: fields.txInput,
+        },
+      },
+    });
+    const looked = await findTxAtNonce(client, fields.txFrom, fields.txNonce, fields);
+    assert.equal(looked.status, "found");
+    assert.equal(looked.tx.hash, right);
+
+    const onlyBad = logClient({
+      count: fields.txNonce + 1,
+      head: 1100,
+      logs: [
+        { transactionHash: removedHash, blockNumber: 1010, removed: true, address: fields.txTo },
+        { transactionHash: wrongAddress, blockNumber: 1012, address: otherContract },
+      ],
+      txs: {
+        [removedHash]: {
+          hash: removedHash,
+          from: fields.txFrom,
+          nonce: fields.txNonce,
+          to: fields.txTo,
+          input: fields.txInput,
+        },
+      },
+    });
+    const missed = await findTxAtNonce(onlyBad, fields.txFrom, fields.txNonce, fields);
+    assert.equal(missed.status, "absent");
+  });
+
   it("leaves a future block unresolved and still finds the head and the chunk edges", async () => {
     const fields = rescueCall();
     let scans = 0;
     const future = logClient({
       count: fields.txNonce + 1,
       head: 990,
-      logs: [{ transactionHash: tx(), blockNumber: 1000 }],
+      logs: [{ transactionHash: tx(), blockNumber: 1000, address: fields.txTo }],
       txs: {},
       calls: { push() { scans += 1; } },
     });
@@ -165,7 +228,7 @@ describe("round 7 lookup and ledger", { concurrency: false }, () => {
     const headClient = logClient({
       count: fields.txNonce + 1,
       head: 1000,
-      logs: [{ transactionHash: atHead, blockNumber: 1000 }],
+      logs: [{ transactionHash: atHead, blockNumber: 1000, address: fields.txTo }],
       txs: {
         [atHead]: { hash: atHead, from: fields.txFrom, nonce: fields.txNonce, to: fields.txTo, input: fields.txInput },
       },
@@ -178,7 +241,7 @@ describe("round 7 lookup and ledger", { concurrency: false }, () => {
     const boundaryClient = logClient({
       count: fields.txNonce + 1,
       head: 5000,
-      logs: [{ transactionHash: boundary, blockNumber: 3000 }],
+      logs: [{ transactionHash: boundary, blockNumber: 3000, address: fields.txTo }],
       txs: {
         [boundary]: {
           hash: boundary,
@@ -197,7 +260,7 @@ describe("round 7 lookup and ledger", { concurrency: false }, () => {
     const laterClient = logClient({
       count: fields.txNonce + 1,
       head: 5000,
-      logs: [{ transactionHash: later, blockNumber: 3500 }],
+      logs: [{ transactionHash: later, blockNumber: 3500, address: fields.txTo }],
       txs: {
         [later]: { hash: later, from: fields.txFrom, nonce: fields.txNonce, to: fields.txTo, input: fields.txInput },
       },
@@ -241,7 +304,7 @@ describe("round 7 lookup and ledger", { concurrency: false }, () => {
         spans.push(span);
         if (span > 10) throw new Error("block range too large");
         if (fromBlock <= 40n && toBlock >= 40n) {
-          return [{ transactionHash: mined, blockNumber: 40 }];
+          return [{ transactionHash: mined, blockNumber: 40, address: fields.txTo }];
         }
         return [];
       },

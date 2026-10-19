@@ -214,6 +214,82 @@ async function signRescue(txData) {
   return { serialized, parsed, hash: keccak256(serialized) };
 }
 
+function simulateRescue(args) {
+  return publicClient.simulateContract({
+    account,
+    address: /** @type {`0x${string}`} */ (SWAP),
+    abi: rescueAbi,
+    functionName: "rescueWithPermit",
+    args,
+  });
+}
+
+function isReceiptNotFound(err) {
+  const parts = [];
+  const visit = (inner) => {
+    if (!inner || typeof inner !== "object") return;
+    for (const key of ["name", "shortMessage", "details", "message"]) {
+      const value = inner[key];
+      if (typeof value === "string" && value) parts.push(value);
+    }
+  };
+  if (err && typeof err.walk === "function") {
+    try {
+      err.walk((inner) => {
+        visit(inner);
+        return false;
+      });
+    } catch {
+      visit(err);
+    }
+  } else {
+    visit(err);
+  }
+  const text = parts.join(" ").toLowerCase();
+  return (
+    text.includes("transactionreceiptnotfounderror") ||
+    (text.includes("transaction receipt") && text.includes("could not be found"))
+  );
+}
+
+function receiptSucceeded(receipt) {
+  if (!receipt || typeof receipt !== "object") return false;
+  const status = receipt.status;
+  return status === "success" || status === "0x1" || status === 1;
+}
+
+/** A timed-out send can still be the tx that mined. Credit that hash instead of signing another. */
+async function minedSignedRescue(signedForRequest) {
+  for (const item of signedForRequest) {
+    if (!item || typeof item.hash !== "string") continue;
+    let receipt;
+    try {
+      receipt = await publicClient.getTransactionReceipt({
+        hash: /** @type {`0x${string}`} */ (item.hash),
+      });
+    } catch (err) {
+      if (isReceiptNotFound(err)) continue;
+      throw err;
+    }
+    if (receiptSucceeded(receipt)) return item;
+  }
+  return null;
+}
+
+async function permitNonceConsumed(user, nonce) {
+  try {
+    const used = await publicClient.readContract({
+      address: /** @type {`0x${string}`} */ (SWAP),
+      abi: usedNoncesAbi,
+      functionName: "usedNonces",
+      args: [/** @type {`0x${string}`} */ (user), nonce],
+    });
+    return used === true;
+  } catch {
+    return false;
+  }
+}
+
 function callDigest(txData, user) {
   return {
     txSelector: txData.slice(0, 10),
@@ -255,29 +331,52 @@ async function submitRescue(body) {
       swapData,
     ];
     try {
-      await publicClient.simulateContract({
-        account,
-        address: /** @type {`0x${string}`} */ (SWAP),
-        abi: rescueAbi,
-        functionName: "rescueWithPermit",
-        args,
-      });
+      await simulateRescue(args);
     } catch (err) {
       logSimulationFailure(err);
       throw simulationFailure(err);
     }
     const sentBlock = await readSentBlock();
     const txData = encodeFunctionData({ abi: rescueAbi, functionName: "rescueWithPermit", args });
+    const signedForRequest = [];
     let signed = null;
     const txHash = await withBroadcastRetry(
       async (attempt) => {
         attempts = attempt;
-        if (!signed) signed = await signRescue(txData);
+        if (!signed) {
+          if (signedForRequest.length > 0) {
+            const mined = await minedSignedRescue(signedForRequest);
+            if (mined) {
+              signed = mined;
+              return mined.hash;
+            }
+            if (await permitNonceConsumed(order.user, order.nonce)) {
+              const used = { errorName: "UsedNonce", shortMessage: "UsedNonce" };
+              logSimulationFailure(used);
+              throw simulationFailure(used);
+            }
+            try {
+              await simulateRescue(args);
+            } catch (err) {
+              logSimulationFailure(err);
+              throw simulationFailure(err);
+            }
+          }
+          signed = await signRescue(txData);
+          signedForRequest.push(signed);
+        }
         try {
           return await walletClient.sendRawTransaction({ serializedTransaction: signed.serialized });
         } catch (err) {
           if (isAlreadyKnownError(err)) return signed.hash;
-          if (isNonceRetryError(err) || isUnderpricedError(err)) signed = null;
+          if (isNonceRetryError(err) || isUnderpricedError(err)) {
+            const mined = await minedSignedRescue(signedForRequest);
+            if (mined) {
+              signed = mined;
+              return mined.hash;
+            }
+            signed = null;
+          }
           throw err;
         }
       },

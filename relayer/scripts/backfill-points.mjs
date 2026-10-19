@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { createPublicClient, http as viemHttp } from "viem";
 import { arbitrumSepolia, baseSepolia } from "viem/chains";
-import { backfillRows, findTxAtNonce, pointsMinConfirmations, pointsPushEnabled } from "../points/notify.mjs";
+import { backfillRows, findTxAtNonce, identityFrom, pointsMinConfirmations, pointsPushEnabled } from "../points/notify.mjs";
 
 const TX_RE = /^0x[0-9a-fA-F]{64}$/;
 const CHAINS = new Set([84532, 421614]);
@@ -44,14 +44,17 @@ export function rescueTxsFromJsonl(text, defaultChainId) {
     }
     const txTo = String(row.txTo || "").trim().toLowerCase();
     if (/^0x[0-9a-f]{40}$/.test(txTo)) rowOut.txTo = txTo;
-    const txInput = String(row.txInput || "").trim().toLowerCase();
-    if (/^0x[0-9a-f]*$/.test(txInput) && txInput.length >= 10) rowOut.txInput = txInput;
     const txSelector = String(row.txSelector || "").trim().toLowerCase();
     if (/^0x[0-9a-f]{8}$/.test(txSelector)) rowOut.txSelector = txSelector;
     const txInputHash = String(row.txInputHash || "").trim().toLowerCase();
     if (/^0x[0-9a-f]{64}$/.test(txInputHash)) rowOut.txInputHash = txInputHash;
     const txUser = String(row.txUser || "").trim().toLowerCase();
     if (/^0x[0-9a-f]{40}$/.test(txUser)) rowOut.txUser = txUser;
+    // Old rescues.jsonl rows may still hold permit calldata. Derive the hash and do not copy it.
+    const derived = identityFrom(row);
+    if (!rowOut.txSelector && derived.txSelector) rowOut.txSelector = derived.txSelector;
+    if (!rowOut.txInputHash && derived.txInputHash) rowOut.txInputHash = derived.txInputHash;
+    if (!rowOut.txUser && derived.txUser) rowOut.txUser = derived.txUser;
     if (row.sentBlock !== undefined && row.sentBlock !== null && /^\d+$/.test(String(row.sentBlock).trim())) {
       const sentBlock = Number(row.sentBlock);
       if (sentBlock > 0) rowOut.sentBlock = sentBlock;

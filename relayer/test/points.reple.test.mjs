@@ -8,11 +8,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
-import { encodeEventTopics, encodeFunctionData, keccak256 } from "viem";
+import { encodeEventTopics, encodeFunctionData, keccak256, toFunctionSelector } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { encodeSwapData } from "../quote.mjs";
 import { rescueAbi } from "../rescueAbi.mjs";
 
+const USED_NONCES_SELECTOR = toFunctionSelector("function usedNonces(address user, uint256 nonce)");
 const relayerRoot = fileURLToPath(new URL("..", import.meta.url));
 const SWAP = `0x${"21".repeat(20)}`;
 const FEE_TO = `0x${"fe".repeat(20)}`;
@@ -178,13 +179,38 @@ function startRpc(state) {
         const minedCount = state.mined ? state.nonce + 1 : state.nonce;
         result = method === "eth_getTransactionCount" ? hx(minedCount) : hx(10n ** 18n);
       } else if (method === "eth_gasPrice" || method === "eth_maxPriorityFeePerGas") result = hx(1_000_000_000);
-      else if (method === "eth_estimateGas") result = "0x186a0";
-      else if (method === "eth_call" || method === "eth_getCode") result = method === "eth_getCode" ? "0x60016000" : `0x${"00".repeat(32)}`;
-      else if (method === "eth_sendRawTransaction") {
+      else if (method === "eth_estimateGas") {
+        if (state.sendMode === "mined-drop" && !state.staleEstimate && state.sentRaw.length > 0) {
+          error = { code: 3, message: "execution reverted: UsedNonce" };
+        } else result = "0x186a0";
+      } else if (method === "eth_getCode") result = "0x60016000";
+      else if (method === "eth_call") {
+        const data = String((call.params && call.params[0] && call.params[0].data) || "");
+        if (state.permitUsed && data.startsWith(USED_NONCES_SELECTOR)) {
+          result = `0x${"00".repeat(31)}01`;
+        } else if (state.sendMode === "mined-drop" && !state.staleEstimate && state.sentRaw.length > 0) {
+          error = { code: 3, message: "execution reverted: UsedNonce" };
+        } else result = `0x${"00".repeat(32)}`;
+      } else if (method === "eth_sendRawTransaction") {
         const raw = String(call.params?.[0] || "");
         const hash = keccak256(raw);
         state.sentRaw.push(hash);
-        if (state.sendMode === "resend") {
+        if (state.sendMode === "mined-drop" || state.sendMode === "permit-used") {
+          if (!state.droppedOnce) {
+            state.droppedOnce = true;
+            state.t0 = hash;
+            if (state.sendMode === "mined-drop") {
+              state.t1 = hash;
+              state.mined = true;
+            }
+            state.dropBody = true;
+          } else if (hash === state.t0) {
+            error = { code: -32000, message: "nonce too low" };
+          } else {
+            state.extra = hash;
+            result = hash;
+          }
+        } else if (state.sendMode === "resend") {
           if (state.known.has(hash)) {
             error = { code: -32000, message: "already known" };
           } else {
@@ -401,6 +427,18 @@ describe("nonce replacement through server.mjs", { concurrency: false }, () => {
     await runBroadcast({ sendMode: "nonce" });
   });
 
+  it("credits the mined rescue when the first send times out on a consistent node", { timeout: 120_000 }, async () => {
+    await runBroadcast({ sendMode: "mined-drop", staleEstimate: false });
+  });
+
+  it("credits the mined rescue when a lagging estimate would sign another", { timeout: 120_000 }, async () => {
+    await runBroadcast({ sendMode: "mined-drop", staleEstimate: true });
+  });
+
+  it("does not credit a rescue whose permit nonce was consumed by another tx", { timeout: 120_000 }, async () => {
+    await runBroadcast({ sendMode: "permit-used", permitUsed: true });
+  });
+
   it("does not store block 0 when the head read fails once", { timeout: 90_000 }, async () => {
     await runBroadcast({ bnFail: 1, head: 400_000 });
   });
@@ -599,7 +637,7 @@ async function runCase({ cancel, outage = false }) {
   }
 }
 
-async function runBroadcast({ sendMode = "", bnFail = 0, head = 20 }) {
+async function runBroadcast({ sendMode = "", bnFail = 0, head = 20, staleEstimate = false, permitUsed = false }) {
   const dir = await mkdtemp(join(tmpdir(), "points-bcast-"));
   const dataDir = join(dir, "data");
   await mkdir(dataDir, { recursive: true });
@@ -621,9 +659,13 @@ async function runBroadcast({ sendMode = "", bnFail = 0, head = 20 }) {
     t1: "",
     bnFail,
     sendMode,
+    staleEstimate,
+    permitUsed,
     sentRaw: [],
     known: new Set(),
     nonceRetried: false,
+    droppedOnce: false,
+    extra: undefined,
     dropBody: false,
     logFrom: [],
   };
@@ -653,6 +695,8 @@ async function runBroadcast({ sendMode = "", bnFail = 0, head = 20 }) {
     BROADCAST_RETRY_BASE_MS: "20",
   };
   let first;
+  let second;
+  let backfill;
   try {
     first = spawnServer(baseEnv);
     const up = await waitFor(() => first.lines.some((line) => line.includes("relayer listening")), 60_000);
@@ -670,6 +714,21 @@ async function runBroadcast({ sendMode = "", bnFail = 0, head = 20 }) {
       assert.equal(failedRescue.includes('"sentBlock":0'), false);
       assert.equal(failedOutbox.includes('"sentBlock":0'), false);
       assert.equal(failedOutbox.includes('"sentBlock":"0"'), false);
+      return;
+    }
+    if (sendMode === "permit-used") {
+      assert.equal(posted.status, 502, `${posted.status} ${JSON.stringify(payload)} ${first.lines.join("\n")}`);
+      assert.equal(payload.error, "simulation_failed");
+      assert.equal(payload.revert, "UsedNonce");
+      assert.equal(state.sentRaw.length >= 1, true);
+      assert.equal(state.sentRaw.every((hash) => hash === state.sentRaw[0]), true);
+      assert.equal(state.extra, undefined);
+      const rescueText = await readFile(join(dataDir, "rescues.jsonl"), "utf8").catch(() => "");
+      assert.equal(rescueText.includes('"event":"rescue_ok"'), false);
+      assert.equal(catcher.posts.length, 0);
+      const outboxText = await readFile(join(dataDir, "points-outbox.jsonl"), "utf8").catch(() => "");
+      assert.equal(outboxText.includes('"op":"delivered"'), false);
+      assert.equal(outboxText.includes('"op":"enqueue"'), false);
       return;
     }
     assert.equal(posted.status, 200, `${posted.status} ${JSON.stringify(payload)} ${first.lines.join("\n")}`);
@@ -701,6 +760,12 @@ async function runBroadcast({ sendMode = "", bnFail = 0, head = 20 }) {
       assert.notEqual(state.sentRaw[0], state.sentRaw[1]);
       assert.equal(t0, state.sentRaw[state.sentRaw.length - 1]);
     }
+    if (sendMode === "mined-drop") {
+      assert.equal(state.extra, undefined);
+      assert.equal(state.sentRaw.length >= 2, true);
+      assert.equal(state.sentRaw.every((hash) => hash === t0), true);
+      assert.equal(String(logged.txNonce), "7");
+    }
     if (bnFail === 1) {
       assert.equal(String(logged.sentBlock), String(head));
       assert.equal(queued.sentBlock, head);
@@ -723,9 +788,45 @@ async function runBroadcast({ sendMode = "", bnFail = 0, head = 20 }) {
       );
       assert.equal(saw, true, `${first.lines.join("\n")}\nposts ${JSON.stringify(catcher.posts)}`);
       assert.equal(catcher.posts.length, 1);
+      if (sendMode === "mined-drop") {
+        const delivered = await waitFor(async () => {
+          const text = await readFile(join(dataDir, "points-outbox.jsonl"), "utf8").catch(() => "");
+          return text.includes('"op":"delivered"') && text.includes(t0);
+        }, 10_000);
+        assert.equal(delivered, true);
+        first.child.kill("SIGTERM");
+        await first.done;
+        first = null;
+        second = spawnServer(baseEnv);
+        const restarted = await waitFor(() => second.lines.some((line) => line.includes("relayer listening")), 60_000);
+        assert.equal(restarted, true, second.lines.join("\n"));
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        assert.equal(catcher.posts.length, 1);
+        second.child.kill("SIGTERM");
+        await second.done;
+        second = null;
+        backfill = spawn(process.execPath, ["--import", join(relayerRoot, "test/pointsFetchShim.mjs"), "scripts/backfill-points.mjs"], {
+          cwd: relayerRoot,
+          env: baseEnv,
+          stdio: ["ignore", "pipe", "pipe"],
+        });
+        const backfillOut = [];
+        backfill.stdout.on("data", (buf) => backfillOut.push(String(buf)));
+        backfill.stderr.on("data", (buf) => backfillOut.push(String(buf)));
+        const exit = await new Promise((resolve) => backfill.on("exit", (code) => resolve(code)));
+        assert.equal(exit, 0, backfillOut.join(""));
+        const after = await readFile(join(dataDir, "points-outbox.jsonl"), "utf8");
+        const deliveredRows = after.split("\n").filter((line) => line.includes('"op":"delivered"'));
+        assert.equal(deliveredRows.length, 1);
+        assert.match(deliveredRows[0], new RegExp(t0));
+        assert.equal(catcher.posts.length, 1);
+        assert.equal(catcher.posts.some((row) => String(row.txHash || "").toLowerCase() === t0), true);
+      }
     }
   } finally {
     if (first && first.child.exitCode === null && !first.child.killed) first.child.kill("SIGKILL");
+    if (second && second.child.exitCode === null && !second.child.killed) second.child.kill("SIGKILL");
+    if (backfill && backfill.exitCode === null) backfill.kill("SIGKILL");
     await closeServer(rpc.server);
     await closeServer(catcher.server);
     await rm(dir, { recursive: true, force: true });
