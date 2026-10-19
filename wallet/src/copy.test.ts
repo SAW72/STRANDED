@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import * as copy from "./copy";
+import * as relayerError from "./lib/relayerError";
+import * as tokenDisclosure from "./lib/tokenDisclosure";
 import copySource from "./copy.ts?raw";
 import {
   AMOUNT_HELPER,
@@ -94,7 +96,21 @@ describe("points copy", () => {
       expect(line.toLowerCase()).not.toContain("reward");
       expect(line.toLowerCase()).not.toContain("token value");
       expect(line.toLowerCase()).not.toContain("airdrop");
-      expect(line.toLowerCase()).not.toMatch(/\bearn\b/);
+      expect(line).not.toMatch(/\bearn/i);
+    }
+  });
+
+  it("rejects earn in every exported user-facing copy string", () => {
+    const modules = [copy, tokenDisclosure, relayerError];
+    const lines: Array<[string, string]> = [];
+    for (const mod of modules) {
+      for (const [key, value] of Object.entries(mod)) {
+        if (typeof value === "string") lines.push([key, value]);
+      }
+    }
+    expect(lines.length).toBeGreaterThan(pointsCopy.length);
+    for (const [key, line] of lines) {
+      expect(line, key).not.toMatch(/\bearn/i);
     }
   });
 

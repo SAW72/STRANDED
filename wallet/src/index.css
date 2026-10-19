@@ -392,6 +392,107 @@ h1 {
   gap: 0.15rem;
 }
 
+.points-how h2 {
+  margin: 0 0 0.35rem;
+}
+
+.points-how p {
+  margin: 0.35rem 0 0;
+  line-height: 1.45;
+}
+
+@media (max-width: 420px) {
+  .app {
+    padding: 0.65rem 0.75rem 2rem;
+  }
+
+  h1 {
+    font-size: 1.65rem;
+    margin-bottom: 0.2rem;
+  }
+
+  .lede {
+    margin-bottom: 0.45rem;
+    line-height: 1.3;
+  }
+
+  .demo-banner {
+    margin-bottom: 0.4rem;
+    padding: 0.25rem 0.45rem;
+  }
+
+  .points-nav {
+    margin-bottom: 0.35rem;
+  }
+
+  .points-disclaimer {
+    margin-bottom: 0.3rem;
+    padding: 0.28rem 0.45rem;
+    font-size: 0.78rem;
+    line-height: 1.25;
+  }
+
+  .points-how h2 {
+    font-size: 0.95rem;
+    margin-bottom: 0.1rem;
+  }
+
+  .points-how p {
+    margin-top: 0.12rem;
+    font-size: 0.78rem;
+    line-height: 1.25;
+  }
+
+  .banner-sample {
+    padding: 0.3rem 0.45rem;
+  }
+
+  .banner-sample p {
+    margin-top: 0.12rem;
+    font-size: 0.78rem;
+    line-height: 1.25;
+  }
+
+  .card {
+    padding: 0.65rem 0.7rem;
+    margin-bottom: 0.55rem;
+    border-radius: 16px;
+  }
+
+  .card h2 {
+    margin-bottom: 0.25rem;
+    font-size: 1rem;
+  }
+
+  .subtitle {
+    margin-bottom: 0.25rem;
+    font-size: 0.82rem;
+    line-height: 1.25;
+  }
+
+  .chain-switch {
+    margin-bottom: 0.4rem;
+  }
+
+  .field {
+    gap: 0.15rem;
+    margin: 0.2rem 0;
+  }
+
+  .field input {
+    padding: 0.4rem 0.55rem;
+  }
+
+  .banner {
+    padding: 0.45rem 0.55rem;
+    margin-top: 0.4rem;
+  }
+
+  .btn {
+    padding: 0.5rem 0.9rem;
+  }
+}
+
 .points-example-mark {
   display: inline-block;
   margin: 0 0.4rem 0.35rem 0;

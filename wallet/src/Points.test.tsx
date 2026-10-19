@@ -371,9 +371,36 @@ describe("Points page", () => {
     expect(points).not.toMatch(/POINTS_TOTAL_LABEL|POINTS_RANK_LABEL|POINTS_UNRANKED/);
   });
 
+  it("labels a ledger wallet_session as Session", async () => {
+    const view = await render(
+      <Points
+        client={client({
+          getWallet: () =>
+            Promise.resolve({
+              wallet: EXAMPLE_POINTS_ADDRESS,
+              total: 10,
+              rank: null,
+              categories: [{ action: "wallet_session", points: 10, count: 1 }],
+              entries: [{ action: "wallet_session", points: 10, txHash: null, chainId: null }],
+            }),
+        })}
+      />,
+    );
+    await lookup(view.container, EXAMPLE_POINTS_ADDRESS);
+    const visible = [...view.container.querySelectorAll("[data-testid='points-category'], [data-testid='points-entry']")]
+      .map((node) => node.textContent ?? "")
+      .join("\n");
+    expect(visible).toContain("Session");
+    expect(visible).toContain("10");
+    expect(visible).not.toContain("Other");
+    expect(visible).not.toContain("wallet_session");
+    await view.unmount();
+  });
+
   it("explains how points are recorded and links back home", async () => {
     const view = await render(<Points />);
     const how = view.container.querySelector("[data-testid='points-how']");
+    expect(how?.id).toBe("how-points-are-recorded");
     expect(how?.textContent).toMatch(/How points are recorded/);
     expect(how?.textContent).toMatch(/completed rescues/);
     expect(how?.textContent).toMatch(/relayer jobs/);

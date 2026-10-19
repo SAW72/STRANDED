@@ -64,6 +64,7 @@ export const QUOTE_ERROR = "Couldn’t load rescue details. Try again.";
 export const QUOTE_IDLE_CONNECT =
   "Connect on Base Sepolia or Arb Sepolia and enter an amount to see the rescue plan.";
 export const QUOTE_CONNECT_TO_REVIEW = "Connect a wallet to see the rescue quote.";
+export const QUOTE_ENTER_AMOUNT = "Enter an amount to see a quote.";
 export const QUOTE_IDLE_AMOUNT = "Enter an amount to see the rescue plan.";
 export const QUOTE_IDLE_UNAVAILABLE = "Rescue details aren’t available yet.";
 

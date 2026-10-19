@@ -6,12 +6,19 @@ import { publishPointsShell } from "./spaFallback";
 
 const configDir = path.dirname(fileURLToPath(import.meta.url));
 
-function pointsShellPlugin(): Plugin {
+export function pointsShellPlugin(): Plugin {
+  let outDir: string | null = null;
   return {
     name: "stranded-points-shell",
     apply: "build",
+    configResolved(resolved) {
+      outDir = resolved.build.outDir;
+    },
     closeBundle() {
-      publishPointsShell(path.resolve(configDir, "dist"));
+      if (!outDir) {
+        throw new Error("Vite build.outDir was not resolved");
+      }
+      publishPointsShell(outDir);
     },
   };
 }

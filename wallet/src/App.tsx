@@ -25,6 +25,7 @@ import {
   CONNECTING_LABEL,
   POINTS_NAV_LABEL,
   QUOTE_CONNECT_TO_REVIEW,
+  QUOTE_ENTER_AMOUNT,
   DEADLINE_HELPER,
   DEADLINE_LABEL,
   FEE_HELPER,
@@ -117,7 +118,7 @@ import { receiptFromSubmit, type RescueReceiptView } from "./lib/receipt";
 import { submitRescue } from "./lib/rescues";
 import { isPointsRoute, Points } from "./Points";
 import { RescueReceipt } from "./RescueReceipt";
-import { demoBannerText, tokenDisclosure } from "./lib/tokenDisclosure";
+import { DEMO_FALLBACK_TICKER, demoBannerText, tokenDisclosure } from "./lib/tokenDisclosure";
 import {
   StrandedCelebration,
   StrandedHero,
@@ -353,11 +354,14 @@ function RescueApp() {
     errorMessage: quoteUserMessage,
   });
 
-  const demoSymbol =
-    (typeof tokenSymbol === "string" ? tokenSymbol : null) ??
-    quote?.tokenSymbol ??
-    receipt?.tokenSymbol ??
-    null;
+  const chainTicker = typeof tokenSymbol === "string" ? tokenSymbol : null;
+  // A sample fixture still names the delisted ticker. The banner uses the
+  // on-chain symbol, or SDEMO when that read has not succeeded.
+  const demoSymbol = useFixture
+    ? (chainTicker ?? DEMO_FALLBACK_TICKER)
+    : (chainTicker ?? quote?.tokenSymbol ?? receipt?.tokenSymbol ?? null);
+
+  const reviewVisible = isConnected && quoteReady;
 
   const phase = rescuePhase({
     quote: quoteReady ? quote : null,
@@ -377,6 +381,10 @@ function RescueApp() {
     setSignError(null);
     setSubmitState({ kind: "idle" });
   }, [humanAmount, selectedChainId, token, receipt]);
+
+  useEffect(() => {
+    if (!reviewVisible) setDetailsConfirmed(false);
+  }, [reviewVisible]);
 
   const reviewDecimals = quote?.tokenDecimals ?? displayDecimals;
   const reviewSymbol = quote?.tokenSymbol;
@@ -717,7 +725,7 @@ function RescueApp() {
           </div>
         )}
 
-        {isConnected ? (
+        {reviewVisible ? (
         <div data-testid="rescue-quote-fields">
         <h3 className="review-heading">What happens to your tokens</h3>
         <div className="review-list">
@@ -840,9 +848,9 @@ function RescueApp() {
           />
         </div>
         </div>
-        ) : (
+        ) : isConnected && (quoteStatus.kind === "loading" || quoteStatus.kind === "error") ? null : (
           <p className="muted" data-testid="rescue-quote-collapsed">
-            {QUOTE_CONNECT_TO_REVIEW}
+            {isConnected ? QUOTE_ENTER_AMOUNT : QUOTE_CONNECT_TO_REVIEW}
           </p>
         )}
 
@@ -861,7 +869,9 @@ function RescueApp() {
             </div>
           </div>
         )}
-        {quoteStatus.kind === "idle" && <p className="muted">{quoteStatus.message}</p>}
+        {quoteStatus.kind === "idle" && reviewVisible && (
+          <p className="muted">{quoteStatus.message}</p>
+        )}
 
         <p className="trust-line">{REVIEW_TRUST_LINE}</p>
 
@@ -869,7 +879,8 @@ function RescueApp() {
           <button
             className="btn btn-primary"
             type="button"
-            disabled={phase !== "review"}
+            data-testid="confirm-details"
+            disabled={!reviewVisible || phase !== "review"}
             onClick={() => {
               setDetailsConfirmed(true);
               setSubmitState((current) => quoteSessionOnNewAttempt(current));
@@ -889,7 +900,7 @@ function RescueApp() {
           {phase === "confirmed" || phase === "signing" || phase === "signed" ? (
             <span className="ok">{CONFIRMED_HINT}</span>
           ) : (
-            <span className="muted">{quoteReady ? CONFIRM_HINT : SIGN_LOCKED_MISSING}</span>
+            <span className="muted">{reviewVisible ? CONFIRM_HINT : SIGN_LOCKED_MISSING}</span>
           )}
         </div>
       </section>
@@ -908,7 +919,9 @@ function RescueApp() {
         <button
           className="btn btn-primary"
           type="button"
+          data-testid="sign-order"
           disabled={
+            !reviewVisible ||
             !canPromptSignatures(phase) ||
             signing ||
             !quoteReady ||
@@ -926,7 +939,9 @@ function RescueApp() {
                 : "Sign Order and permit"}
         </button>
         {!canPromptSignatures(phase) && (
-          <div className="banner banner-block">{quoteReady ? SIGN_LOCKED : SIGN_LOCKED_MISSING}</div>
+          <div className="banner banner-block">
+            {reviewVisible ? SIGN_LOCKED : SIGN_LOCKED_MISSING}
+          </div>
         )}
         {signError && <p className="danger">{signError}</p>}
         {signed && (

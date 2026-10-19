@@ -8,7 +8,7 @@ No public points announcement goes out until all of the following are done:
 
 (b) The full POINTS_DISCLAIMER, or a link to it, sits next to any points mention.
 
-(c) Banned words and phrases: airdrop; token (except 'not a token'); reward/earn; value; early/early-adopter; 'points may matter later'; conversion; snapshot; eligibility; leaderboard-for-prizes; and any hint of a future distribution.
+(c) Banned words and phrases: airdrop; token (except 'not a token'); reward/earn; value; early/early-adopter; 'points may matter later'; conversion; snapshot; eligibility; leaderboard-for-prizes; and any hint of a future distribution. The required POINTS_DISCLAIMER is exempt from this list: that text contains 'token' and 'value' and must still appear in full.
 
 (d) Spencer gives an explicit GO after Lawyer's sign-off.
 

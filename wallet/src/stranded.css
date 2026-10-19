@@ -251,6 +251,22 @@
   }
 }
 
+@media (max-width: 420px) {
+  .stranded-hero {
+    gap: 0.35rem;
+    margin-bottom: 0.55rem;
+  }
+
+  .stranded-hero-pup {
+    width: 3.25rem;
+    height: 3.25rem;
+  }
+
+  .btn.btn-play {
+    margin-top: 0.25rem;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .stranded-hero-pup,
   .stranded-pup,

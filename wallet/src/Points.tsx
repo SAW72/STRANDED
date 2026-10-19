@@ -45,6 +45,7 @@ const ACTION_LABELS: Record<string, string> = {
   registry_find: POINTS_ACTION_REGISTRY_FIND,
   registry_claim: POINTS_ACTION_REGISTRY_CLAIM,
   session: POINTS_ACTION_SESSION,
+  wallet_session: POINTS_ACTION_SESSION,
 };
 
 /** Bug reports and security findings are not points actions and are not shown. */
@@ -120,7 +121,7 @@ export function Points({ client }: { client?: PointsClient }) {
       <p className="points-disclaimer" role="note" data-testid="points-disclaimer">
         {POINTS_DISCLAIMER}
       </p>
-      <section data-testid="points-how">
+      <section className="points-how" id="how-points-are-recorded" data-testid="points-how">
         <h2>{POINTS_HOW_HEADING}</h2>
         <p>{POINTS_HOW_BODY}</p>
         <p>{POINTS_HOW_STATUS}</p>
