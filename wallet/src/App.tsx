@@ -26,6 +26,7 @@ import {
   POINTS_NAV_LABEL,
   QUOTE_CONNECT_TO_REVIEW,
   QUOTE_ENTER_AMOUNT,
+  QUOTE_ERROR,
   DEADLINE_HELPER,
   DEADLINE_LABEL,
   FEE_HELPER,
@@ -118,7 +119,7 @@ import { receiptFromSubmit, type RescueReceiptView } from "./lib/receipt";
 import { submitRescue } from "./lib/rescues";
 import { isPointsRoute, Points } from "./Points";
 import { RescueReceipt } from "./RescueReceipt";
-import { DEMO_FALLBACK_TICKER, demoBannerText, tokenDisclosure } from "./lib/tokenDisclosure";
+import { DEMO_FALLBACK_TICKER, demoBannerText, demoTicker, tokenDisclosure } from "./lib/tokenDisclosure";
 import {
   StrandedCelebration,
   StrandedHero,
@@ -140,7 +141,7 @@ function ReviewRow({
   return (
     <div className="review-row">
       <div className="review-label">{label}</div>
-      <div className="review-value">{value}</div>
+      <div className="review-figure">{value}</div>
       <p className="review-help">{help}</p>
     </div>
   );
@@ -354,7 +355,8 @@ function RescueApp() {
     errorMessage: quoteUserMessage,
   });
 
-  const chainTicker = typeof tokenSymbol === "string" ? tokenSymbol : null;
+  const liveTicker = demoTicker(typeof tokenSymbol === "string" ? tokenSymbol : null);
+  const chainTicker = liveTicker;
   // Sample mode never shows the on-chain symbol. An empty read and a live
   // ticker such as GRTT or gMOCK both render as SDEMO.
   const demoSymbol = useFixture
@@ -407,6 +409,7 @@ function RescueApp() {
   }, [refreshHoldings, displayDecimals]);
 
   function selectChain(next: SupportedChainId) {
+    if (next !== selectedChainId) setReceipt(null);
     setSelectedChainId(next);
     if (isConnected && chainId !== next) {
       switchChain({ chainId: next });
@@ -679,9 +682,13 @@ function RescueApp() {
         <dl className="kv">
           <dt>Token</dt>
           <dd>
-            {token
-              ? `${useFixture ? DEMO_FALLBACK_TICKER : (tokenSymbol ?? "Token")} · ${shortenAddress(token)}`
-              : "not configured"}
+            {!token
+              ? "not configured"
+              : useFixture
+                ? `${DEMO_FALLBACK_TICKER} · ${shortenAddress(token)}`
+                : liveTicker
+                  ? `${liveTicker} · ${shortenAddress(token)}`
+                  : QUOTE_ERROR}
           </dd>
           <dt>Balance</dt>
           <dd>

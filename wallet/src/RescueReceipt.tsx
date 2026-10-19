@@ -23,7 +23,7 @@ function Row({ label, value, help }: { label: string; value: ReactNode; help: st
   return (
     <div className="review-row">
       <div className="review-label">{label}</div>
-      <div className="review-value">{value}</div>
+      <div className="review-figure">{value}</div>
       <p className="review-help">{help}</p>
     </div>
   );

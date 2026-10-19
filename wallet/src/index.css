@@ -183,7 +183,7 @@ h1 {
   color: var(--muted);
 }
 
-.review-value {
+.review-figure {
   font-size: 1.15rem;
 }
 
@@ -307,6 +307,8 @@ h1 {
   border-radius: 22px;
   padding: 1.2rem 1.25rem 1.15rem;
   width: min(22.5rem, 100%);
+  max-height: calc(100dvh - 2.5rem);
+  overflow: auto;
   box-shadow: 0 10px 0 rgba(240, 201, 176, 0.55);
 }
 

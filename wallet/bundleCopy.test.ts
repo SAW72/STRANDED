@@ -14,11 +14,11 @@ import {
   formatBannedHits,
   hitsInAppCode,
   isWholeBannedForm,
+  unsafeRedirects,
   type BannedHit,
 } from "./src/lib/bannedWords";
 
 const walletRoot = path.dirname(fileURLToPath(import.meta.url));
-const walletSrc = `${walletRoot.replaceAll("\\", "/")}/src/`;
 
 function normalize(id: string): string {
   return id.replaceAll("\\", "/");
@@ -34,14 +34,27 @@ function walk(dir: string, accept: (name: string) => boolean): string[] {
   return found;
 }
 
-function isAppModuleId(id: string): boolean {
+/** Vendor code is the top-level node_modules tree. A node_modules folder under src stays app code. */
+function isVendorModuleId(id: string): boolean {
   const norm = normalize(id);
-  if (norm.includes("/node_modules/") || norm.includes("\0")) return false;
-  return norm.startsWith(walletSrc);
+  const marker = "/node_modules/";
+  const srcRoot = `${normalize(walletRoot)}/src`;
+  let from = 0;
+  while (from < norm.length) {
+    const at = norm.indexOf(marker, from);
+    if (at === -1) return false;
+    const before = norm.slice(0, at);
+    const nestedInSrc = before === srcRoot || before.startsWith(`${srcRoot}/`);
+    if (!nestedInSrc) return true;
+    from = at + marker.length;
+  }
+  return false;
 }
 
-function isVendorModuleId(id: string): boolean {
-  return normalize(id).includes("/node_modules/");
+function isAppModuleId(id: string): boolean {
+  const norm = normalize(id);
+  if (!norm || norm.includes("\0")) return false;
+  return !isVendorModuleId(norm);
 }
 
 /** The gate QA blocked: a one-word literal was skipped unless it was an exact banned form. */
@@ -85,16 +98,26 @@ function scanAppModules(output: RollupOutput["output"]): BannedHit[] {
 function isPublicText(name: string): boolean {
   if (name === "_redirects") return true;
   const ext = path.extname(name).toLowerCase();
-  return ext === ".json" || ext === ".txt" || ext === ".text";
+  return ext === ".json" || ext === ".txt" || ext === ".text" || ext === ".html" || ext === ".htm" || ext === ".svg" || ext === ".webmanifest" || ext === ".xml" || ext === ".md";
 }
 
 function scanCopiedText(outDir: string, publicDir: string): BannedHit[] {
-  if (!fs.existsSync(publicDir)) return [];
   const hits: BannedHit[] = [];
+  const indexHtml = path.join(outDir, "index.html");
+  if (fs.existsSync(indexHtml)) {
+    hits.push(...bannedHitsInText(fs.readFileSync(indexHtml, "utf8"), "index.html"));
+  }
+  if (!fs.existsSync(publicDir)) return hits;
   for (const file of walk(publicDir, isPublicText)) {
     const rel = path.relative(publicDir, file).split(path.sep).join("/");
     const shipped = path.join(outDir, rel);
-    hits.push(...bannedHitsInText(fs.readFileSync(shipped, "utf8"), rel));
+    const text = fs.readFileSync(shipped, "utf8");
+    hits.push(...bannedHitsInText(text, rel));
+    if (path.basename(file) === "_redirects") {
+      for (const bad of unsafeRedirects(text, rel)) {
+        hits.push({ stem: "redirect", match: bad.target, excerpt: bad.line, file: rel });
+      }
+    }
   }
   return hits;
 }
@@ -117,21 +140,38 @@ function jsxText(source: string): string[] {
 }
 
 async function buildWallet(outDir: string, extra: { plugins?: Plugin[]; publicDir?: string } = {}) {
-  const result = await build({
-    root: walletRoot,
-    configFile: path.join(walletRoot, "vite.config.ts"),
-    plugins: extra.plugins,
-    publicDir: extra.publicDir,
-    build: {
-      outDir,
-      emptyOutDir: true,
+  const previous = process.env.NODE_ENV;
+  process.env.NODE_ENV = "production";
+  let mode = "";
+  const modePlugin: Plugin = {
+    name: "record-build-mode",
+    configResolved(config) {
+      mode = config.mode;
     },
-    logLevel: "silent",
-  });
-  if (Array.isArray(result) || !result || !("output" in result)) {
-    throw new Error("expected a Vite Rollup build");
+  };
+  try {
+    const result = await build({
+      root: walletRoot,
+      mode: "production",
+      configFile: path.join(walletRoot, "vite.config.ts"),
+      plugins: [modePlugin, ...(extra.plugins ?? [])],
+      publicDir: extra.publicDir,
+      build: {
+        outDir,
+        emptyOutDir: true,
+      },
+      logLevel: "silent",
+    });
+    if (Array.isArray(result) || !result || !("output" in result)) {
+      throw new Error("expected a Vite Rollup build");
+    }
+    if (mode !== "production" || process.env.NODE_ENV !== "production") {
+      throw new Error(`copy scan expected a production build, mode=${mode} NODE_ENV=${process.env.NODE_ENV}`);
+    }
+    return result;
+  } finally {
+    process.env.NODE_ENV = previous;
   }
-  return result;
 }
 
 const priceLabel = ["Pri", "ce", ":"].join("");
@@ -179,7 +219,46 @@ describe("banned-word scanner", () => {
     expect(bannedWordsIn(["list", "ed"].join(""))).toEqual(["listing"]);
     expect(bannedWordsIn(["pre-", "sale"].join(""))).toEqual(["presale"]);
     expect(bannedWordsIn(["pre ", "sale"].join(""))).toEqual(["presale"]);
+    expect(bannedWordsIn(["profit", "ability"].join(""))).toEqual(["profit"]);
+    expect(bannedWordsIn(["trade", "able"].join(""))).toEqual(["trade"]);
     expect(bannedWordsIn("learn yearn earnest unearned valuation tradeoff")).toEqual([]);
+  });
+
+  it("fails hyphenated and joined forms, including a non-breaking hyphen", () => {
+    const airdropEligible = ["Air", "drop", "-eligible"].join("");
+    const rewardReady = ["Re", "ward", "-ready"].join("");
+    const airDrop = ["air", "-drop"].join("");
+    const nbPreSale = ["pre", "\u2011", "sale"].join("");
+    expect(bannedWordsIn(airdropEligible)).toEqual(["airdrop"]);
+    expect(bannedWordsIn(rewardReady)).toEqual(["reward"]);
+    expect(bannedWordsIn(airDrop)).toEqual(["airdrop"]);
+    expect(bannedWordsIn(nbPreSale)).toEqual(["presale"]);
+    expect(bannedWordsIn(["air", "\u200B", "drop"].join(""))).toEqual(["airdrop"]);
+    expect(bannedWordsIn("\uFF50\uFF52\uFF49\uFF43\uFF45")).toEqual(["price"]);
+    expect(bannedWordsIn(["re", "ward", "_ready"].join(""))).toEqual(["reward"]);
+  });
+
+  it("passes a checkout path that contains rewards", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "rewards-checkout-"));
+    try {
+      const file = path.join(root, "wallet", "src", "App.tsx");
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      const source = fs.readFileSync(path.join(walletRoot, "src", "App.tsx"), "utf8");
+      fs.writeFileSync(file, source);
+      const withPath = `${source}\nexport const builtFrom = ${JSON.stringify(file)};\n`;
+      const hits = hitsInAppCode(withPath, file);
+      expect(hits, formatBannedHits(hits)).toEqual([]);
+      expect(bannedHitsInText(file, file)).toEqual([]);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("flags an external redirect target", () => {
+    const line = ["/go", "https://example.invalid/out", "302"].join(" ");
+    const hits = unsafeRedirects(`# note\n/points /index.html 200\n${line}\n`, "_redirects");
+    expect(hits).toEqual([{ file: "_redirects", line, target: "https://example.invalid/out" }]);
+    expect(unsafeRedirects("/points /index.html 200\n/* /index.html 200\n", "_redirects")).toEqual([]);
   });
 
   it("flags a static concatenation and documents the runtime-join limit", () => {
@@ -259,6 +338,9 @@ describe("built app chunks", () => {
       });
       expect(mixed, "production chunking keeps app and vendor modules in one chunk").toBeDefined();
       expect(normalize(mixed?.facadeModuleId ?? "")).toMatch(/\/index\.html$/);
+      expect(isAppModuleId(path.join(walletRoot, "src/pkg/node_modules/left/index.js"))).toBe(true);
+      expect(isAppModuleId(path.resolve(walletRoot, "../shared/quote.ts"))).toBe(true);
+      expect(isAppModuleId(path.join(walletRoot, "node_modules/viem/index.js"))).toBe(false);
       expect(mixed?.code).toMatch(/\bvalue\b/);
       const naive = hitsInAppCode(mixed?.code ?? "", mixed?.fileName ?? "chunk.js");
       expect(naive.length, "the mixed chunk still contains vendor copy").toBeGreaterThan(0);
@@ -303,15 +385,36 @@ describe("planted bundle copy", () => {
   const earnings = ["earn", "ings"].join("");
   const trader = ["trad", "er"].join("");
   const profitable = ["profit", "able"].join("");
+  const airdropEligible = ["Air", "drop", "-eligible"].join("");
+  const rewardReady = ["Re", "ward", "-ready"].join("");
+  const airDrop = ["air", "-drop"].join("");
+  const nbPreSale = ["pre", "\u2011", "sale"].join("");
+  const sharedWord = ["list", "ed"].join("");
+  const manifestWord = ["profit", "ability"].join("");
+  const svgWord = ["trade", "able"].join("");
+  const htmlWord = ["in", "vestors"].join("");
+  const sharedId = path.resolve(walletRoot, "../shared/planted-copy.ts");
   let outDir = "";
   let publicDir = "";
   let hits: BannedHit[] = [];
+  let copied: BannedHit[] = [];
   let output: RollupOutput["output"] = [];
 
   function plantPlugin(): Plugin {
     return {
       name: "plant-banned-copy",
       enforce: "pre",
+      resolveId(source) {
+        if (source === "../shared/planted-copy") return sharedId;
+        return null;
+      },
+      load(id) {
+        if (normalize(id) !== normalize(sharedId)) return null;
+        return `Object.assign(globalThis, { sharedPlant: ${JSON.stringify(sharedWord)} });\n`;
+      },
+      transformIndexHtml(html) {
+        return html.replace("</body>", `<p>${htmlWord}</p></body>`);
+      },
       transform(code, id) {
         const norm = normalize(id);
         if (norm.endsWith("/src/App.tsx")) {
@@ -325,13 +428,18 @@ describe("planted bundle copy", () => {
             `__plantEarn: ${JSON.stringify(earnLabel)},`,
             "});",
           ].join("\n");
-          return { code: `${code.replace(anchor, `${anchor}${jsx}`)}\n${extra}\n`, map: null };
+          const withImport = `import "../shared/planted-copy";\n${code.replace(anchor, `${anchor}${jsx}`)}`;
+          return { code: `${withImport}\n${extra}\n`, map: null };
         }
         if (norm.endsWith("/src/lib/format.ts")) {
           const extra = [
             "Object.assign(globalThis, {",
             `__plantedConstant: ${JSON.stringify(phrase)},`,
             `__plantedInflection: ${JSON.stringify(inflection)},`,
+            `__plantHyphenA: ${JSON.stringify(airdropEligible)},`,
+            `__plantHyphenB: ${JSON.stringify(rewardReady)},`,
+            `__plantHyphenC: ${JSON.stringify(airDrop)},`,
+            `__plantHyphenD: ${JSON.stringify(nbPreSale)},`,
             '__plantedSplit: "air" + "drop"',
             "});",
           ].join("\n");
@@ -350,9 +458,19 @@ describe("planted bundle copy", () => {
     publicDir = fs.mkdtempSync(path.join(os.tmpdir(), "stranded-public-"));
     fs.writeFileSync(path.join(publicDir, "notice.json"), JSON.stringify({ note: earnings }));
     fs.writeFileSync(path.join(publicDir, "notice.txt"), `${trader}\n`);
+    fs.writeFileSync(
+      path.join(publicDir, "site.webmanifest"),
+      JSON.stringify({ name: manifestWord }),
+    );
+    fs.writeFileSync(path.join(publicDir, "mark.svg"), `<svg xmlns="http://www.w3.org/2000/svg"><text>${svgWord}</text></svg>\n`);
+    fs.writeFileSync(
+      path.join(publicDir, "_redirects"),
+      ["/go", "https://example.invalid/out", "302"].join(" ") + "\n",
+    );
     const built = await buildWallet(outDir, { plugins: [plantPlugin()], publicDir });
     output = built.output;
     hits = scanAppModules(output);
+    copied = scanCopiedText(outDir, publicDir);
   }, 90_000);
 
   afterAll(() => {
@@ -419,5 +537,39 @@ describe("planted bundle copy", () => {
     expect(cssHits[0]?.stem).toBe("profit");
     expect(cssHits[0]?.file).toMatch(/\.css$/);
     expect(cssHits[0]?.excerpt).toBe(profitable);
+  });
+
+  it("flags hyphenated labels planted in the built app module", () => {
+    const planted = hits.filter((hit) => hit.file.includes("src/lib/format.ts"));
+    expect(planted.some((hit) => hit.stem === "airdrop" && hit.excerpt.includes(airdropEligible))).toBe(true);
+    expect(planted.some((hit) => hit.stem === "reward" && hit.excerpt.includes(rewardReady))).toBe(true);
+    expect(planted.some((hit) => hit.stem === "airdrop" && hit.excerpt.includes(airDrop))).toBe(true);
+    expect(planted.some((hit) => hit.stem === "presale" && hit.excerpt.includes(nbPreSale))).toBe(true);
+  });
+
+  it("flags a shared module outside src and outside node_modules", () => {
+    const hit = hits.find((item) => item.file.includes("shared/planted-copy"));
+    expect(hit, formatBannedHits(hits)).toBeDefined();
+    expect(hit?.stem).toBe("listing");
+    expect(isAppModuleId(sharedId)).toBe(true);
+    expect(isVendorModuleId(sharedId)).toBe(false);
+  });
+
+  it("flags a webmanifest, an svg, and index.html copied into dist", () => {
+    const manifest = copied.filter((hit) => hit.file === "site.webmanifest");
+    const svg = copied.filter((hit) => hit.file === "mark.svg");
+    const html = copied.filter((hit) => hit.file === "index.html");
+    expect(manifest.map((hit) => hit.stem)).toEqual(["profit"]);
+    expect(svg.map((hit) => hit.stem)).toEqual(["trade"]);
+    expect(html.some((hit) => hit.stem === "invest")).toBe(true);
+    expect(fs.existsSync(path.join(outDir, "site.webmanifest"))).toBe(true);
+    expect(fs.existsSync(path.join(outDir, "mark.svg"))).toBe(true);
+  });
+
+  it("flags an external 302 target in _redirects", () => {
+    const bad = copied.filter((hit) => hit.stem === "redirect");
+    expect(bad, formatBannedHits(copied)).toHaveLength(1);
+    expect(bad[0]?.match).toBe("https://example.invalid/out");
+    expect(bad[0]?.file).toBe("_redirects");
   });
 });

@@ -8,7 +8,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { WagmiProvider } from "wagmi";
 import { App } from "./App";
 import { ARB_SEPOLIA_CHAIN_ID } from "./lib/chains";
-import { SAMPLE_BADGE } from "./copy";
+import { sampleFixtureRaw } from "./lib/fixture";
+import { QUOTE_ERROR, SAMPLE_BADGE } from "./copy";
 import { UNKNOWN_DEMO_BANNER } from "./lib/tokenDisclosure";
 import { wagmiConfig } from "./wagmi";
 
@@ -22,6 +23,11 @@ const accountState = vi.hoisted(() => ({
 
 const readState = vi.hoisted(() => ({
   symbol: undefined as unknown,
+}));
+
+vi.mock("./lib/holdings", () => ({
+  readLiveHoldings: async () => ({ tokenBalance: 10n ** 24n, nativeBalance: 0n }),
+  readLivePermitAuth: async () => ({ tokenName: "Sample", permitNonce: 0n }),
 }));
 
 vi.mock("wagmi", async () => {
@@ -150,11 +156,11 @@ describe("App routes", () => {
     const rows = [...view.container.querySelectorAll(".review-row")];
     expect(rows.length).toBeGreaterThan(0);
     expect(view.container.querySelector("[data-testid='rescue-quote-collapsed']")).toBeNull();
-    const values = rows.map((row) => row.querySelector(".review-value")?.textContent ?? "").join("\n");
+    const values = rows.map((row) => row.querySelector(".review-figure")?.textContent ?? "").join("\n");
     expect(values).toMatch(/SDEMO/);
     expect(values).not.toMatch(/\bGRTT\b/);
     for (const row of rows) {
-      expect(row.querySelector(".review-value")?.textContent).not.toBe("—");
+      expect(row.querySelector(".review-figure")?.textContent).not.toBe("—");
     }
     const confirm = button(view.container, "confirm-details");
     const sign = button(view.container, "sign-order");
@@ -235,6 +241,73 @@ describe("App routes", () => {
     expect(emptyToken).not.toMatch(/\bToken\b/);
     expect(emptyToken).not.toBe("not configured");
     await empty.unmount();
+  });
+
+  it("rejects an empty on-chain symbol outside sample mode", async () => {
+    vi.stubEnv("VITE_RELAYER_URL_ARB_SEPOLIA", "https://relayer.example.invalid");
+    vi.stubEnv("VITE_TOKEN_ADDRESS_ARB_SEPOLIA", WALLET);
+    readState.symbol = "";
+    accountState.address = WALLET;
+    accountState.isConnected = true;
+    accountState.chainId = ARB_SEPOLIA_CHAIN_ID;
+
+    function tokenRow(container: HTMLElement): string {
+      const dt = [...container.querySelectorAll("dt")].find((node) => node.textContent === "Token");
+      const dd = dt?.nextElementSibling;
+      if (!(dd instanceof HTMLElement)) throw new Error("missing token row");
+      return dd.textContent ?? "";
+    }
+
+    const view = await renderAt("/", <App />);
+    expect(tokenRow(view.container)).toBe(QUOTE_ERROR);
+    expect(tokenRow(view.container)).not.toMatch(/\u00b7/);
+    const banner = view.container.querySelector("[data-testid='demo-banner']")?.textContent ?? "";
+    const review = [...view.container.querySelectorAll("section")].find((node) =>
+      /^4\./.test(node.querySelector("h2")?.textContent ?? ""),
+    );
+    const reviewText = review?.textContent ?? "";
+    if (reviewText.includes("GRTT")) expect(banner).toContain("GRTT");
+    if (reviewText.includes("SDEMO")) expect(banner).toContain("SDEMO");
+    expect(reviewText).not.toMatch(/\u00b7\s*0x/i);
+    await view.unmount();
+
+    const body = sampleFixtureRaw({
+      chainId: ARB_SEPOLIA_CHAIN_ID,
+      user: WALLET,
+      tokenIn: WALLET,
+      tokenSymbol: "GRTT",
+    });
+    vi.stubGlobal(
+      "fetch",
+      async () =>
+        new Response(JSON.stringify(body), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+    );
+    readState.symbol = "   ";
+    const quoted = await renderAt("/", <App />);
+    const input = quoted.container.querySelector("input[inputmode='decimal']");
+    if (!(input instanceof HTMLInputElement)) throw new Error("missing amount");
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(input, "1");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    for (let i = 0; i < 8; i += 1) {
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      });
+    }
+    const quotedBanner = quoted.container.querySelector("[data-testid='demo-banner']")?.textContent ?? "";
+    const rows = [...quoted.container.querySelectorAll(".review-row")].map((row) => row.textContent ?? "").join("\n");
+    expect(rows.length).toBeGreaterThan(0);
+    expect(quotedBanner).toContain("GRTT");
+    expect(rows).toContain("GRTT");
+    expect(quotedBanner.includes("SDEMO")).toBe(rows.includes("SDEMO"));
+    expect(tokenRow(quoted.container)).toBe(QUOTE_ERROR);
+    expect(tokenRow(quoted.container)).not.toMatch(/\u00b7\s*0x/i);
+    vi.unstubAllGlobals();
+    await quoted.unmount();
   });
 
   it("names Base Sepolia in the disclosure when that network is selected", async () => {

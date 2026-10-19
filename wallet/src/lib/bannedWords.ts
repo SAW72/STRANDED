@@ -58,14 +58,20 @@ addForm("trade", "traders");
 addForm("trade", "tradable");
 addForm("value", "valuable");
 addForm("profit", "profitable");
+addForm("profit", "profitability");
 addForm("listing", "listed");
+addForm("trade", "tradeable");
 
 const FORMS_LONGEST_FIRST = [...FORM_TO_STEM.keys()].sort((a, b) => b.length - a.length);
-// Hyphen joins identifier parts, so a class such as review-value is one token.
+// Hyphens and underscores split tokens. A second pass joins each run so air-drop matches.
 const BANNED_PATTERN = new RegExp(
-  `(?<![A-Za-z0-9-])(?:${FORMS_LONGEST_FIRST.map(escapeRegExp).join("|")})(?![A-Za-z0-9-])`,
+  `(?<![A-Za-z0-9])(?:${FORMS_LONGEST_FIRST.map(escapeRegExp).join("|")})(?![A-Za-z0-9])`,
   "gi",
 );
+
+const ZERO_WIDTH = /[\u200B\u200C\u200D\uFEFF\u2060\u180E]/g;
+const HYPHEN_SOURCE = "\\-\\u2010\\u2011\\u2012\\u2013\\u2014\\u2015\\u2212\\uFE58\\uFE63\\uFF0D_";
+const HYPHEN_RUN = new RegExp(`[A-Za-z0-9]+(?:[${HYPHEN_SOURCE}][A-Za-z0-9]+)+`, "gu");
 
 /** True when the whole literal is a banned form, with no punctuation stripped. */
 export function isWholeBannedForm(text: string): boolean {
@@ -82,30 +88,89 @@ export function formatBannedHits(hits: BannedHit[]): string {
     .join("\n");
 }
 
-/** Same-length rewrite so match indexes still point at the original text. */
-function prepareCopy(text: string): string {
-  return text
-    .replace(/\bno cash value\b/gi, (match) => " ".repeat(match.length))
-    .replace(/\bno value\b/gi, (match) => " ".repeat(match.length))
-    .replace(/\bpre-sales\b/gi, "presales ")
-    .replace(/\bpre sales\b/gi, "presales ")
-    .replace(/\bpre-sale\b/gi, "presale  ")
-    .replace(/\bpre sale\b/gi, "presale ")
-    .replace(/[^A-Za-z0-9\s'-]/g, " ");
+/** A filesystem path. A checkout directory named rewards must not become a hit. */
+export function isAbsoluteBuildPath(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed || /\s/.test(trimmed)) return false;
+  if (trimmed.includes("node_modules")) return true;
+  if (/^(?:\/|[A-Za-z]:[\\/])/.test(trimmed) && trimmed.split(/[\\/]/).filter(Boolean).length >= 2) {
+    return true;
+  }
+  return false;
 }
 
-export function bannedHitsInText(text: string, file: string): BannedHit[] {
-  const prepared = prepareCopy(text);
+function normalizeCopy(text: string): string {
+  return text.replace(ZERO_WIDTH, "").normalize("NFKC");
+}
+
+function maskBuildPaths(text: string): string {
+  return text.replace(/(?:\/|[A-Za-z]:[\\/])[^\s"'`<>)]+/g, (path) =>
+    isAbsoluteBuildPath(path) ? " ".repeat(path.length) : path,
+  );
+}
+
+/** Same-length rewrite so match indexes still point at the original text. */
+function prepareCopy(text: string): string {
+  return maskBuildPaths(normalizeCopy(text))
+    .replace(/\bno cash value\b/gi, (match) => " ".repeat(match.length))
+    .replace(/\bno value\b/gi, (match) => " ".repeat(match.length))
+    .replace(new RegExp(`\\bpre[${HYPHEN_SOURCE} ]sales\\b`, "gi"), "presales ")
+    .replace(new RegExp(`\\bpre[${HYPHEN_SOURCE} ]sale\\b`, "gi"), "presale ")
+    .replace(new RegExp(`[${HYPHEN_SOURCE}]`, "g"), " ")
+    .replace(/[^A-Za-z0-9\s']/g, " ");
+}
+
+function hitsOnPrepared(prepared: string, excerptFrom: string, file: string): BannedHit[] {
   const hits: BannedHit[] = [];
   for (const match of prepared.matchAll(BANNED_PATTERN)) {
     const word = match[0];
     const stem = FORM_TO_STEM.get(word.toLowerCase()) ?? word.toLowerCase();
     const index = match.index ?? 0;
-    const excerpt = text
-      .slice(Math.max(0, index - 48), Math.min(text.length, index + word.length + 48))
+    const excerpt = excerptFrom
+      .slice(Math.max(0, index - 48), Math.min(excerptFrom.length, index + word.length + 48))
       .replace(/\s+/g, " ")
       .trim();
     hits.push({ stem, match: word, excerpt, file });
+  }
+  return hits;
+}
+
+function remember(hits: BannedHit[], next: BannedHit[]) {
+  for (const hit of next) {
+    const seen = hits.some(
+      (item) => item.stem === hit.stem && item.excerpt === hit.excerpt && item.file === hit.file,
+    );
+    if (!seen) hits.push(hit);
+  }
+}
+
+export function bannedHitsInText(text: string, file: string): BannedHit[] {
+  if (isAbsoluteBuildPath(text)) return [];
+  const hits: BannedHit[] = [];
+  remember(hits, hitsOnPrepared(prepareCopy(text), text, file));
+  const normalized = normalizeCopy(text);
+  for (const run of normalized.matchAll(HYPHEN_RUN)) {
+    const collapsed = run[0].replace(new RegExp(`[${HYPHEN_SOURCE}]`, "g"), "");
+    const prepared = prepareCopy(collapsed);
+    for (const hit of hitsOnPrepared(prepared, run[0], file)) {
+      remember(hits, [{ ...hit, excerpt: run[0] }]);
+    }
+  }
+  return hits;
+}
+
+export type RedirectHit = { file: string; line: string; target: string };
+
+/** Every `_redirects` target must be a site path. An external 302 is a hit. */
+export function unsafeRedirects(text: string, file: string): RedirectHit[] {
+  const hits: RedirectHit[] = [];
+  for (const line of text.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const parts = trimmed.split(/\s+/);
+    const target = parts[1];
+    if (!target || target.startsWith("/")) continue;
+    hits.push({ file, line: trimmed, target });
   }
   return hits;
 }
@@ -189,6 +254,7 @@ export function hitsInAppCode(code: string, file: string): BannedHit[] {
   for (const literal of extractStringLiterals(folded)) {
     const trimmed = literal.text.trim();
     if (!trimmed) continue;
+    if (isAbsoluteBuildPath(trimmed)) continue;
     if (trimmed.toLowerCase() === "value") {
       const around = folded.slice(Math.max(0, literal.index - 48), Math.min(folded.length, literal.index + 48));
       if (/uint256/.test(around)) continue;
