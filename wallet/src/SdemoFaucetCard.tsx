@@ -1,0 +1,75 @@
+import { useState } from "react";
+import { useAccount, useSwitchChain, useWriteContract } from "wagmi";
+import { ARB_SEPOLIA_CHAIN_ID, sdemoFaucetAddress } from "./config";
+import { chainLabel } from "./lib/chains";
+
+const dripAbi = [
+  {
+    type: "function",
+    name: "drip",
+    stateMutability: "nonpayable",
+    inputs: [],
+    outputs: [],
+  },
+] as const;
+
+/**
+ * Asks the no-mint SDEMO faucet for 2 tokens. Hidden off Arb Sepolia.
+ * The button stays disabled until VITE_SDEMO_FAUCET_ARB_SEPOLIA is set.
+ */
+export function SdemoFaucetCard() {
+  const faucet = sdemoFaucetAddress();
+  const { address, isConnected, chainId } = useAccount();
+  const { switchChain, isPending: isSwitching } = useSwitchChain();
+  const { writeContractAsync, isPending } = useWriteContract();
+  const [message, setMessage] = useState<string | null>(null);
+  const onArb = chainId === ARB_SEPOLIA_CHAIN_ID;
+
+  if (!isConnected || !address) return null;
+
+  async function requestDrip() {
+    if (!faucet) return;
+    setMessage(null);
+    try {
+      const hash = await writeContractAsync({
+        address: faucet,
+        abi: dripAbi,
+        functionName: "drip",
+        chainId: ARB_SEPOLIA_CHAIN_ID,
+      });
+      setMessage(`Requested 2 SDEMO. Tx ${hash}`);
+    } catch (err) {
+      const text = err instanceof Error ? err.message : "The faucet did not send tokens.";
+      setMessage(text);
+    }
+  }
+
+  return (
+    <section className="card">
+      <h2>Get test SDEMO</h2>
+      <p className="muted">
+        2 SDEMO per wallet each 24 hours. The faucet cannot mint. It only sends tokens already held by the contract.
+        SDEMO has no monetary value.
+      </p>
+      {!onArb && (
+        <button
+          className="btn"
+          type="button"
+          disabled={isSwitching}
+          onClick={() => switchChain({ chainId: ARB_SEPOLIA_CHAIN_ID })}
+        >
+          Switch to {chainLabel(ARB_SEPOLIA_CHAIN_ID)}
+        </button>
+      )}
+      {onArb && !faucet && (
+        <p className="warn">The faucet contract is not deployed yet. VITE_SDEMO_FAUCET_ARB_SEPOLIA is unset.</p>
+      )}
+      {onArb && faucet && (
+        <button className="btn btn-primary" type="button" disabled={isPending} onClick={() => void requestDrip()}>
+          {isPending ? "Waiting for wallet…" : "Get 2 SDEMO"}
+        </button>
+      )}
+      {message && <p className="muted">{message}</p>}
+    </section>
+  );
+}

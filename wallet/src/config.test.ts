@@ -3,7 +3,14 @@ import configSource from "./config.ts?raw";
 import copySource from "./copy.ts?raw";
 import pointsClientSource from "./lib/points.ts?raw";
 import pointsPageSource from "./Points.tsx?raw";
-import { ARB_SEPOLIA_CHAIN_ID, BASE_SEPOLIA_CHAIN_ID, pointsApiUrl, relayerUrl } from "./config";
+import {
+  ARB_SEPOLIA_CHAIN_ID,
+  BASE_SEPOLIA_CHAIN_ID,
+  LIVE_SDEMO_ADDRESS,
+  pointsApiUrl,
+  relayerUrl,
+  sdemoFaucetAddress,
+} from "./config";
 import { createPointsClient } from "./lib/points";
 
 describe("relayerUrl", () => {
@@ -14,6 +21,13 @@ describe("relayerUrl", () => {
       expect(arb).not.toBe(base);
       expect(arb).not.toMatch(/2\.29\.20\.224/);
     }
+  });
+});
+
+describe("sdemo faucet config", () => {
+  it("stays empty until the deploy address is set", () => {
+    expect(sdemoFaucetAddress()).toBeNull();
+    expect(LIVE_SDEMO_ADDRESS).toBe("0xE3cb1AC5EDc70D3a85250a8c00cBe3A45AFc616C");
   });
 });
 

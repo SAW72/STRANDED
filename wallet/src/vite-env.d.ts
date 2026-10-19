@@ -10,6 +10,8 @@ interface ImportMetaEnv {
   readonly VITE_GAS_RESCUE_LENS_ADDRESS?: string;
   readonly VITE_TOKEN_ADDRESS?: string;
   readonly VITE_TOKEN_ADDRESS_ARB_SEPOLIA?: string;
+  /** Deployed SdemoFaucet on Arb Sepolia. Unset until Spencer deploys it. */
+  readonly VITE_SDEMO_FAUCET_ARB_SEPOLIA?: string;
   readonly VITE_BASE_SEPOLIA_RPC_URL?: string;
   readonly VITE_ARB_SEPOLIA_RPC_URL?: string;
   /** Public points API origin. Unset → labelled example data, no network. */
