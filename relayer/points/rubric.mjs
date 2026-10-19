@@ -1,3 +1,7 @@
+// ledgerStore imports MAX_POINTS_PER_ROW from this file. syntheticTxKey is
+// called only from functions, after both modules have finished evaluating.
+import { syntheticTxKey } from "./ledgerStore.mjs";
+
 /**
  * Scoring rubric for docs/POINTS-PROGRAM.md.
  *
@@ -9,10 +13,13 @@
  * decision. It is not a per-dollar score.
  *
  * Anti-gaming:
+ * - One wallet session per wallet per ISO week. The week is the server
+ *   clock. A caller-supplied `at` is ignored. The session tx key includes
+ *   that week, so a second session in that week is a duplicate row.
  * - No referral action and no referral points.
  * - Splitting a rescue across wallets does not multiply points. One rescue
  *   transaction produces one award of the flat placeholder.
- * - Bug reports and security findings are not rubric actions.
+ * - Bug reports and security findings are not rubric actions and earn no points.
  */
 
 /** FLAT 100 PLACEHOLDER pending Spencer's decision. Not dollar-based. */
@@ -29,6 +36,7 @@ export const FIXED_POINTS = Object.freeze({
   relayer_job: 50,
   registry_find_posted: 30,
   registry_find_claimed: 50,
+  wallet_session: 10,
 });
 
 const ADDRESS_RE = /^0x[0-9a-f]{40}$/;
@@ -129,6 +137,29 @@ export function scoreRegistryFindClaimed(input = {}) {
   };
 }
 
+/**
+ * Ten points, once per wallet per ISO week.
+ * The week is taken from `now` (the server clock: a function or a timestamp)
+ * and defaults to Date.now. Caller field `at` is ignored.
+ * The tx key is syntheticTxKey("wallet_session", [week, wallet]), and
+ * syntheticTxKey lowercases its inputs, so address case does not open a
+ * second session.
+ * @param {object} [input]
+ * @param {(() => number | string | Date) | number | string | Date} [now]
+ */
+export function scoreWalletSession(input = {}, now = Date.now) {
+  const wallet = normalizeWallet(input.wallet);
+  const instant = typeof now === "function" ? now() : now;
+  const week = isoWeekKey(instant);
+  return {
+    action: "wallet_session",
+    points: FIXED_POINTS.wallet_session,
+    wallet,
+    week,
+    txHash: syntheticTxKey("wallet_session", [week, wallet]),
+  };
+}
+
 /** Referrals are not a rubric action. */
 export function scoreReferral() {
   throw fail("referrals_disabled");
@@ -137,9 +168,11 @@ export function scoreReferral() {
 /**
  * Score one rubric event.
  * Referral actions throw `referrals_disabled`.
+ * `now` is the server clock used for a wallet session. Caller field `at` is ignored.
  * @param {object} input
+ * @param {(() => number | string | Date) | number | string | Date} [now]
  */
-export function score(input) {
+export function score(input, now = Date.now) {
   if (!input || typeof input !== "object" || Array.isArray(input)) throw fail("invalid_entry");
   const action = String(input.action ?? "").trim();
   if (REFERRAL_ACTIONS.has(action)) return scoreReferral();
@@ -152,6 +185,8 @@ export function score(input) {
       return scoreRegistryFindPosted(input);
     case "registry_find_claimed":
       return scoreRegistryFindClaimed(input);
+    case "wallet_session":
+      return scoreWalletSession(input, now);
     default:
       throw fail("invalid_action");
   }

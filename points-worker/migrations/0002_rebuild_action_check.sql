@@ -3,7 +3,7 @@
 -- existed. Session rows move into points_ledger_archive. They are not deleted.
 -- The rebuilt points_ledger keeps the CHECK. This file does not edit 0001.
 
-CREATE TABLE points_ledger_archive (
+CREATE TABLE IF NOT EXISTS points_ledger_archive (
   id INTEGER PRIMARY KEY,
   wallet TEXT NOT NULL,
   action TEXT NOT NULL,
@@ -13,7 +13,7 @@ CREATE TABLE points_ledger_archive (
   created_at TEXT NOT NULL
 );
 
-INSERT INTO points_ledger_archive (id, wallet, action, points, tx_hash, metadata, created_at)
+INSERT OR IGNORE INTO points_ledger_archive (id, wallet, action, points, tx_hash, metadata, created_at)
 SELECT id, wallet, action, points, tx_hash, metadata, created_at
 FROM points_ledger
 WHERE action = 'wallet_session';

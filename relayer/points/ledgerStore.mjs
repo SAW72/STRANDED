@@ -51,6 +51,7 @@ export const POINTS_ACTIONS = Object.freeze([
   "relayer_job",
   "registry_find_posted",
   "registry_find_claimed",
+  "wallet_session",
 ]);
 
 export { EXCLUDED_POINTS_ACTIONS };
@@ -323,7 +324,8 @@ export function createLedgerStore(opts = {}) {
 
   /**
    * Public write. `score()` chooses the points. A caller `points` value that
-   * is not that rubric total is rejected. `createdAt` is ignored; the clock is `now`.
+   * is not that rubric total is rejected. `createdAt` and, for a session,
+   * `at` are ignored; both clocks are `now`.
    * @param {string} action
    * @param {object} ctx
    */

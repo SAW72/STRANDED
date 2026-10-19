@@ -20,7 +20,7 @@ describe("schema port", () => {
     assert.match(migration, /CHECK \(action <> 'wallet_session'\)/);
     assert.match(migration, /'wallet_session'/);
     assert.doesNotMatch(migration, /'registry_find_claimed',\s*'wallet_session'/);
-    assert.match(rebuild, /CREATE TABLE points_ledger_archive/);
+    assert.match(rebuild, /CREATE TABLE IF NOT EXISTS points_ledger_archive/);
     assert.match(rebuild, /CREATE TABLE points_ledger_next/);
     assert.match(rebuild, /CHECK \(action <> 'wallet_session'\)/);
     assert.match(rebuild, /ALTER TABLE points_ledger_next RENAME TO points_ledger/);
@@ -109,6 +109,45 @@ describe("action check rebuild", () => {
       )
       .run(wallet, kept);
     assert.ok(Number(next.lastInsertRowid) > Number(seq.seq));
+    db.close();
+  });
+
+  it("keeps the same archive row when the copy runs twice", () => {
+    const db = new DatabaseSync(":memory:");
+    const wallet = "0x1111111111111111111111111111111111111111";
+    const session = `0x${"cd".repeat(32)}`;
+    db.exec(`
+      CREATE TABLE points_ledger (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        wallet TEXT NOT NULL,
+        action TEXT NOT NULL,
+        points INTEGER NOT NULL,
+        tx_hash TEXT NOT NULL,
+        metadata TEXT,
+        created_at TEXT NOT NULL
+      );
+    `);
+    db.prepare(
+      `INSERT INTO points_ledger (wallet, action, points, tx_hash, metadata, created_at)
+       VALUES (?, 'wallet_session', 10, ?, NULL, '2026-10-19T00:00:00.000Z')`,
+    ).run(wallet, session);
+    const migration = read(new URL("migrations/0002_rebuild_action_check.sql", root));
+    const archiveSql = migration.slice(
+      migration.indexOf("CREATE TABLE IF NOT EXISTS points_ledger_archive"),
+      migration.indexOf("CREATE TABLE points_ledger_next"),
+    );
+    assert.match(archiveSql, /INSERT OR IGNORE/);
+    db.exec(archiveSql);
+    const once = db.prepare("SELECT id, wallet, action, points, tx_hash FROM points_ledger_archive ORDER BY id").all();
+    db.exec(archiveSql);
+    const twice = db.prepare("SELECT id, wallet, action, points, tx_hash FROM points_ledger_archive ORDER BY id").all();
+    assert.equal(once.length, 1);
+    assert.equal(twice.length, once.length);
+    assert.equal(twice[0].id, once[0].id);
+    assert.equal(twice[0].wallet, wallet);
+    assert.equal(twice[0].action, "wallet_session");
+    assert.equal(twice[0].points, 10);
+    assert.equal(twice[0].tx_hash, session);
     db.close();
   });
 });
