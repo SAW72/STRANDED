@@ -82,6 +82,10 @@ it("hides a live receipt after switching into sample mode", async () => {
   for (let i = 0; i < 3; i++) await tick();
   const page = c.textContent ?? "";
   // Requirement: sample/demo mode must never show a real ticker.
-  expect(page).not.toMatch(/\bGRTT\b/);
+  expect(page.includes("GRTT")).toBe(false);
+  const arb = [...c.querySelectorAll(".chain-switch button")].find((b) => /Arb/.test(b.textContent ?? "")) as HTMLButtonElement;
+  await act(async () => arb.click());
+  for (let i = 0; i < 3; i++) await tick();
+  expect(c.querySelector("[data-testid='rescue-receipt']"), "a cleared receipt must stay cleared after switching back").toBeNull();
   await act(async () => root.unmount());
 });

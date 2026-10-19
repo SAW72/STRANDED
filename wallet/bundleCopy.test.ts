@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { OutputChunk, RollupOutput } from "rollup";
+import { transformSync } from "esbuild";
 import { build, type Plugin } from "vite";
 import {
   bannedHitsInText,
@@ -24,14 +25,51 @@ function normalize(id: string): string {
   return id.replaceAll("\\", "/");
 }
 
-function walk(dir: string, accept: (name: string) => boolean): string[] {
+const BINARY_EXT = new Set([
+  ".webp", ".png", ".jpg", ".jpeg", ".gif", ".ico", ".avif",
+  ".woff", ".woff2", ".ttf", ".otf", ".eot", ".mp4", ".webm", ".wasm", ".bin", ".pdf", ".zip",
+]);
+
+function walk(dir: string, accept: (name: string) => boolean, seen = new Set<string>()): string[] {
+  let real = dir;
+  try {
+    real = fs.realpathSync(dir);
+  } catch {
+    return [];
+  }
+  if (seen.has(real)) return [];
+  seen.add(real);
   const found: string[] = [];
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) found.push(...walk(full, accept));
-    else if (accept(entry.name)) found.push(full);
+    let isDir = entry.isDirectory();
+    let isFile = entry.isFile();
+    if (entry.isSymbolicLink()) {
+      try {
+        const st = fs.statSync(full);
+        isDir = st.isDirectory();
+        isFile = st.isFile();
+      } catch {
+        continue;
+      }
+    }
+    if (isDir) found.push(...walk(full, accept, seen));
+    else if (isFile && accept(entry.name)) found.push(full);
   }
   return found;
+}
+
+function isBinaryPath(file: string): boolean {
+  const ext = path.extname(file).toLowerCase();
+  if (BINARY_EXT.has(ext)) return true;
+  const handle = fs.openSync(file, "r");
+  try {
+    const buf = Buffer.alloc(8000);
+    const n = fs.readSync(handle, buf, 0, buf.length, 0);
+    return buf.subarray(0, n).includes(0);
+  } finally {
+    fs.closeSync(handle);
+  }
 }
 
 /** Vendor code is the top-level node_modules tree. A node_modules folder under src stays app code. */
@@ -88,30 +126,51 @@ function appModules(output: RollupOutput["output"]): BuiltModule[] {
   return found;
 }
 
+function textsFromDataUris(code: string): string[] {
+  const found: string[] = [];
+  const pattern = /data:([^,;]*)(;base64)?,([A-Za-z0-9+/=%._~-]{4,})/g;
+  for (const match of code.matchAll(pattern)) {
+    const mime = (match[1] ?? "").toLowerCase();
+    const textual =
+      mime.length === 0 ||
+      mime.startsWith("text/") ||
+      mime === "image/svg+xml" ||
+      mime === "application/json" ||
+      mime === "application/xml" ||
+      mime.endsWith("+xml") ||
+      mime.endsWith("+json");
+    if (!textual) continue;
+    try {
+      const text = match[2] ? Buffer.from(match[3] ?? "", "base64").toString("utf8") : decodeURIComponent(match[3] ?? "");
+      if (text && !text.includes("\0")) found.push(text);
+    } catch {
+      // A data URI that does not decode is not text copy.
+    }
+  }
+  return found;
+}
+
 function scanAppModules(output: RollupOutput["output"]): BannedHit[] {
   return appModules(output).flatMap((mod) => {
     const rel = path.relative(walletRoot, mod.id).split(path.sep).join("/");
-    return hitsInAppCode(mod.code, `${mod.chunkFile} (${rel})`);
+    const label = `${mod.chunkFile} (${rel})`;
+    const hits = hitsInAppCode(mod.code, label);
+    for (const text of textsFromDataUris(mod.code)) {
+      hits.push(...bannedHitsInText(text, `${label} data-uri`));
+    }
+    return hits;
   });
 }
 
-function isPublicText(name: string): boolean {
-  if (name === "_redirects") return true;
-  const ext = path.extname(name).toLowerCase();
-  return ext === ".json" || ext === ".txt" || ext === ".text" || ext === ".html" || ext === ".htm" || ext === ".svg" || ext === ".webmanifest" || ext === ".xml" || ext === ".md";
-}
-
-function scanCopiedText(outDir: string, publicDir: string): BannedHit[] {
+function scanCopiedText(outDir: string, output: RollupOutput["output"]): BannedHit[] {
+  const chunkNames = new Set(chunksOf(output).map((chunk) => chunk.fileName.split(path.sep).join("/")));
   const hits: BannedHit[] = [];
-  const indexHtml = path.join(outDir, "index.html");
-  if (fs.existsSync(indexHtml)) {
-    hits.push(...bannedHitsInText(fs.readFileSync(indexHtml, "utf8"), "index.html"));
-  }
-  if (!fs.existsSync(publicDir)) return hits;
-  for (const file of walk(publicDir, isPublicText)) {
-    const rel = path.relative(publicDir, file).split(path.sep).join("/");
-    const shipped = path.join(outDir, rel);
-    const text = fs.readFileSync(shipped, "utf8");
+  if (!fs.existsSync(outDir)) return hits;
+  for (const file of walk(outDir, () => true)) {
+    if (isBinaryPath(file)) continue;
+    const rel = path.relative(outDir, file).split(path.sep).join("/");
+    if (chunkNames.has(rel) || rel.endsWith(".css")) continue;
+    const text = fs.readFileSync(file, "utf8");
     hits.push(...bannedHitsInText(text, rel));
     if (path.basename(file) === "_redirects") {
       for (const bad of unsafeRedirects(text, rel)) {
@@ -236,6 +295,44 @@ describe("banned-word scanner", () => {
     expect(bannedWordsIn(["air", "\u200B", "drop"].join(""))).toEqual(["airdrop"]);
     expect(bannedWordsIn("\uFF50\uFF52\uFF49\uFF43\uFF45")).toEqual(["price"]);
     expect(bannedWordsIn(["re", "ward", "_ready"].join(""))).toEqual(["reward"]);
+    expect(bannedWordsIn(["re", "_", "ward"].join(""))).toEqual(["reward"]);
+    expect(bannedWordsIn(["in", "-", "vest"].join(""))).toEqual(["invest"]);
+    expect(bannedWordsIn(["tra", "de", "-off"].join(""))).toEqual([]);
+    expect(bannedWordsIn(["no", "-", "value"].join(""))).toEqual([]);
+    expect(bannedWordsIn(["no", "_", "value"].join(""))).toEqual([]);
+    expect(bannedWordsIn(["data", "-", "value"].join(""))).toEqual([]);
+    expect(bannedWordsIn(["pri", "ce", "_id"].join(""))).toEqual([]);
+    expect(bannedWordsIn("valuation tradeoff")).toEqual([]);
+  });
+
+  it("flags slash-separated copy and still scans Price:/month", () => {
+    const slashList = ["Track points/", "re", "wards/", "air", "drops in one place"].join("");
+    const buySell = ["Buy/sell/", "tra", "de"].join("");
+    const claim = ["/", "air", "drop", "/claim"].join("");
+    const priceMonth = ["Pri", "ce", ":/month"].join("");
+    expect(bannedWordsIn(slashList).sort()).toEqual(["airdrop", "reward"]);
+    expect(bannedWordsIn(buySell)).toEqual(["trade"]);
+    expect(bannedWordsIn(claim)).toEqual(["airdrop"]);
+    expect(bannedWordsIn(priceMonth)).toEqual(["price"]);
+    expect(bannedWordsIn(`pkg/node_modules/left/${["re", "wards"].join("")}.js`)).toEqual([]);
+    expect(bannedWordsIn(["Air", "drop", "!node_modules"].join(""))).toEqual(["airdrop"]);
+    expect(hitsInAppCode(`export const label = ${JSON.stringify(slashList)};`, "format.ts").length).toBeGreaterThan(0);
+  });
+
+  it("strips default-ignorable characters, including a JSX soft hyphen", () => {
+    expect(bannedWordsIn(["air", "\u00AD", "drop"].join(""))).toEqual(["airdrop"]);
+    expect(bannedWordsIn(["air", "\u034F", "drop"].join(""))).toEqual(["airdrop"]);
+    expect(bannedWordsIn(["air", "\u200E", "drop"].join(""))).toEqual(["airdrop"]);
+    expect(bannedWordsIn(["air", "\u2061", "drop"].join(""))).toEqual(["airdrop"]);
+    expect(bannedWordsIn(["air", "\u2062", "drop"].join(""))).toEqual(["airdrop"]);
+    expect(bannedWordsIn(["air", "\uFE0F", "drop"].join(""))).toEqual(["airdrop"]);
+    expect(bannedWordsIn(["air", "\u2E3A", "drop"].join(""))).toEqual(["airdrop"]);
+    const jsx = transformSync("export function L(){return <span>air&shy;drop</span>}", {
+      loader: "tsx",
+      jsx: "automatic",
+    }).code;
+    const hits = hitsInAppCode(jsx, "Shy.tsx");
+    expect(hits.map((hit) => hit.stem)).toContain("airdrop");
   });
 
   it("passes a checkout path that contains rewards", () => {
@@ -259,6 +356,29 @@ describe("banned-word scanner", () => {
     const hits = unsafeRedirects(`# note\n/points /index.html 200\n${line}\n`, "_redirects");
     expect(hits).toEqual([{ file: "_redirects", line, target: "https://example.invalid/out" }]);
     expect(unsafeRedirects("/points /index.html 200\n/* /index.html 200\n", "_redirects")).toEqual([]);
+  });
+
+  it("rejects protocol-relative, backslash, placeholder, encoded, CR, and proxy targets", () => {
+    const cases = [
+      ["/go", "//evil.example/out", "302"],
+      ["/go", "/\\evil.example", "302"],
+      ["/go/*", "/:splat", "302"],
+      ["/go/:host", "/:host", "302"],
+      ["/go", "/%2Fevil.example", "302"],
+      ["/go", "/%5Cevil.example", "302"],
+      ["/api/*", "//evil.example/:splat", "200!"],
+    ];
+    for (const parts of cases) {
+      const line = parts.join(" ");
+      const hits = unsafeRedirects(`${line}\n`, "_redirects");
+      expect(hits, line).toHaveLength(1);
+      expect(hits[0]?.target).toBe(parts[1]);
+    }
+    const hidden = ["/x", "https://example.invalid/out", "302"].join(" ");
+    const cr = `/a /index.html 200\r${hidden}`;
+    const crHits = unsafeRedirects(cr, "_redirects");
+    expect(crHits).toHaveLength(1);
+    expect(crHits[0]?.target).toBe("https://example.invalid/out");
   });
 
   it("flags a static concatenation and documents the runtime-join limit", () => {
@@ -357,8 +477,8 @@ describe("built app chunks", () => {
       expect(appModules(built.output).length).toBeGreaterThan(0);
 
       const publicDir = path.join(walletRoot, "public");
-      const copied = scanCopiedText(outDir, publicDir);
-      expect(walk(publicDir, isPublicText).length).toBeGreaterThan(0);
+      const copied = scanCopiedText(outDir, built.output);
+      expect(fs.existsSync(path.join(publicDir, "_redirects"))).toBe(true);
       expect(copied, formatBannedHits(copied)).toEqual([]);
       const cssHits = scanCssContent(outDir);
       expect(walk(outDir, (name) => name.endsWith(".css")).length).toBeGreaterThan(0);
@@ -393,9 +513,27 @@ describe("planted bundle copy", () => {
   const manifestWord = ["profit", "ability"].join("");
   const svgWord = ["trade", "able"].join("");
   const htmlWord = ["in", "vestors"].join("");
+  const cssVar = ["re", "ward"].join("");
+  const headerWord = ["air", "drop"].join("");
+  const scriptWord = ["pre", "sale"].join("");
+  const moduleWord = ["re", "wards"].join("");
+  const csvWord = ["air", "drops"].join("");
+  const feedWord = ["list", "ed"].join("");
+  const xhtmlWord = ["valu", "able"].join("");
+  const calendarWord = ["in", "vestors"].join("");
+  const yamlWord = ["AP", "Y"].join("");
+  const licenseWord = ["earn", "ings"].join("");
+  const linkWord = ["profit", "able"].join("");
+  const smallWord = ["earn", "ings"].join("");
+  const logoWord = ["valu", "able"].join("");
+  const docWord = ["trad", "ers"].join("");
+  const workerWord = ["pre", "sale"].join("");
+  const bigWord = ["air", "drop"].join("");
   const sharedId = path.resolve(walletRoot, "../shared/planted-copy.ts");
   let outDir = "";
   let publicDir = "";
+  let outsideDir = "";
+  const assetRoot = path.join(walletRoot, "src", "plant-scope");
   let hits: BannedHit[] = [];
   let copied: BannedHit[] = [];
   let output: RollupOutput["output"] = [];
@@ -428,8 +566,19 @@ describe("planted bundle copy", () => {
             `__plantEarn: ${JSON.stringify(earnLabel)},`,
             "});",
           ].join("\n");
-          const withImport = `import "../shared/planted-copy";\n${code.replace(anchor, `${anchor}${jsx}`)}`;
-          return { code: `${withImport}\n${extra}\n`, map: null };
+          const withImport = [
+            'import "../shared/planted-copy";',
+            'import plantTerms from "./plant-scope/terms.html?url";',
+            'import plantSmall from "./plant-scope/small.txt?url";',
+            'import plantLogo from "./plant-scope/logo.svg";',
+            code.replace(anchor, `${anchor}${jsx}`),
+          ].join("\n");
+          const sideEffects = [
+            extra,
+            "Object.assign(globalThis, { plantTerms, plantSmall, plantLogo, plantDoc: new URL(\"./plant-scope/doc.md\", import.meta.url).href });",
+            'new Worker(new URL("./plant-scope/worker.ts", import.meta.url), { type: "module" });',
+          ].join("\n");
+          return { code: `${withImport}\n${sideEffects}\n`, map: null };
         }
         if (norm.endsWith("/src/lib/format.ts")) {
           const extra = [
@@ -446,7 +595,10 @@ describe("planted bundle copy", () => {
           return { code: `${code}\n${extra}\n`, map: null };
         }
         if (norm.endsWith("/src/index.css")) {
-          return { code: `${code}\n.plant{content:${JSON.stringify(profitable)};}\n`, map: null };
+          return {
+            code: `${code}\n.plant{content:${JSON.stringify(profitable)};}\n:root{--plant-label:${JSON.stringify(cssVar)};}\n`,
+            map: null,
+          };
         }
         return null;
       },
@@ -467,15 +619,35 @@ describe("planted bundle copy", () => {
       path.join(publicDir, "_redirects"),
       ["/go", "https://example.invalid/out", "302"].join(" ") + "\n",
     );
+    fs.writeFileSync(path.join(publicDir, "_headers"), `/*\n  X-Note: ${headerWord}\n`);
+    fs.writeFileSync(path.join(publicDir, "note.js"), `document.title=${JSON.stringify(scriptWord)};\n`);
+    fs.writeFileSync(path.join(publicDir, "app.mjs"), `export const label = ${JSON.stringify(moduleWord)};\n`);
+    fs.writeFileSync(path.join(publicDir, "notice.csv"), `a,${csvWord}\n`);
+    fs.writeFileSync(path.join(publicDir, "feed.rss"), `<rss><title>${feedWord}</title></rss>\n`);
+    fs.writeFileSync(path.join(publicDir, "page.xhtml"), `<p>${xhtmlWord}</p>\n`);
+    fs.writeFileSync(path.join(publicDir, "cal.ics"), `SUMMARY:${calendarWord}\n`);
+    fs.writeFileSync(path.join(publicDir, "notes.yaml"), `title: ${yamlWord}\n`);
+    fs.writeFileSync(path.join(publicDir, "LICENSE"), `${licenseWord}\n`);
+    outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), "plant-outside-"));
+    fs.writeFileSync(path.join(outsideDir, "notes.txt"), `${linkWord}\n`);
+    fs.symlinkSync(outsideDir, path.join(publicDir, "linkdir"));
+    fs.mkdirSync(assetRoot, { recursive: true });
+    fs.writeFileSync(path.join(assetRoot, "terms.html"), `<p>${bigWord}</p>\n${"x".repeat(5000)}\n`);
+    fs.writeFileSync(path.join(assetRoot, "small.txt"), `${smallWord}\n`);
+    fs.writeFileSync(path.join(assetRoot, "logo.svg"), `<svg><text>${logoWord}</text></svg>\n`);
+    fs.writeFileSync(path.join(assetRoot, "doc.md"), `# ${docWord}\n`);
+    fs.writeFileSync(path.join(assetRoot, "worker.ts"), `Object.assign(globalThis, { workerPlant: ${JSON.stringify(workerWord)} });\n`);
     const built = await buildWallet(outDir, { plugins: [plantPlugin()], publicDir });
     output = built.output;
     hits = scanAppModules(output);
-    copied = scanCopiedText(outDir, publicDir);
+    copied = scanCopiedText(outDir, output);
   }, 90_000);
 
   afterAll(() => {
     if (outDir) fs.rmSync(outDir, { recursive: true, force: true });
     if (publicDir) fs.rmSync(publicDir, { recursive: true, force: true });
+    if (assetRoot) fs.rmSync(assetRoot, { recursive: true, force: true });
+    if (outsideDir) fs.rmSync(outsideDir, { recursive: true, force: true });
   });
 
   it("flags a planted string constant in the app chunk", () => {
@@ -506,7 +678,7 @@ describe("planted bundle copy", () => {
     expect(app).toBeDefined();
     const previous = legacyOneWordGate(app?.code ?? "", "App.tsx");
     expect(previous, formatBannedHits(previous)).toEqual([]);
-    const planted = hits.filter((hit) => hit.file.includes("src/App.tsx"));
+    const planted = hits.filter((hit) => /\(src\/App\.tsx\)$/.test(hit.file));
     expect(planted.map((hit) => hit.stem).sort()).toEqual(["apy", "earn", "price", "reward"]);
     expect(planted.find((hit) => hit.stem === "price")?.excerpt).toBe(priceLabel);
     expect(planted.find((hit) => hit.stem === "reward")?.excerpt).toBe(rewardsLabel);
@@ -516,7 +688,7 @@ describe("planted bundle copy", () => {
   });
 
   it("flags a JSON file copied from public into dist", () => {
-    const copied = scanCopiedText(outDir, publicDir).filter((hit) => hit.file === "notice.json");
+    const copied = scanCopiedText(outDir, output).filter((hit) => hit.file === "notice.json");
     expect(copied, formatBannedHits(copied)).toHaveLength(1);
     expect(copied[0]?.stem).toBe("earn");
     expect(copied[0]?.file).toBe("notice.json");
@@ -524,7 +696,7 @@ describe("planted bundle copy", () => {
   });
 
   it("flags a text file copied from public into dist", () => {
-    const copied = scanCopiedText(outDir, publicDir).filter((hit) => hit.file === "notice.txt");
+    const copied = scanCopiedText(outDir, output).filter((hit) => hit.file === "notice.txt");
     expect(copied, formatBannedHits(copied)).toHaveLength(1);
     expect(copied[0]?.stem).toBe("trade");
     expect(copied[0]?.file).toBe("notice.txt");
@@ -533,10 +705,9 @@ describe("planted bundle copy", () => {
 
   it("flags a CSS content value in the built stylesheet", () => {
     const cssHits = scanCssContent(outDir);
-    expect(cssHits, formatBannedHits(cssHits)).toHaveLength(1);
-    expect(cssHits[0]?.stem).toBe("profit");
-    expect(cssHits[0]?.file).toMatch(/\.css$/);
-    expect(cssHits[0]?.excerpt).toBe(profitable);
+    expect(cssHits.some((hit) => hit.stem === "profit" && hit.excerpt === profitable), formatBannedHits(cssHits)).toBe(true);
+    expect(cssHits.some((hit) => hit.stem === "reward" && hit.excerpt === cssVar)).toBe(true);
+    expect(cssHits.every((hit) => hit.file.endsWith(".css"))).toBe(true);
   });
 
   it("flags hyphenated labels planted in the built app module", () => {
@@ -571,5 +742,28 @@ describe("planted bundle copy", () => {
     expect(bad, formatBannedHits(copied)).toHaveLength(1);
     expect(bad[0]?.match).toBe("https://example.invalid/out");
     expect(bad[0]?.file).toBe("_redirects");
+  });
+
+  it("flags every non-binary public file, a symlinked directory, emitted assets, and a worker", () => {
+    const all = [...hits, ...copied];
+    const expectCaught = (stem: string, filePart: string) => {
+      const hit = all.find((item) => item.stem === stem && item.file.includes(filePart));
+      expect(hit, formatBannedHits(all.filter((item) => item.file.includes(filePart)))).toBeDefined();
+    };
+    expectCaught("airdrop", "_headers");
+    expectCaught("presale", "note.js");
+    expectCaught("reward", "app.mjs");
+    expectCaught("airdrop", "notice.csv");
+    expectCaught("listing", "feed.rss");
+    expectCaught("value", "page.xhtml");
+    expectCaught("invest", "cal.ics");
+    expectCaught("apy", "notes.yaml");
+    expectCaught("earn", "LICENSE");
+    expectCaught("profit", "linkdir/notes.txt");
+    expectCaught("airdrop", "terms");
+    expectCaught("earn", "small.txt");
+    expectCaught("value", "logo.svg");
+    expectCaught("trade", "data-uri");
+    expectCaught("presale", "worker");
   });
 });

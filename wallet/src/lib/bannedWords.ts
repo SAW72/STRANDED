@@ -69,9 +69,13 @@ const BANNED_PATTERN = new RegExp(
   "gi",
 );
 
-const ZERO_WIDTH = /[\u200B\u200C\u200D\uFEFF\u2060\u180E]/g;
-const HYPHEN_SOURCE = "\\-\\u2010\\u2011\\u2012\\u2013\\u2014\\u2015\\u2212\\uFE58\\uFE63\\uFF0D_";
+// Default_Ignorable covers the soft hyphen, CGJ, bidi marks, function application, and variation selectors.
+const IGNORABLE = /[\u180E\p{Default_Ignorable_Code_Point}]/gu;
+// ASCII hyphen, the dashes from the first pass, the remaining Unicode dashes, and underscore.
+const HYPHEN_SOURCE =
+  "\\-\\u2010\\u2011\\u2012\\u2013\\u2014\\u2015\\u2212\\uFE58\\uFE63\\uFF0D\\u058A\\u05BE\\u1806\\u2043\\u2E17\\u2E1A\\u2E3A\\u2E3B\\u301C\\u30A0_";
 const HYPHEN_RUN = new RegExp(`[A-Za-z0-9]+(?:[${HYPHEN_SOURCE}][A-Za-z0-9]+)+`, "gu");
+const ALLOWED_COMPOUNDS = ["trade-off", "data-value", "price_id"];
 
 /** True when the whole literal is a banned form, with no punctuation stripped. */
 export function isWholeBannedForm(text: string): boolean {
@@ -88,35 +92,60 @@ export function formatBannedHits(hits: BannedHit[]): string {
     .join("\n");
 }
 
-/** A filesystem path. A checkout directory named rewards must not become a hit. */
+function buildRoots(): string[] {
+  const proc = (globalThis as { process?: { cwd?: () => string; env?: Record<string, string | undefined> } }).process;
+  const roots = [proc?.cwd?.(), proc?.env?.TMPDIR, proc?.env?.TEMP, proc?.env?.TMP, "/tmp"];
+  const found: string[] = [];
+  for (const root of roots) {
+    if (!root) continue;
+    const norm = root.replaceAll("\\", "/").replace(/\/+$/, "");
+    if (norm && !found.includes(norm)) found.push(norm);
+  }
+  return found;
+}
+
+/**
+ * A genuine build path: an absolute path under this checkout, the temp dir, or
+ * /tmp, or a node_modules segment that ends in a file extension.
+ * Slash-separated copy is not a path.
+ */
 export function isAbsoluteBuildPath(text: string): boolean {
   const trimmed = text.trim();
   if (!trimmed || /\s/.test(trimmed)) return false;
-  if (trimmed.includes("node_modules")) return true;
-  if (/^(?:\/|[A-Za-z]:[\\/])/.test(trimmed) && trimmed.split(/[\\/]/).filter(Boolean).length >= 2) {
-    return true;
-  }
-  return false;
+  const norm = trimmed.replaceAll("\\", "/");
+  if (/(?:^|\/)node_modules\/.+\.[A-Za-z0-9]+$/.test(norm)) return true;
+  if (!norm.startsWith("/")) return false;
+  return buildRoots().some((root) => norm === root || norm.startsWith(`${root}/`));
 }
 
 function normalizeCopy(text: string): string {
-  return text.replace(ZERO_WIDTH, "").normalize("NFKC");
+  return text.replace(IGNORABLE, "").normalize("NFKC");
 }
 
 function maskBuildPaths(text: string): string {
-  return text.replace(/(?:\/|[A-Za-z]:[\\/])[^\s"'`<>)]+/g, (path) =>
-    isAbsoluteBuildPath(path) ? " ".repeat(path.length) : path,
+  return text.replace(/(?:\/|[A-Za-z]:[\\/])[^\s"'`<>)]+/g, (candidate) =>
+    isAbsoluteBuildPath(candidate) ? " ".repeat(candidate.length) : candidate,
   );
+}
+
+function maskAllowedCompounds(text: string): string {
+  let next = text;
+  for (const compound of ALLOWED_COMPOUNDS) {
+    const pattern = new RegExp(compound.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
+    next = next.replace(pattern, (match) => " ".repeat(match.length));
+  }
+  return next;
 }
 
 /** Same-length rewrite so match indexes still point at the original text. */
 function prepareCopy(text: string): string {
-  return maskBuildPaths(normalizeCopy(text))
-    .replace(/\bno cash value\b/gi, (match) => " ".repeat(match.length))
-    .replace(/\bno value\b/gi, (match) => " ".repeat(match.length))
+  const split = maskAllowedCompounds(maskBuildPaths(normalizeCopy(text)))
     .replace(new RegExp(`\\bpre[${HYPHEN_SOURCE} ]sales\\b`, "gi"), "presales ")
     .replace(new RegExp(`\\bpre[${HYPHEN_SOURCE} ]sale\\b`, "gi"), "presale ")
-    .replace(new RegExp(`[${HYPHEN_SOURCE}]`, "g"), " ")
+    .replace(new RegExp(`[${HYPHEN_SOURCE}]`, "g"), " ");
+  return split
+    .replace(/\bno\s+cash\s+value\b/gi, (match) => " ".repeat(match.length))
+    .replace(/\bno\s+value\b/gi, (match) => " ".repeat(match.length))
     .replace(/[^A-Za-z0-9\s']/g, " ");
 }
 
@@ -161,15 +190,30 @@ export function bannedHitsInText(text: string, file: string): BannedHit[] {
 
 export type RedirectHit = { file: string; line: string; target: string };
 
+/** A site path. Rejects protocol-relative, backslash, placeholder, and encoded-slash targets. */
+export function redirectTargetAllowed(target: string): boolean {
+  if (/%2f|%5c/i.test(target)) return false;
+  let decoded = target;
+  try {
+    decoded = decodeURIComponent(target);
+  } catch {
+    return false;
+  }
+  if (!decoded.startsWith("/")) return false;
+  if (decoded.startsWith("//") || decoded.startsWith("/\\") || decoded.startsWith("/:")) return false;
+  if (decoded.includes("\\")) return false;
+  return true;
+}
+
 /** Every `_redirects` target must be a site path. An external 302 is a hit. */
 export function unsafeRedirects(text: string, file: string): RedirectHit[] {
   const hits: RedirectHit[] = [];
-  for (const line of text.split(/\r?\n/)) {
+  for (const line of text.split(/\r\n|\r|\n/)) {
     const trimmed = line.trim();
     if (!trimmed || trimmed.startsWith("#")) continue;
     const parts = trimmed.split(/\s+/);
     const target = parts[1];
-    if (!target || target.startsWith("/")) continue;
+    if (!target || redirectTargetAllowed(target)) continue;
     hits.push({ file, line: trimmed, target });
   }
   return hits;
@@ -213,7 +257,24 @@ export function extractStringLiterals(code: string): CodeLiteral[] {
         const next = code[j + 1];
         if (next === "n") text += "\n";
         else if (next === "t") text += "\t";
-        else if (next !== undefined) text += next;
+        else if (next === "x" && /^[0-9A-Fa-f]{2}/.test(code.slice(j + 2, j + 4))) {
+          text += String.fromCharCode(Number.parseInt(code.slice(j + 2, j + 4), 16));
+          j += 4;
+          continue;
+        } else if (next === "u" && code[j + 2] === "{") {
+          const end = code.indexOf("}", j + 3);
+          const hex = end === -1 ? "" : code.slice(j + 3, end);
+          if (/^[0-9A-Fa-f]{1,6}$/.test(hex)) {
+            text += String.fromCodePoint(Number.parseInt(hex, 16));
+            j = end + 1;
+            continue;
+          }
+          text += next;
+        } else if (next === "u" && /^[0-9A-Fa-f]{4}/.test(code.slice(j + 2, j + 6))) {
+          text += String.fromCharCode(Number.parseInt(code.slice(j + 2, j + 6), 16));
+          j += 6;
+          continue;
+        } else if (next !== undefined) text += next;
         j += 2;
         continue;
       }
@@ -264,13 +325,18 @@ export function hitsInAppCode(code: string, file: string): BannedHit[] {
   return hits;
 }
 
-/** CSS `content:` values. `justify-content` is not the content property. */
+/** CSS `content:` values and custom-property strings. `justify-content` is not the content property. */
 export function cssContentHits(css: string, file: string): BannedHit[] {
   const hits: BannedHit[] = [];
-  const pattern = /(?<![\w-])content\s*:\s*(?:"((?:\\.|[^"\\])*)"|'((?:\\.|[^'\\])*)')/g;
-  for (const match of css.matchAll(pattern)) {
-    const text = (match[1] ?? match[2] ?? "").replace(/\\(["'])/g, "$1");
-    if (text) hits.push(...bannedHitsInText(text, file));
+  const patterns = [
+    /(?<![\w-])content\s*:\s*(?:"((?:\\.|[^"\\])*)"|'((?:\\.|[^'\\])*)')/g,
+    /--[\w-]+\s*:\s*(?:"((?:\\.|[^"\\])*)"|'((?:\\.|[^'\\])*)')/g,
+  ];
+  for (const pattern of patterns) {
+    for (const match of css.matchAll(pattern)) {
+      const text = (match[1] ?? match[2] ?? "").replace(/\\(["'])/g, "$1");
+      if (text) hits.push(...bannedHitsInText(text, file));
+    }
   }
   return hits;
 }

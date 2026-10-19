@@ -23,6 +23,8 @@ const accountState = vi.hoisted(() => ({
 
 const readState = vi.hoisted(() => ({
   symbol: undefined as unknown,
+  symbolPending: false,
+  symbolError: false,
 }));
 
 vi.mock("./lib/holdings", () => ({
@@ -46,9 +48,17 @@ vi.mock("wagmi", async () => {
       isDisconnected: !accountState.isConnected,
     }),
     useReadContract: ((params?: { functionName?: string }) => {
-      if (params?.functionName === "symbol") return { data: readState.symbol };
-      return { data: undefined };
-    }) as typeof actual.useReadContract,
+      if (params?.functionName === "symbol") {
+        if (readState.symbolPending) {
+          return { data: undefined, isPending: true, isLoading: true, isError: false, status: "pending", fetchStatus: "fetching" };
+        }
+        if (readState.symbolError) {
+          return { data: undefined, isPending: false, isLoading: false, isError: true, status: "error", error: new Error("The symbol read failed.") };
+        }
+        return { data: readState.symbol, isPending: false, isLoading: false, isError: false, status: "success" };
+      }
+      return { data: undefined, isPending: false, isError: false, status: "success" };
+    }) as unknown as typeof actual.useReadContract,
   };
 });
 
@@ -89,6 +99,8 @@ afterEach(() => {
   accountState.isConnected = false;
   accountState.chainId = undefined;
   readState.symbol = undefined;
+  readState.symbolPending = false;
+  readState.symbolError = false;
   vi.unstubAllEnvs();
   window.history.pushState({}, "", "/");
 });
@@ -187,7 +199,7 @@ describe("App routes", () => {
     accountState.chainId = ARB_SEPOLIA_CHAIN_ID;
     const view = await renderAt("/", <App />);
     expect(view.container.querySelector("[data-testid='rescue-quote-fields']")?.textContent).toMatch(/SDEMO/);
-    expect(view.container.textContent).not.toMatch(/\bGRTT\b/);
+    expect(view.container.textContent?.includes("GRTT")).toBe(false);
     expect(view.container.querySelector("[data-testid='sample-banner']")?.textContent).toContain(
       SAMPLE_BADGE,
     );
@@ -202,7 +214,7 @@ describe("App routes", () => {
     const grtt = await renderAt("/", <App />);
     const grttRows = grtt.container.querySelector("[data-testid='rescue-quote-fields']")?.textContent ?? "";
     expect(grttRows).toMatch(/SDEMO/);
-    expect(grtt.container.textContent).not.toMatch(/\bGRTT\b/);
+    expect(grtt.container.textContent?.includes("GRTT")).toBe(false);
     expect(grtt.container.querySelector("[data-testid='sample-banner']")?.textContent).toContain(SAMPLE_BADGE);
     expect(grtt.container.querySelector("[data-testid='demo-banner']")?.textContent).toBe(UNKNOWN_DEMO_BANNER);
     await grtt.unmount();
@@ -210,8 +222,8 @@ describe("App routes", () => {
     readState.symbol = "gMOCK";
     const gmock = await renderAt("/", <App />);
     expect(gmock.container.querySelector("[data-testid='rescue-quote-fields']")?.textContent).toMatch(/SDEMO/);
-    expect(gmock.container.textContent).not.toMatch(/\bgMOCK\b/);
-    expect(gmock.container.textContent).not.toMatch(/\bGRTT\b/);
+    expect(gmock.container.textContent?.includes("gMOCK")).toBe(false);
+    expect(gmock.container.textContent?.includes("GRTT")).toBe(false);
     expect(gmock.container.querySelector("[data-testid='sample-banner']")?.textContent).toContain(SAMPLE_BADGE);
     await gmock.unmount();
   });
@@ -266,9 +278,11 @@ describe("App routes", () => {
       /^4\./.test(node.querySelector("h2")?.textContent ?? ""),
     );
     const reviewText = review?.textContent ?? "";
-    if (reviewText.includes("GRTT")) expect(banner).toContain("GRTT");
-    if (reviewText.includes("SDEMO")) expect(banner).toContain("SDEMO");
+    expect(banner.includes("GRTT")).toBe(false);
+    expect(reviewText.includes("GRTT")).toBe(false);
     expect(reviewText).not.toMatch(/\u00b7\s*0x/i);
+    expect(button(view.container, "confirm-details").disabled).toBe(true);
+    expect(button(view.container, "sign-order").disabled).toBe(true);
     await view.unmount();
 
     const body = sampleFixtureRaw({
@@ -299,15 +313,40 @@ describe("App routes", () => {
       });
     }
     const quotedBanner = quoted.container.querySelector("[data-testid='demo-banner']")?.textContent ?? "";
-    const rows = [...quoted.container.querySelectorAll(".review-row")].map((row) => row.textContent ?? "").join("\n");
-    expect(rows.length).toBeGreaterThan(0);
-    expect(quotedBanner).toContain("GRTT");
-    expect(rows).toContain("GRTT");
-    expect(quotedBanner.includes("SDEMO")).toBe(rows.includes("SDEMO"));
+    const quotedReview = [...quoted.container.querySelectorAll("section")].find((node) =>
+      /^4\./.test(node.querySelector("h2")?.textContent ?? ""),
+    );
+    const quotedReviewText = quotedReview?.textContent ?? "";
+    expect(quotedBanner.includes("GRTT")).toBe(false);
+    expect(quotedReviewText.includes("GRTT")).toBe(false);
+    expect(quoted.container.textContent?.includes("GRTT")).toBe(false);
     expect(tokenRow(quoted.container)).toBe(QUOTE_ERROR);
-    expect(tokenRow(quoted.container)).not.toMatch(/\u00b7\s*0x/i);
+    expect(button(quoted.container, "confirm-details").disabled).toBe(true);
+    expect(button(quoted.container, "sign-order").disabled).toBe(true);
     vi.unstubAllGlobals();
     await quoted.unmount();
+
+    readState.symbolPending = true;
+    readState.symbol = undefined;
+    const loading = await renderAt("/", <App />);
+    const loadingRow = tokenRow(loading.container);
+    expect(loadingRow).toContain("Reading");
+    expect(loadingRow).toContain("0x1111");
+    expect(loadingRow).not.toBe(QUOTE_ERROR);
+    expect(button(loading.container, "confirm-details").disabled).toBe(true);
+    expect(button(loading.container, "sign-order").disabled).toBe(true);
+    await loading.unmount();
+
+    readState.symbolPending = false;
+    readState.symbolError = true;
+    const failed = await renderAt("/", <App />);
+    const failedRow = tokenRow(failed.container);
+    expect(failedRow).toContain(QUOTE_ERROR);
+    expect(failedRow).toContain("0x1111");
+    expect(failed.container.textContent?.includes("GRTT")).toBe(false);
+    expect(button(failed.container, "confirm-details").disabled).toBe(true);
+    expect(button(failed.container, "sign-order").disabled).toBe(true);
+    await failed.unmount();
   });
 
   it("names Base Sepolia in the disclosure when that network is selected", async () => {

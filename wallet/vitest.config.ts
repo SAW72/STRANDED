@@ -5,7 +5,7 @@ export default defineConfig({
   plugins: [react()],
   test: {
     environment: "node",
-    include: ["src/**/*.test.ts", "src/**/*.test.tsx", "viteFs.test.ts", "spaFallback.test.ts", "bundleCopy.test.ts"],
+    include: ["src/**/*.test.ts", "src/**/*.test.tsx", "viteFs.test.ts", "spaFallback.test.ts", "spaCleanup.test.ts", "bundleCopy.test.ts"],
   },
 });
 

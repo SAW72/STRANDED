@@ -237,7 +237,8 @@ function RescueApp() {
     | { kind: "ok"; txHash: Hex | null }
     | { kind: "error"; message: string; relayerMessage?: boolean }
   >({ kind: "idle" });
-  const [receipt, setReceipt] = useState<RescueReceiptView | null>(null);
+  const [storedReceipt, setReceipt] = useState<RescueReceiptView | null>(null);
+  const receipt = storedReceipt && storedReceipt.chainId === selectedChainId ? storedReceipt : null;
   const [celebration, setCelebration] = useState<CelebrationKind>(null);
   const [awaitingFreshHoldings, setAwaitingFreshHoldings] = useState(false);
   const queryClient = useQueryClient();
@@ -248,13 +249,16 @@ function RescueApp() {
     else if (play === "1" || play === "rescue") setCelebration("rescue");
   }, []);
 
-  const { data: tokenSymbol } = useReadContract({
+  const symbolQuery = useReadContract({
     address: token ?? undefined,
     abi: erc20PermitAbi,
     functionName: "symbol",
     chainId: selectedChainId,
     query: { enabled: Boolean(token) },
   });
+  const tokenSymbol = symbolQuery.data;
+  const symbolPending = Boolean(symbolQuery.isPending || symbolQuery.isLoading);
+  const symbolFailed = Boolean(symbolQuery.isError);
 
   const { data: tokenDecimals } = useReadContract({
     address: token ?? undefined,
@@ -356,14 +360,12 @@ function RescueApp() {
   });
 
   const liveTicker = demoTicker(typeof tokenSymbol === "string" ? tokenSymbol : null);
-  const chainTicker = liveTicker;
   // Sample mode never shows the on-chain symbol. An empty read and a live
   // ticker such as GRTT or gMOCK both render as SDEMO.
-  const demoSymbol = useFixture
-    ? DEMO_FALLBACK_TICKER
-    : (chainTicker ?? quote?.tokenSymbol ?? receipt?.tokenSymbol ?? null);
+  const demoSymbol = useFixture ? DEMO_FALLBACK_TICKER : liveTicker;
+  const liveSymbolReady = useFixture || (Boolean(liveTicker) && !symbolPending && !symbolFailed);
 
-  const reviewVisible = isConnected && quoteReady;
+  const reviewVisible = isConnected && quoteReady && liveSymbolReady;
 
   const phase = rescuePhase({
     quote: quoteReady ? quote : null,
@@ -686,9 +688,13 @@ function RescueApp() {
               ? "not configured"
               : useFixture
                 ? `${DEMO_FALLBACK_TICKER} · ${shortenAddress(token)}`
-                : liveTicker
-                  ? `${liveTicker} · ${shortenAddress(token)}`
-                  : QUOTE_ERROR}
+                : symbolPending
+                  ? `Reading… · ${shortenAddress(token)}`
+                  : symbolFailed
+                    ? `${QUOTE_ERROR} · ${shortenAddress(token)}`
+                    : liveTicker
+                      ? `${liveTicker} · ${shortenAddress(token)}`
+                      : QUOTE_ERROR}
           </dd>
           <dt>Balance</dt>
           <dd>

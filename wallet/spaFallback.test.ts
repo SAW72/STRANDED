@@ -52,11 +52,6 @@ describe("publishPointsShell", () => {
 });
 
 describe("host SPA fallback", () => {
-  it("fails if the temp dirs are no longer removed in afterAll", () => {
-    const source = fs.readFileSync(fileURLToPath(import.meta.url), "utf8");
-    expect(source).toMatch(/afterAll\(\(\) => \{\s*for \(const dir of tempDirs\) fs\.rmSync\(dir, \{ recursive: true, force: true \}\);\s*\}\);/);
-  });
-
   it("gives the wallet picker a scrolling dialog", () => {
     const css = fs.readFileSync(path.join(repoRoot, "wallet/src/index.css"), "utf8");
     const start = css.indexOf(".wallet-picker {");
