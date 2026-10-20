@@ -161,3 +161,28 @@ export const POINTS_BADGE_FLARE = "Flare";
 export const POINTS_BADGE_BEACON = "Beacon";
 export const POINTS_BADGE_HARBOR = "Harbor";
 export const POINTS_BADGE_KEEP = "Keep";
+export const GUIDE_KICKER = "Arb Sepolia testnet";
+export const GUIDE_RESCUE_TITLE = "How a rescue works";
+export const GUIDE_RESCUE_LEAD =
+  "Stranded carries a stuck test token home. You sign. The relayer sends the transaction. Your wallet does not pay the gas.";
+export const GUIDE_STEP_1_TITLE = "Get tDEMO";
+export const GUIDE_STEP_1_BODY =
+  "Press Get 2 tDEMO. Each wallet can take 2 tDEMO once every 24 hours. tDEMO has no value.";
+export const GUIDE_STEP_2_TITLE = "Sign the rescue";
+export const GUIDE_STEP_2_BODY =
+  "Choose how many tokens to rescue and review the quote. Your wallet asks you to sign. Nothing moves until you confirm.";
+export const GUIDE_STEP_3_TITLE = "The relayer sends it";
+export const GUIDE_STEP_3_BODY =
+  "A slice of the token is swapped for test ETH so the rescue can pay its own gas. The relayer sends the transaction.";
+export const GUIDE_STEP_4_TITLE = "It lands on-chain";
+export const GUIDE_STEP_4_BODY =
+  "Leftover tokens move to the destination on the quote, and a small amount of test ETH is delivered. One rescue for each wallet every 4 hours.";
+export const GUIDE_POINTS_TITLE = "How points work";
+export const GUIDE_POINTS_LEAD =
+  "Points are an off-chain record of a confirmed rescue. They have no value, are not a token, and can't be transferred.";
+export const GUIDE_POINTS_YOURS = "Your wallet records 100 points when your rescue confirms.";
+export const GUIDE_POINTS_RELAYER = "The relayer that sent the rescue records 50 points.";
+export const GUIDE_POINTS_BADGES =
+  "Rescue badges mark how many rescues are recorded.";
+export const GUIDE_START_LABEL = "Start a rescue";
+export const GUIDE_POINTS_LINK = "See who has the most points";
