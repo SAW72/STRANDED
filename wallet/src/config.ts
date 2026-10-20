@@ -63,7 +63,7 @@ export const LIVE_SDEMO_ADDRESS = "0xE3cb1AC5EDc70D3a85250a8c00cBe3A45AFc616C" a
  * and sets VITE_SDEMO_FAUCET_ARB_SEPOLIA. Not a secret.
  */
 export function sdemoFaucetAddress(): Address | null {
-  return optionalAddress(readEnv("VITE_SDEMO_FAUCET_ARB_SEPOLIA"));
+  return optionalAddress(envString(import.meta.env.VITE_SDEMO_FAUCET_ARB_SEPOLIA));
 }
 
 export function tokenAddress(chainId: SupportedChainId = BASE_SEPOLIA_CHAIN_ID): Address | null {

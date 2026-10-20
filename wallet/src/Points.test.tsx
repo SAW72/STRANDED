@@ -369,7 +369,7 @@ describe("Points page", () => {
     expect(points).not.toMatch(/\b(winner|1st|2nd|3rd)\b/i);
   });
 
-  it("labels a ledger wallet_session as Session", async () => {
+  it("hides a ledger wallet_session", async () => {
     const view = await render(
       <Points
         client={client({
@@ -377,7 +377,6 @@ describe("Points page", () => {
             Promise.resolve({
               wallet: EXAMPLE_POINTS_ADDRESS,
               total: 10,
-              rank: null,
               categories: [{ action: "wallet_session", points: 10, count: 1 }],
               entries: [{ action: "wallet_session", points: 10, txHash: null, chainId: null }],
             }),
@@ -385,13 +384,10 @@ describe("Points page", () => {
       />,
     );
     await lookup(view.container, EXAMPLE_POINTS_ADDRESS);
-    const visible = [...view.container.querySelectorAll("[data-testid='points-category'], [data-testid='points-entry']")]
-      .map((node) => node.textContent ?? "")
-      .join("\n");
-    expect(visible).toContain("Session");
-    expect(visible).toContain("10");
-    expect(visible).not.toContain("Other");
-    expect(visible).not.toContain("wallet_session");
+    expect(view.container.querySelector("[data-testid='points-loaded']")).toBeNull();
+    expect(view.container.querySelector("[data-testid='points-empty']")?.textContent).toMatch(/no points/i);
+    expect(view.container.textContent).not.toContain("wallet_session");
+    expect(view.container.textContent).not.toContain("Session");
     await view.unmount();
   });
 
@@ -403,7 +399,8 @@ describe("Points page", () => {
     expect(how?.textContent).toMatch(/completed rescues/);
     expect(how?.textContent).toMatch(/relayer jobs/);
     expect(how?.textContent).toMatch(/registry finds posted or claimed/);
-    expect(how?.textContent).toMatch(/10 per week for an active wallet session/);
+    expect(how?.textContent).toMatch(/completed rescues, relayer jobs, and registry finds/);
+    expect(how?.textContent).not.toMatch(/10 per week/);
     expect(how?.textContent).toMatch(/off-chain/);
     expect(how?.textContent).toMatch(/no value/);
     expect(how?.textContent).toMatch(/not a token/);

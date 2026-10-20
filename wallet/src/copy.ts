@@ -123,7 +123,7 @@ export const POINTS_BACK_LABEL = "Back to home";
 export const POINTS_INTRO = "Enter a wallet address to see recorded activity by category.";
 export const POINTS_HOW_HEADING = "How points are recorded";
 export const POINTS_HOW_BODY =
-  "Points are recorded for completed rescues, relayer jobs, and registry finds posted or claimed, plus 10 per week for an active wallet session.";
+  "Points are recorded for completed rescues, relayer jobs, and registry finds posted or claimed.";
 export const POINTS_HOW_STATUS =
   "Points are an off-chain activity record. They have no value, are not a token, and can't be transferred.";
 export const POINTS_DISCLAIMER =

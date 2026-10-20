@@ -127,7 +127,7 @@ describe("points copy", () => {
   it("describes how points are recorded without a final rescue number", () => {
     expect(copy.POINTS_HOW_HEADING).toBe("How points are recorded");
     expect(copy.POINTS_HOW_BODY).toBe(
-      "Points are recorded for completed rescues, relayer jobs, and registry finds posted or claimed, plus 10 per week for an active wallet session.",
+      "Points are recorded for completed rescues, relayer jobs, and registry finds posted or claimed.",
     );
     expect(copy.POINTS_HOW_BODY).not.toMatch(/\b100\b/);
     expect(copy.POINTS_HOW_STATUS).toBe(
