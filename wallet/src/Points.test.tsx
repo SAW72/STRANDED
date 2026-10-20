@@ -38,7 +38,7 @@ const loadedWallet: WalletPoints = {
 function client(partial: Partial<PointsClient> & Pick<PointsClient, "getWallet">): PointsClient {
   return {
     source: "http",
-    getLeaderboard: () => Promise.reject(new Error("leaderboard unused")),
+    getLeaderboard: () => Promise.resolve({ rows: [] }),
     ...partial,
   };
 }
@@ -77,6 +77,63 @@ async function lookup(container: HTMLElement, address: string) {
     button.click();
   });
 }
+
+describe("points board", () => {
+  afterEach(() => {
+    document.body.innerHTML = "";
+  });
+
+  it("lists wallets with the most points first and shows the rescue badge", async () => {
+    const higher = "0x2222222222222222222222222222222222222222";
+    const lower = "0x1111111111111111111111111111111111111111";
+    const relayer = "0x3333333333333333333333333333333333333333";
+    const getWallet = vi.fn(async (wallet: string) => ({
+      wallet,
+      total: 0,
+      categories: [],
+      entries: [],
+    }));
+    const view = await render(
+      <Points
+        client={client({
+          getWallet,
+          getLeaderboard: async () => ({
+            rows: [
+              { wallet: lower, total: 50, rescues: 0 },
+              { wallet: higher, total: 300, rescues: 5 },
+              { wallet: relayer, total: 100, rescues: 1 },
+            ],
+          }),
+        })}
+      />,
+    );
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    const rows = [...view.container.querySelectorAll("[data-testid='points-board-row']")].map(
+      (node) => node.textContent,
+    );
+    expect(rows).toHaveLength(3);
+    expect(rows[0]).toContain("300");
+    expect(rows[0]).toContain("Beacon");
+    expect(rows[0]).toContain("5 rescues");
+    expect(rows[1]).toContain("100");
+    expect(rows[1]).toContain("Lantern");
+    expect(rows[1]).toContain("1 rescue");
+    expect(rows[2]).toContain("50");
+    expect(rows[2]).not.toContain("Lantern");
+    expect(view.container.textContent).toContain("Most points");
+    expect(view.container.textContent?.toLowerCase()).not.toContain("reward");
+    expect(view.container.querySelector("[data-testid='points-rank']")).toBeNull();
+    const pick = view.container.querySelector("[data-testid='points-board-wallet']");
+    if (!(pick instanceof HTMLButtonElement)) throw new Error("board wallet missing");
+    await act(async () => {
+      pick.click();
+    });
+    expect(getWallet).toHaveBeenCalledWith(higher);
+    await view.unmount();
+  });
+});
 
 describe("points route", () => {
   it("matches /points only", () => {

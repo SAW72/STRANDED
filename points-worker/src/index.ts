@@ -11,7 +11,7 @@ import { parseTokenAllowlist } from "./tokenAllowlist";
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/i;
 const LEADERBOARD_MEMO_MS = 30_000;
 
-let leaderboardMemo: { at: number; rows: Array<{ wallet: string; total: number }> } | null = null;
+let leaderboardMemo: { at: number; rows: Array<{ wallet: string; total: number; rescues: number }> } | null = null;
 
 export function resetLeaderboardCache(): void {
   leaderboardMemo = null;
@@ -107,7 +107,7 @@ async function leaderboard(request: Request, env: PointsBindings): Promise<Respo
     const board = await leaderboardTotals(env.DB);
     leaderboardMemo = {
       at: now,
-      rows: board.map((row) => ({ wallet: row.wallet, total: row.total })),
+      rows: board.map((row) => ({ wallet: row.wallet, total: row.total, rescues: row.rescues })),
     };
   }
   return json(request, 200, { rows: leaderboardMemo.rows }, WALLET_READ_CACHE);

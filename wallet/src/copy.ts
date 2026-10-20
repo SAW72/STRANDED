@@ -150,3 +150,14 @@ export const POINTS_ACTION_REGISTRY_FIND = "Registry find";
 export const POINTS_ACTION_REGISTRY_CLAIM = "Registry claim";
 export const POINTS_ACTION_SESSION = "Session";
 export const POINTS_ACTION_OTHER = "Other";
+export const POINTS_BOARD_HEADING = "Most points";
+export const POINTS_BOARD_NOTE =
+  "Wallets with recorded points, highest first. Rescue badges mark how many rescues are recorded. They have no value.";
+export const POINTS_BOARD_EMPTY = "No points are recorded yet.";
+export const POINTS_BOARD_ERROR = "Couldn’t load the list. Try again.";
+export const POINTS_BOARD_LOADING = "Loading the list…";
+export const POINTS_BADGE_LANTERN = "Lantern";
+export const POINTS_BADGE_FLARE = "Flare";
+export const POINTS_BADGE_BEACON = "Beacon";
+export const POINTS_BADGE_HARBOR = "Harbor";
+export const POINTS_BADGE_KEEP = "Keep";

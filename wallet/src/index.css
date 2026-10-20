@@ -394,6 +394,119 @@ h1 {
   gap: 0.15rem;
 }
 
+.points-board {
+  list-style: none;
+  margin: 0.75rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.points-board-row {
+  display: grid;
+  grid-template-columns: 1.6rem minmax(0, 1fr) auto;
+  grid-template-areas:
+    "place wallet points"
+    "place badge badge";
+  gap: 0.2rem 0.65rem;
+  align-items: center;
+  background: var(--bg-elev);
+  border: 2px solid var(--line);
+  border-radius: 16px;
+  padding: 0.6rem 0.75rem;
+}
+
+.points-place {
+  grid-area: place;
+  font-weight: 800;
+  color: var(--muted);
+}
+
+.points-board-wallet {
+  grid-area: wallet;
+  justify-self: start;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-weight: 700;
+  text-align: left;
+}
+
+.points-board-row [data-testid="points-board-points"] {
+  grid-area: points;
+  font-weight: 800;
+}
+
+.rescue-badge {
+  grid-area: badge;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  width: fit-content;
+  border-radius: 999px;
+  padding: 0.12rem 0.55rem 0.12rem 0.35rem;
+  font-size: 0.82rem;
+  font-weight: 800;
+  border: 2px solid currentColor;
+  background: var(--bg-panel);
+}
+
+.rescue-mark {
+  width: 0.7rem;
+  height: 0.7rem;
+  background: currentColor;
+}
+
+.rescue-count {
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.rescue-badge-lantern {
+  color: #c46a12;
+}
+
+.rescue-badge-lantern .rescue-mark {
+  border-radius: 50%;
+}
+
+.rescue-badge-flare {
+  color: #d4524a;
+}
+
+.rescue-badge-flare .rescue-mark {
+  transform: rotate(45deg);
+  border-radius: 2px;
+}
+
+.rescue-badge-beacon {
+  color: #2a7fbf;
+}
+
+.rescue-badge-beacon .rescue-mark {
+  background: transparent;
+  border: 2px solid currentColor;
+  border-radius: 50%;
+}
+
+.rescue-badge-harbor {
+  color: #2e9e6b;
+}
+
+.rescue-badge-harbor .rescue-mark {
+  border-radius: 2px 2px 7px 7px;
+}
+
+.rescue-badge-keep {
+  color: #3d2c29;
+}
+
+.rescue-badge-keep .rescue-mark {
+  border-radius: 2px;
+}
+
 .points-how h2 {
   margin: 0 0 0.35rem;
 }

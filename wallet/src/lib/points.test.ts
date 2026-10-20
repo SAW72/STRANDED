@@ -130,7 +130,7 @@ describe("http points client", () => {
     expect(wallet).not.toHaveProperty("rank");
     expect(JSON.stringify(wallet).toLowerCase()).not.toContain("token value");
     expect(JSON.stringify(wallet)).not.toContain("$");
-    expect(board.rows).toEqual([{ wallet: EXAMPLE_POINTS_ADDRESS, total: 140 }]);
+    expect(board.rows).toEqual([{ wallet: EXAMPLE_POINTS_ADDRESS, total: 140, rescues: 0 }]);
     expect(board.rows[0]).not.toHaveProperty("rank");
   });
 
@@ -140,7 +140,7 @@ describe("http points client", () => {
         return new Response(
           JSON.stringify({
             rows: [
-              { wallet: EXAMPLE_POINTS_HIGHER_ADDRESS, total: 200 },
+              { wallet: EXAMPLE_POINTS_HIGHER_ADDRESS, total: 200, rescues: 5 },
               { wallet: EXAMPLE_POINTS_ADDRESS, total: 140 },
             ],
           }),
@@ -170,7 +170,10 @@ describe("http points client", () => {
     expect(wallet.categories[0]?.action).toBe("rescue");
     expect(wallet.entries[0]?.points).toBe(100);
     expect(wallet).not.toHaveProperty("rank");
-    expect(board.rows.map((row) => row.total)).toEqual([200, 140]);
+    expect(board.rows).toEqual([
+      { wallet: EXAMPLE_POINTS_HIGHER_ADDRESS, total: 200, rescues: 5 },
+      { wallet: EXAMPLE_POINTS_ADDRESS, total: 140, rescues: 0 },
+    ]);
     expect(JSON.stringify(board)).not.toContain('"rank"');
   });
 

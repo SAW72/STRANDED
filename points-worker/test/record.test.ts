@@ -70,8 +70,8 @@ describe.sequential("recorded activity", () => {
     const boardBody = await board.json();
     expect(boardBody).toEqual({
       rows: [
-        { wallet: USER, total: 100 },
-        { wallet: RELAYER, total: 50 },
+        { wallet: USER, total: 100, rescues: 1 },
+        { wallet: RELAYER, total: 50, rescues: 0 },
       ],
     });
     expect(board.headers.get("cache-control")).toBe("public, max-age=30");
