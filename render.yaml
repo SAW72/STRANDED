@@ -27,6 +27,13 @@ services:
       - path: /*
         name: Referrer-Policy
         value: strict-origin-when-cross-origin
+      # Not live until the Blueprint is synced. See DEPLOY.md. Spencer's step.
+      - path: /*
+        name: Content-Security-Policy
+        value: "frame-ancestors 'none'"
+      - path: /*
+        name: Strict-Transport-Security
+        value: "max-age=31536000; includeSubDomains"
     envVars:
       - key: NODE_VERSION
         value: "22"

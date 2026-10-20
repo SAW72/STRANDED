@@ -163,7 +163,13 @@ jobs:
       - name: Build
         env:
           TMPDIR: ${{ runner.temp }}
-        run: npm run build
+        run: |
+          set -euo pipefail
+          # Runtime canaries only. Generated here, never printed, never committed.
+          export RELAYER_PRIVATE_KEY="$(openssl rand -hex 32)"
+          export ADMIN_SECRET="$(openssl rand -hex 32)"
+          npm run build
+          node checkDistSecrets.mjs dist
 
   # Local anvil only. Proves production _isBroadcast under forge script
   # --broadcast. No fork, no public RPC, no key.

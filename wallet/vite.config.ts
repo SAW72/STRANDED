@@ -25,8 +25,9 @@ export function pointsShellPlugin(): Plugin {
 
 export default defineConfig({
   plugins: [react(), pointsShellPlugin()],
-  // RELAYER_BASE_URL is a public Relayer origin, not a secret.
-  envPrefix: ["VITE_", "RELAYER_"],
+  // Only VITE_ is exposed to the client. A RELAYER_ prefix would inline every
+  // RELAYER_* value from the build environment, including RELAYER_PRIVATE_KEY.
+  envPrefix: ["VITE_"],
   server: {
     host: "0.0.0.0",
     port: 5173,

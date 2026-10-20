@@ -13,6 +13,14 @@ function allowList(): string[] {
   return allow ?? [];
 }
 
+describe("client env prefix", () => {
+  it("exposes only VITE_ variables", () => {
+    const prefix = config.envPrefix;
+    const list = Array.isArray(prefix) ? prefix : prefix ? [prefix] : [];
+    expect(list).toEqual(["VITE_"]);
+  });
+});
+
 describe("dev server file access", () => {
   it("allows only the wallet root and the shared folder", () => {
     const allow = allowList();
