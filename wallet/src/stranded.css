@@ -22,6 +22,133 @@
   font-weight: 700;
 }
 
+.guide {
+  margin: 0 0 1.4rem;
+  padding: 1.15rem 1.1rem 1.2rem;
+  border: 2px solid var(--line);
+  border-radius: 28px;
+  background:
+    radial-gradient(460px 200px at 100% 0%, #ffe0c2 0%, transparent 70%),
+    radial-gradient(380px 200px at 0% 100%, #ccefff 0%, transparent 72%),
+    var(--bg-elev);
+}
+
+.guide-kicker {
+  margin: 0 0 0.25rem;
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #c46a12;
+}
+
+.guide h2 {
+  margin: 0;
+  font-size: 1.55rem;
+}
+
+.guide-lead,
+.guide-points p,
+.guide-facts {
+  margin: 0.4rem 0 0;
+  line-height: 1.45;
+}
+
+.guide-path {
+  list-style: none;
+  margin: 0.95rem 0 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.guide-step {
+  background: var(--bg-panel);
+  border: 2px solid var(--line);
+  border-radius: 18px;
+  padding: 0.75rem 0.7rem 0.85rem;
+}
+
+.guide-step-num {
+  display: inline-grid;
+  place-items: center;
+  width: 1.7rem;
+  height: 1.7rem;
+  margin-bottom: 0.4rem;
+  border-radius: 50%;
+  background: #ff8a65;
+  color: #3d2c29;
+  font-weight: 800;
+}
+
+.guide-step h3 {
+  margin: 0 0 0.25rem;
+  font-size: 1rem;
+}
+
+.guide-step p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.4;
+  font-size: 0.92rem;
+}
+
+.guide-points {
+  margin-top: 1rem;
+  padding-top: 0.95rem;
+  border-top: 2px dashed var(--line);
+}
+
+.guide-facts {
+  padding-left: 1.1rem;
+}
+
+.guide-badges {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin: 0.7rem 0 0;
+  padding: 0;
+}
+
+.guide-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-top: 0.95rem;
+}
+
+.guide-actions .btn {
+  text-decoration: none;
+}
+
+#rescue {
+  scroll-margin-top: 0.75rem;
+}
+
+@media (max-width: 860px) {
+  .guide-path {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 560px) {
+  .guide {
+    padding: 0.9rem 0.8rem 1rem;
+    border-radius: 22px;
+  }
+
+  .guide h2 {
+    font-size: 1.3rem;
+  }
+
+  .guide-path {
+    grid-template-columns: 1fr;
+  }
+}
+
 .stranded-overlay {
   position: fixed;
   inset: 0;

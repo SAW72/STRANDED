@@ -8,6 +8,7 @@ import copyValueSource from "../CopyValue.tsx?raw";
 import indexHtml from "../../index.html?raw";
 import receiptSource from "../RescueReceipt.tsx?raw";
 import celebrationSource from "../StrandedCelebration.tsx?raw";
+import guideSource from "../RescueGuide.tsx?raw";
 import pickerSource from "../WalletPicker.tsx?raw";
 import * as copy from "../copy";
 import { QUOTE_ERROR } from "../copy";
@@ -45,6 +46,7 @@ const COPY_SOURCES = [
   appSource,
   pointsSource,
   celebrationSource,
+  guideSource,
   receiptSource,
   pickerSource,
   copyValueSource,

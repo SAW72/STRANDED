@@ -118,6 +118,7 @@ import { fetchRescueQuote, hasRequiredQuoteFields, type QuoteSource, type Rescue
 import { receiptFromSubmit, type RescueReceiptView } from "./lib/receipt";
 import { submitRescue } from "./lib/rescues";
 import { isPointsRoute, Points } from "./Points";
+import { RescueGuide } from "./RescueGuide";
 import { RescueReceipt } from "./RescueReceipt";
 import {
   DEMO_FALLBACK_TICKER,
@@ -613,8 +614,9 @@ function RescueApp() {
       </p>
       <StrandedCelebration kind={celebration} onDone={() => setCelebration(null)} />
       <StrandedHero onPlay={() => setCelebration("rescue")} />
+      <RescueGuide />
 
-      <section className="card">
+      <section className="card" id="rescue">
         <h2>1. Network</h2>
         <p className="subtitle">{CHAIN_SWITCH_HINT}</p>
         <div className="chain-switch" role="group" aria-label="Rescue testnet">
