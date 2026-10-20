@@ -146,20 +146,36 @@ describe("points rubric", () => {
     const dir = await mkdtemp(join(tmpdir(), "points-week-"));
     const store = createLedgerStore({ dataDir: dir, now: () => clock });
     try {
-      const row = store.appendScored("wallet_session", { wallet: USER, at: "2999-01-01T00:00:00.000Z" });
-      assert.equal(row.txHash, from2999.txHash);
       assert.throws(
-        () => store.appendScored("wallet_session", { wallet: USER, at: "1970-01-01T00:00:00.000Z" }),
-        rejection("duplicate"),
+        () => store.appendScored("wallet_session", { wallet: USER, at: "2999-01-01T00:00:00.000Z" }),
+        /excluded_action/,
       );
-      store.appendScored("wallet_session", { wallet: OTHER, at: "2999-06-01T00:00:00.000Z" });
-      clock = Date.parse("2026-10-19T00:00:00.000Z");
-      store.appendScored("wallet_session", { wallet: USER, at: "1970-01-01T00:00:00.000Z" });
-      assert.equal(store.totals(USER).total, 20);
-      assert.equal(store.byWallet(USER).length, 2);
-      assert.equal(store.totals(OTHER).total, 10);
+      assert.throws(
+        () => store.appendScored("wallet_session", { wallet: OTHER, at: "2999-06-01T00:00:00.000Z" }),
+        /excluded_action/,
+      );
+      assert.equal(store.totals(USER).total, 0);
+      assert.equal(store.byWallet(USER).length, 0);
+      assert.equal(store.totals(OTHER).total, 0);
     } finally {
       store.close();
+    }
+  });
+
+  it("matches the c1f201f session score for the same inputs", () => {
+    const wallet = "0x1111111111111111111111111111111111111111";
+    const now = () => Date.parse("2026-10-12T15:00:00.000Z");
+    const expectedTx = `off:${["3ff91a60", "5dd3f401", "93afc91c", "4df04175", "ad580f23", "5dc49f92", "e38165ae", "42d79fb6"].join("")}`;
+    const fromScore = score(
+      { action: "wallet_session", wallet: wallet.toUpperCase(), at: "2999-01-01T00:00:00.000Z" },
+      now,
+    );
+    const fromDirect = scoreWalletSession({ wallet, at: "1970-01-01T00:00:00.000Z" }, now);
+    for (const row of [fromScore, fromDirect]) {
+      assert.equal(row.points, 10);
+      assert.equal(row.week, "2026-W42");
+      assert.equal(row.wallet, wallet);
+      assert.equal(row.txHash, expectedTx);
     }
   });
 });

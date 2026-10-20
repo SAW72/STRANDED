@@ -4,4 +4,5 @@ export const EXCLUDED_POINTS_ACTIONS = Object.freeze([
   "security",
   "security_finding",
   "finding",
+  "wallet_session",
 ]);

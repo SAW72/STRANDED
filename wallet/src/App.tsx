@@ -132,6 +132,7 @@ import {
   isFirstRescuePending,
   type CelebrationKind,
 } from "./StrandedCelebration";
+import { SdemoFaucetCard } from "./SdemoFaucetCard";
 import { WalletPicker } from "./WalletPicker";
 import "./stranded.css";
 
@@ -675,6 +676,8 @@ function RescueApp() {
         )}
         {connectError && !pickerOpen && <p className="danger">{connectErrorMessage(connectError)}</p>}
       </section>
+
+      <SdemoFaucetCard />
 
       <WalletPicker
         open={pickerOpen}

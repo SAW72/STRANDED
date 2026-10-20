@@ -140,6 +140,31 @@ export function isTransientBroadcastError(err) {
   return TRANSIENT_MARKERS.some((m) => text.includes(m));
 }
 
+/** The node already has this raw transaction. The local hash is the one that can mine. */
+export function isAlreadyKnownError(err) {
+  const text = blob(err);
+  return text.includes("already known") || text.includes("alreadyknown");
+}
+
+/** Account nonce moved. The same signed bytes will not mine. */
+export function isNonceRetryError(err) {
+  const text = blob(err);
+  if (!text) return false;
+  return (
+    text.includes("nonce too low") ||
+    text.includes("noncetoolow") ||
+    text.includes("lower than the current nonce") ||
+    text.includes("nonce has already been used") ||
+    /nonce[_\-\s]?expired/.test(text)
+  );
+}
+
+/** Fee moved. A fresh prepare picks up the new price. */
+export function isUnderpricedError(err) {
+  const text = blob(err);
+  return text.includes("underpriced");
+}
+
 export function backoffMs(attempt, baseDelayMs = DEFAULT_BASE_DELAY_MS) {
   const exp = Math.max(0, attempt - 1);
   return Number(baseDelayMs) * 2 ** exp;

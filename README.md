@@ -207,8 +207,7 @@ SDEMO was deployed on Oct 1, 2026 (tx `0xfc357a9aa4ef5092882ee806228edb6a03843b4
 
 The contract creates 20 SDEMO in the constructor and has no `mint`. Supply stays at `totalSupply()` of 20.
 
-- No faucet and no liquidity pool.
-- The Steward wallet transfers 2 SDEMO per named judge or QA wallet, on request only. Those wallets are the demo and hackathon-judge wallets named above.
+- No liquidity pool. SDEMO still has no `mint`. A no-owner faucet (`src/SdemoFaucet.sol`) can send 2 SDEMO per wallet per 24 hours, but only from SDEMO transferred into that contract. It cannot create supply. The Steward wallet still transfers 2 SDEMO per named judge or QA wallet when the faucet is empty. Those wallets are the demo and hackathon-judge wallets named above.
 - Log every transfer (date, recipient, amount, tx hash) in [docs/SDEMO_DISTRIBUTION_LOG.md](docs/SDEMO_DISTRIBUTION_LOG.md). The migration script does not move balances.
 - Do not change `setRate` or `setMaxPayout` on the router during judging. Do not call `sweepToken` on SDEMO on the router during judging. SDEMO held by the router is never swept and sent out again. The 0.01 ETH ceiling assumes that.
 

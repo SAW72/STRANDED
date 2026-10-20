@@ -23,7 +23,6 @@ const EMPTY_ADDRESS = "0x3333333333333333333333333333333333333333";
 const loadedWallet: WalletPoints = {
   wallet: EXAMPLE_POINTS_ADDRESS,
   total: 140,
-  rank: 2,
   categories: [
     { action: "rescue", points: 100, count: 1 },
     { action: "registry_find", points: 30, count: 1 },
@@ -99,12 +98,14 @@ describe("Points page", () => {
     const view = await render(<Points client={client({ getWallet })} />);
     await lookup(view.container, "  " + EXAMPLE_POINTS_ADDRESS.toUpperCase().replace("0X", "0x") + " ");
 
+    expect(loadedWallet).not.toHaveProperty("rank");
     expect(getWallet).toHaveBeenCalledWith(EXAMPLE_POINTS_ADDRESS);
     expect(view.container.querySelector("[data-testid='points-loaded']")).not.toBeNull();
     expect(view.container.querySelector("[data-testid='points-total']")).toBeNull();
     expect(view.container.querySelector("[data-testid='points-rank']")).toBeNull();
     expect(view.container.textContent).not.toMatch(/\bTotal\b/);
     expect(view.container.textContent).not.toMatch(/\bRank\b/);
+    expect(view.container.textContent).not.toMatch(/\b(1st|2nd|3rd|winner)\b/i);
     expect(view.container.querySelector("[data-testid='points-disclaimer']")?.textContent).toBe(POINTS_DISCLAIMER);
     expect(view.container.textContent).toContain(POINTS_INTRO);
     const weights = view.container.querySelector("[data-testid='points-weights']");
@@ -140,7 +141,6 @@ describe("Points page", () => {
     const getWallet = vi.fn(async (wallet: string) => ({
       wallet,
       total: 0,
-      rank: null,
       categories: [],
       entries: [],
     }));
@@ -189,7 +189,7 @@ describe("Points page", () => {
   it("shows Example data on each example result, including after the page banner", async () => {
     const getWallet = vi.fn(async (wallet: string) => {
       if (wallet === EMPTY_ADDRESS) {
-        return { wallet, total: 0, rank: null, categories: [], entries: [] };
+        return { wallet, total: 0, categories: [], entries: [] };
       }
       return loadedWallet;
     });
@@ -219,7 +219,6 @@ describe("Points page", () => {
       const beside: WalletPoints = {
         wallet: EXAMPLE_POINTS_ADDRESS,
         total: 117,
-        rank: 1,
         categories: [
           { action: "rescue", points: 100, count: 1 },
           { action, points: 17, count: 1 },
@@ -253,7 +252,6 @@ describe("Points page", () => {
     const beside: WalletPoints = {
       wallet: EXAMPLE_POINTS_ADDRESS,
       total: 117,
-      rank: 1,
       categories: [
         { action: "rescue", points: 100, count: 1 },
         { action: "audit", points: 17, count: 1 },
@@ -285,7 +283,6 @@ describe("Points page", () => {
     const hidden: WalletPoints = {
       wallet: EXAMPLE_POINTS_ADDRESS,
       total: 100,
-      rank: 1,
       categories: [
         { action: "rescue", points: 100, count: 1 },
         ...excluded.map((action, index) => ({ action, points: 200 + index, count: 1 })),
@@ -329,7 +326,6 @@ describe("Points page", () => {
     const excludedOnly: WalletPoints = {
       wallet: EXAMPLE_POINTS_ADDRESS,
       total: 500,
-      rank: 1,
       categories: [
         { action: "bug_report", points: 500, count: 1 },
         { action: "security", points: 300, count: 1 },
@@ -369,6 +365,8 @@ describe("Points page", () => {
     expect(points).not.toMatch(/data-testid=["']points-total["']/);
     expect(points).not.toMatch(/data-testid=["']points-rank["']/);
     expect(points).not.toMatch(/POINTS_TOTAL_LABEL|POINTS_RANK_LABEL|POINTS_UNRANKED/);
+    expect(points).not.toMatch(/\brank\b/i);
+    expect(points).not.toMatch(/\b(winner|1st|2nd|3rd)\b/i);
   });
 
   it("labels a ledger wallet_session as Session", async () => {
@@ -483,6 +481,7 @@ describe("Points page", () => {
     expect(view.container.querySelector("[data-testid='points-rank']")).toBeNull();
     expect(view.container.textContent).not.toMatch(/\bTotal\b/);
     expect(view.container.textContent).not.toMatch(/\bRank\b/);
+    expect(view.container.textContent).not.toMatch(/\b(1st|2nd|3rd|winner)\b/i);
     expect(view.container.textContent).toContain("Rescue");
     expect(view.container.textContent).not.toMatch(/placeholder, TBD/);
     const href = view.container.querySelector("[data-testid='points-tx']")?.getAttribute("href") ?? "";

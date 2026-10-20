@@ -207,7 +207,7 @@ function Loaded({ result, example }: { result: WalletPoints; example: boolean })
       <div data-testid="points-result">
         {example ? <ExampleLabel /> : null}
         <dl className="kv">
-          {/* Total and rank stay hidden until category weights are set. */}
+          {/* Total stays off this list. */}
           <dt>{POINTS_ADDRESS_RESULT_LABEL}</dt>
           <dd className="mono" data-testid="points-wallet">
             {result.wallet}

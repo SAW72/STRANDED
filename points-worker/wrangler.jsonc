@@ -1,0 +1,32 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "stranded-points",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-19",
+  "compatibility_flags": ["nodejs_compat"],
+  // Logs stay on. Traces stay off so RPC URLs are not exported.
+  // A root head_sampling_rate of 0 would drop logs as well as traces.
+  "observability": {
+    "enabled": true,
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 1,
+      "invocation_logs": false
+    },
+    "traces": {
+      "enabled": false,
+      "head_sampling_rate": 0
+    }
+  },
+  // database_id is a placeholder. Replace it with the id printed by
+  // `wrangler d1 create stranded-points`. It is an id, not a secret.
+  // Do not add account_id, secrets, or RPC URLs to this file.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "stranded-points",
+      "database_id": "00000000-0000-4000-8000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ]
+}
