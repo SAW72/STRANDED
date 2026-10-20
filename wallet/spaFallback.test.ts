@@ -51,6 +51,23 @@ describe("publishPointsShell", () => {
   });
 });
 
+const HEADLINE =
+  "Tokens with no ETH can't move. Stranded finds them, swaps a slice for gas, and carries the rest home.";
+
+describe("seo shell", () => {
+  it("puts the rescue headline and Open Graph tags in the HTML before the script", () => {
+    const html = fs.readFileSync(path.join(repoRoot, "wallet/index.html"), "utf8");
+    const withoutScripts = html.replace(/<script[\s\S]*?<\/script>/gi, "");
+    expect(withoutScripts).toContain(HEADLINE);
+    expect(withoutScripts).toContain("<h1>Stranded</h1>");
+    expect(html).toContain(`property="og:title" content="Stranded"`);
+    expect(html).toContain(`property="og:description"`);
+    expect(html).toContain(`property="og:image" content="https://strandedtoken.trade/stranded/idle.webp"`);
+    expect(html).toContain('name="description"');
+    expect(html.indexOf(HEADLINE)).toBeLessThan(html.indexOf("<script"));
+  });
+});
+
 describe("host SPA fallback", () => {
   it("gives the wallet picker a scrolling dialog", () => {
     const css = fs.readFileSync(path.join(repoRoot, "wallet/src/index.css"), "utf8");

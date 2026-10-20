@@ -76,7 +76,8 @@ const HYPHEN_SOURCE =
   "\\-\\u2010\\u2011\\u2012\\u2013\\u2014\\u2015\\u2212\\uFE58\\uFE63\\uFF0D\\u058A\\u05BE\\u1806\\u2043\\u2E17\\u2E1A\\u2E3A\\u2E3B\\u301C\\u30A0_";
 const HYPHEN_RUN = new RegExp(`[A-Za-z0-9]+(?:[${HYPHEN_SOURCE}][A-Za-z0-9]+)+`, "gu");
 // "trade-offs" is the plural. A longer token such as "trade-offer" stays flagged.
-const ALLOWED_COMPOUNDS = ["trade-off", "trade-offs", "data-value", "price_id"];
+// The live host contains the letters trade after a dot. It is the site name, not the banned stem.
+const ALLOWED_COMPOUNDS = ["trade-off", "trade-offs", "data-value", "price_id", "strandedtoken.trade"];
 
 /** True when the whole literal is a banned form, with no punctuation stripped. */
 export function isWholeBannedForm(text: string): boolean {
