@@ -72,6 +72,8 @@ Render fronts the service with Cloudflare. A client-supplied leftmost `X-Forward
 
 A disabled cap is `null` and its `*Enabled` flag is `false`.
 
+`pointsHook` is true when the points post is configured. The response does not include the secret or the URL. On startup the relayer posts the completed Arb Sepolia rescue `0x044e4ba0a0a1712024acafd2c43ddeaeeec0e2b12183d87bdf4dc070eab9d68f` when that flag is true. A process with `QA_POINTS_TARGET` set skips that post.
+
 ## Quote and rescue errors
 
 Bad input is HTTP 400 with `{ "ok": false, "error": "<code>", "message": "..." }`. No stack traces, RPC URLs, or secrets.

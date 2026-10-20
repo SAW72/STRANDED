@@ -18,9 +18,11 @@ import { createNonceStore } from "./nonceStore.mjs";
 import { createBuildQuote, encodeSwapData } from "./quote.mjs";
 import { rescueAbi } from "./rescueAbi.mjs";
 import {
+  deliverPointsNotify,
   findTxAtNonce,
   notePointsReceiptReplacement,
   pointsMinConfirmations,
+  pointsPushEnabled,
   schedulePointsNotify,
   schedulePointsRetry,
 } from "./points/notify.mjs";
@@ -149,6 +151,7 @@ async function liveStatus() {
     swapCode: Boolean(bytecode && bytecode !== "0x"),
     relayer: account.address,
     rpc: "live",
+    pointsHook: pointsPushEnabled(process.env),
   };
 }
 
@@ -520,8 +523,31 @@ try {
   console.error("points_notify", "error");
 }
 const limitLabel = (value) => (value == null ? "off" : String(value));
+
+// Completed tDEMO rescue on Arb Sepolia. The hook did not keep an outbox row
+// for it, and a new Render disk does not keep rescues.jsonl.
+const PROVEN_POINTS_TX = "0x044e4ba0a0a1712024acafd2c43ddeaeeec0e2b12183d87bdf4dc070eab9d68f";
+
+function replayProvenPoints() {
+  if (process.env.QA_POINTS_TARGET) return;
+  if (!pointsPushEnabled(process.env)) return;
+  const job = deliverPointsNotify({
+    chainId: 421614,
+    txHash: PROVEN_POINTS_TX,
+    dataDir: DATA_DIR,
+    env: process.env,
+    confirmReceipt: confirmPointsReceipt,
+    lookupNonce: lookupPointsNonce,
+    getTx: readPointsTx,
+  });
+  void Promise.resolve(job).catch(() => {
+    console.error("points_notify", "error");
+  });
+}
+
 server.listen(PORT, HOST, () => {
   console.log(
-    `relayer listening on ${HOST}:${PORT} stubRpc=false swap=${SWAP} relayer=${account.address} chain=${CHAIN_ID} paused=${killSwitch.isPaused()} dataDir=${DATA_DIR} walletLimit=${limitLabel(RESCUE_LIMITS.perWallet)} ipLimit=${limitLabel(RESCUE_LIMITS.perIp)} windowMs=${RESCUE_LIMITS.windowMs} trustedProxyHops=${TRUSTED_PROXY_HOPS}`,
+    `relayer listening on ${HOST}:${PORT} stubRpc=false swap=${SWAP} relayer=${account.address} chain=${CHAIN_ID} paused=${killSwitch.isPaused()} dataDir=${DATA_DIR} walletLimit=${limitLabel(RESCUE_LIMITS.perWallet)} ipLimit=${limitLabel(RESCUE_LIMITS.perIp)} windowMs=${RESCUE_LIMITS.windowMs} trustedProxyHops=${TRUSTED_PROXY_HOPS} pointsHook=${pointsPushEnabled(process.env)}`,
   );
+  replayProvenPoints();
 });
