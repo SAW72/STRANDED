@@ -224,6 +224,20 @@ describe("points push", { concurrency: false }, () => {
     assert.equal(src.includes("txInput,"), false);
   });
 
+  it("publishes pointsHook and replays the proven rescue after listen", () => {
+    const src = readFileSync(fileURLToPath(new URL("../server.mjs", import.meta.url)), "utf8");
+    assert.match(src, /pointsHook: pointsPushEnabled\(process\.env\)/);
+    const listen = src.indexOf("server.listen(PORT, HOST");
+    const logged = src.indexOf("relayer listening");
+    const replay = src.lastIndexOf("replayProvenPoints()");
+    const fn = src.indexOf("function replayProvenPoints()");
+    const guard = src.indexOf("QA_POINTS_TARGET", fn);
+    const deliver = src.indexOf("deliverPointsNotify(", fn);
+    assert.ok(listen !== -1 && logged > listen && replay > logged);
+    assert.ok(fn !== -1 && guard > fn && deliver > guard);
+    assert.match(src, /0x044e4ba0a0a1712024acafd2c43ddeaeeec0e2b12183d87bdf4dc070eab9d68f/);
+  });
+
   it("retries a 404 receipt_not_found instead of dropping it (O5)", async () => {
     const dir = await mkdtemp(join(tmpdir(), "points-404-"));
     const secret = runtimeSecret();
