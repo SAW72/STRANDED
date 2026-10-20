@@ -1,7 +1,8 @@
 import { useState } from "react";
-import { useAccount, useSwitchChain, useWriteContract } from "wagmi";
+import { useAccount, usePublicClient, useSwitchChain, useWriteContract } from "wagmi";
 import { ARB_SEPOLIA_CHAIN_ID, sdemoFaucetAddress } from "./config";
 import { chainLabel } from "./lib/chains";
+import { arbDripFees, dripErrorText } from "./lib/dripGas";
 
 const dripAbi = [
   {
@@ -21,6 +22,7 @@ export function SdemoFaucetCard() {
   const { address, isConnected, chainId } = useAccount();
   const { switchChain, isPending: isSwitching } = useSwitchChain();
   const { writeContractAsync, isPending } = useWriteContract();
+  const publicClient = usePublicClient({ chainId: ARB_SEPOLIA_CHAIN_ID });
   const [message, setMessage] = useState<string | null>(null);
   const onArb = chainId === ARB_SEPOLIA_CHAIN_ID;
 
@@ -30,16 +32,21 @@ export function SdemoFaucetCard() {
     if (!faucet) return;
     setMessage(null);
     try {
+      let baseFee: bigint | null = null;
+      if (publicClient && typeof publicClient.getBlock === "function") {
+        const block = await publicClient.getBlock();
+        baseFee = block.baseFeePerGas ?? null;
+      }
       const hash = await writeContractAsync({
         address: faucet,
         abi: dripAbi,
         functionName: "drip",
         chainId: ARB_SEPOLIA_CHAIN_ID,
+        ...arbDripFees(baseFee),
       });
       setMessage(`Requested 2 tDEMO. Tx ${hash}`);
     } catch (err) {
-      const text = err instanceof Error ? err.message : "The faucet did not send tokens.";
-      setMessage(text);
+      setMessage(dripErrorText(err));
     }
   }
 
