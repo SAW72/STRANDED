@@ -44,7 +44,7 @@ cp .env.example .env
 | `VITE_BASE_SEPOLIA_RPC_URL` | no | Defaults to `https://sepolia.base.org` |
 | `VITE_ARB_SEPOLIA_RPC_URL` | no | Defaults to `https://sepolia-rollup.arbitrum.io/rpc` |
 
-Relayer URLs are public origins, not secrets. Aliases `RELAYER_BASE_URL` and `VITE_RELAYER_BASE_URL` still work for Base. **Do not** put private keys, Relayer keys, or mainnet RPC credentials in `.env`.
+Relayer URLs are public origins, not secrets. The Base alias is `VITE_RELAYER_BASE_URL`. Unprefixed `RELAYER_BASE_URL` is not read. **Do not** put private keys, Relayer keys, or mainnet RPC credentials in `.env`.
 
 If a chain’s Relayer URL is unset, the wallet uses the Relayer dry-mock fixture for that chain (not a live price). Confirm details still gates the fixture path. If the URL is set, a failed POST does **not** invent a quote. Arb never falls back to the Base Relayer origin.
 

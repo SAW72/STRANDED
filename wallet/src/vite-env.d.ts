@@ -3,7 +3,6 @@
 interface ImportMetaEnv {
   readonly VITE_RELAYER_URL?: string;
   readonly VITE_RELAYER_URL_ARB_SEPOLIA?: string;
-  readonly RELAYER_BASE_URL?: string;
   readonly VITE_RELAYER_BASE_URL?: string;
   readonly VITE_GAS_RESCUE_ADDRESS?: string;
   readonly VITE_GAS_RESCUE_ADDRESS_ARB_SEPOLIA?: string;
