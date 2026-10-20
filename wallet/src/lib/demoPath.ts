@@ -1,6 +1,6 @@
 import { encodeFunctionData, keccak256, type Address, type Hex } from "viem";
 import { ARB_SEPOLIA_CHAIN_ID } from "./chains";
-import { LIVE_ARB_GRTT, liveDemoToken } from "./demoToken";
+import { LIVE_ARB_GRTT, LIVE_SDEMO_ADDRESS, LIVE_TDEMO_ADDRESS, liveDemoToken } from "./demoToken";
 import { RELAYER_DRY_PATH_HASH } from "./fixture";
 import type { RescueQuote } from "./quotes";
 
@@ -40,7 +40,9 @@ export function isSupportedDemoToken(tokenIn: Address): boolean {
   return (
     t === liveDemoToken().toLowerCase() ||
     t === ARB_SEPOLIA_DEMO.grtt.toLowerCase() ||
-    t === ARB_SEPOLIA_DEMO.gmock.toLowerCase()
+    t === ARB_SEPOLIA_DEMO.gmock.toLowerCase() ||
+    t === LIVE_TDEMO_ADDRESS.toLowerCase() ||
+    t === LIVE_SDEMO_ADDRESS.toLowerCase()
   );
 }
 

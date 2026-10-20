@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { LIVE_ARB_GRTT, liveDemoToken } from "./demoToken";
+import { LIVE_TDEMO_ADDRESS, liveDemoToken } from "./demoToken";
 import { isSupportedDemoToken } from "./demoPath";
 
 afterEach(() => {
@@ -7,9 +7,9 @@ afterEach(() => {
 });
 
 describe("live demo token", () => {
-  it("defaults to live GRTT when the env override is empty", () => {
+  it("defaults to tDEMO when the env override is empty", () => {
     vi.stubEnv("VITE_TOKEN_ADDRESS_ARB_SEPOLIA", "");
-    expect(liveDemoToken()).toBe(LIVE_ARB_GRTT);
+    expect(liveDemoToken()).toBe(LIVE_TDEMO_ADDRESS);
   });
 
   it("uses VITE_TOKEN_ADDRESS_ARB_SEPOLIA when set", () => {
