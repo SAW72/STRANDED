@@ -6,6 +6,7 @@ import {
   isSupportedChainId,
   type SupportedChainId,
 } from "./lib/chains";
+import { liveDemoToken } from "./lib/demoToken";
 
 export {
   ARB_SEPOLIA_CHAIN_ID,
@@ -58,18 +59,24 @@ export function gasRescueLensAddress(): Address | null {
 /** Live SDEMO on Arb Sepolia. The faucet cannot mint more of it. */
 export const LIVE_SDEMO_ADDRESS = "0xE3cb1AC5EDc70D3a85250a8c00cBe3A45AFc616C" as Address;
 
+/** tDEMO faucet. Holds the one-time trillion-token supply. Not a secret. */
+export const LIVE_TDEMO_FAUCET = "0x88DFCa8f07325595300f7ABe1E7d8E70EA7Ae4Df" as Address;
+
+/** SDEMO faucet funded with 18 tokens. A rebuild maps this address onto tDEMO. */
+const RETIRED_SDEMO_FAUCET = "0x057f2F0Bf6cF4fC6af8a58Be21f4A2fBcEbCDc6B";
+
 /**
- * Arb Sepolia SDEMO faucet. Empty until Spencer deploys `SdemoFaucet`
- * and sets VITE_SDEMO_FAUCET_ARB_SEPOLIA. Not a secret.
+ * Arb Sepolia drip faucet. The retired SDEMO faucet and an empty env both
+ * use the tDEMO faucet. A different env address is kept for tests.
  */
 export function sdemoFaucetAddress(): Address | null {
-  return optionalAddress(envString(import.meta.env.VITE_SDEMO_FAUCET_ARB_SEPOLIA));
+  const fromEnv = optionalAddress(envString(import.meta.env.VITE_SDEMO_FAUCET_ARB_SEPOLIA));
+  if (!fromEnv || fromEnv.toLowerCase() === RETIRED_SDEMO_FAUCET.toLowerCase()) return LIVE_TDEMO_FAUCET;
+  return fromEnv;
 }
 
 export function tokenAddress(chainId: SupportedChainId = BASE_SEPOLIA_CHAIN_ID): Address | null {
-  if (chainId === ARB_SEPOLIA_CHAIN_ID) {
-    return optionalAddress(envString(import.meta.env.VITE_TOKEN_ADDRESS_ARB_SEPOLIA));
-  }
+  if (chainId === ARB_SEPOLIA_CHAIN_ID) return liveDemoToken();
   return optionalAddress(envString(import.meta.env.VITE_TOKEN_ADDRESS));
 }
 

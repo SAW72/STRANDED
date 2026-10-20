@@ -7,6 +7,7 @@ import {
   ARB_SEPOLIA_CHAIN_ID,
   BASE_SEPOLIA_CHAIN_ID,
   LIVE_SDEMO_ADDRESS,
+  LIVE_TDEMO_FAUCET,
   pointsApiUrl,
   relayerUrl,
   sdemoFaucetAddress,
@@ -25,8 +26,8 @@ describe("relayerUrl", () => {
 });
 
 describe("sdemo faucet config", () => {
-  it("stays empty until the deploy address is set", () => {
-    expect(sdemoFaucetAddress()).toBeNull();
+  it("uses the tDEMO faucet unless a different address is set", () => {
+    expect(sdemoFaucetAddress()).toBe(LIVE_TDEMO_FAUCET);
     expect(LIVE_SDEMO_ADDRESS).toBe("0xE3cb1AC5EDc70D3a85250a8c00cBe3A45AFc616C");
   });
 });

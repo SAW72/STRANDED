@@ -14,8 +14,7 @@ const dripAbi = [
 ] as const;
 
 /**
- * Asks the no-mint SDEMO faucet for 2 tokens. Hidden off Arb Sepolia.
- * The button stays disabled until VITE_SDEMO_FAUCET_ARB_SEPOLIA is set.
+ * Asks the no-mint tDEMO faucet for 2 tokens. Hidden off Arb Sepolia.
  */
 export function SdemoFaucetCard() {
   const faucet = sdemoFaucetAddress();
@@ -37,7 +36,7 @@ export function SdemoFaucetCard() {
         functionName: "drip",
         chainId: ARB_SEPOLIA_CHAIN_ID,
       });
-      setMessage(`Requested 2 SDEMO. Tx ${hash}`);
+      setMessage(`Requested 2 tDEMO. Tx ${hash}`);
     } catch (err) {
       const text = err instanceof Error ? err.message : "The faucet did not send tokens.";
       setMessage(text);
@@ -46,10 +45,10 @@ export function SdemoFaucetCard() {
 
   return (
     <section className="card">
-      <h2>Get test SDEMO</h2>
+      <h2>Get test tDEMO</h2>
       <p className="muted">
-        2 SDEMO per wallet each 24 hours. The faucet cannot mint. It only sends tokens already held by the contract.
-        SDEMO has no value.
+        2 tDEMO per wallet each 24 hours. The faucet cannot mint. It only sends tokens already held by the contract.
+        tDEMO has no value.
       </p>
       {!onArb && (
         <button
@@ -66,7 +65,7 @@ export function SdemoFaucetCard() {
       )}
       {onArb && faucet && (
         <button className="btn btn-primary" type="button" disabled={isPending} onClick={() => void requestDrip()}>
-          {isPending ? "Waiting for wallet…" : "Get 2 SDEMO"}
+          {isPending ? "Waiting for wallet…" : "Get 2 tDEMO"}
         </button>
       )}
       {message && <p className="muted">{message}</p>}
