@@ -55,6 +55,17 @@ export function gasRescueLensAddress(): Address | null {
   return optionalAddress(envString(import.meta.env.VITE_GAS_RESCUE_LENS_ADDRESS));
 }
 
+/** Live SDEMO on Arb Sepolia. The faucet cannot mint more of it. */
+export const LIVE_SDEMO_ADDRESS = "0xE3cb1AC5EDc70D3a85250a8c00cBe3A45AFc616C" as Address;
+
+/**
+ * Arb Sepolia SDEMO faucet. Empty until Spencer deploys `SdemoFaucet`
+ * and sets VITE_SDEMO_FAUCET_ARB_SEPOLIA. Not a secret.
+ */
+export function sdemoFaucetAddress(): Address | null {
+  return optionalAddress(readEnv("VITE_SDEMO_FAUCET_ARB_SEPOLIA"));
+}
+
 export function tokenAddress(chainId: SupportedChainId = BASE_SEPOLIA_CHAIN_ID): Address | null {
   if (chainId === ARB_SEPOLIA_CHAIN_ID) {
     return optionalAddress(envString(import.meta.env.VITE_TOKEN_ADDRESS_ARB_SEPOLIA));
