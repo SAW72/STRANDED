@@ -18,14 +18,13 @@
       "head_sampling_rate": 0
     }
   },
-  // database_id is a placeholder. Replace it with the id printed by
-  // `wrangler d1 create stranded-points`. It is an id, not a secret.
+  // database_id is the stranded-points D1 id. It is an id, not a secret.
   // Do not add account_id, secrets, or RPC URLs to this file.
   "d1_databases": [
     {
       "binding": "DB",
       "database_name": "stranded-points",
-      "database_id": "00000000-0000-4000-8000-000000000000",
+      "database_id": "50d89b3b-f9b7-4f53-a74f-fd48c9ca5980",
       "migrations_dir": "migrations"
     }
   ]
