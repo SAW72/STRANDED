@@ -7,6 +7,11 @@ import {
   POINTS_ACTION_RESCUE,
   POINTS_ACTION_SESSION,
   POINTS_ADDRESS_LABEL,
+  POINTS_BOARD_EMPTY,
+  POINTS_BOARD_ERROR,
+  POINTS_BOARD_HEADING,
+  POINTS_BOARD_LOADING,
+  POINTS_BOARD_NOTE,
   POINTS_ADDRESS_PLACEHOLDER,
   POINTS_ADDRESS_RESULT_LABEL,
   POINTS_BACK_LABEL,
@@ -31,13 +36,15 @@ import {
 } from "./copy";
 import { EXCLUDED_POINTS_ACTIONS } from "../../shared/excludedPointsActions.mjs";
 import { chainLabel, isSupportedChainId, transactionUrl } from "./lib/chains";
-import { shortenBytes32 } from "./lib/format";
+import { shortenAddress, shortenBytes32 } from "./lib/format";
 import {
   createPointsClient,
   normaliseWalletAddress,
+  type LeaderboardRow,
   type PointsClient,
   type WalletPoints,
 } from "./lib/points";
+import { rescueBadge, rescueCountLabel } from "./lib/rescueBadges";
 
 const ACTION_LABELS: Record<string, string> = {
   rescue: POINTS_ACTION_RESCUE,
@@ -72,6 +79,24 @@ type Lookup =
   | { kind: "error" }
   | { kind: "loaded"; result: WalletPoints };
 
+type Board =
+  | { kind: "loading" }
+  | { kind: "error" }
+  | { kind: "ready"; rows: LeaderboardRow[] };
+
+function byPoints(a: LeaderboardRow, b: LeaderboardRow): number {
+  if (a.total !== b.total) return b.total - a.total;
+  if (a.wallet < b.wallet) return -1;
+  if (a.wallet > b.wallet) return 1;
+  return 0;
+}
+
+function listedRescueCount(result: WalletPoints): number {
+  return result.categories
+    .filter((category) => category.action === "rescue" && isListedAction(category.action))
+    .reduce((sum, category) => sum + category.count, 0);
+}
+
 function isEmptyResult(result: WalletPoints): boolean {
   const categories = result.categories.filter((category) => isListedAction(category.action));
   const entries = result.entries.filter((entry) => isListedAction(entry.action));
@@ -82,7 +107,26 @@ export function Points({ client }: { client?: PointsClient }) {
   const api = client ?? createPointsClient();
   const [input, setInput] = useState("");
   const [lookup, setLookup] = useState<Lookup>({ kind: "idle" });
+  const [board, setBoard] = useState<Board>({ kind: "loading" });
   const requestId = useRef(0);
+
+  useEffect(() => {
+    const current = client ?? createPointsClient();
+    let cancel = false;
+    current
+      .getLeaderboard()
+      .then((result) => {
+        if (cancel) return;
+        setBoard({ kind: "ready", rows: [...result.rows].sort(byPoints) });
+      })
+      .catch(() => {
+        if (cancel) return;
+        setBoard({ kind: "error" });
+      });
+    return () => {
+      cancel = true;
+    };
+  }, [client]);
 
   useEffect(() => {
     document.title = "Stranded · " + POINTS_TITLE;
@@ -101,9 +145,8 @@ export function Points({ client }: { client?: PointsClient }) {
     node.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
   }, []);
 
-  async function onSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const wallet = normaliseWalletAddress(input);
+  async function loadWallet(raw: string) {
+    const wallet = normaliseWalletAddress(raw);
     if (!wallet) {
       requestId.current += 1;
       setLookup({ kind: "invalid" });
@@ -120,6 +163,11 @@ export function Points({ client }: { client?: PointsClient }) {
       if (requestId.current !== id) return;
       setLookup({ kind: "error" });
     }
+  }
+
+  function onSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    void loadWallet(input);
   }
 
   return (
@@ -145,6 +193,14 @@ export function Points({ client }: { client?: PointsClient }) {
           <p>{POINTS_EXAMPLE_NOTE}</p>
         </div>
       ) : null}
+      <PointsBoard
+        board={board}
+        example={api.source === "example"}
+        onPick={(wallet) => {
+          setInput(wallet);
+          void loadWallet(wallet);
+        }}
+      />
       <form onSubmit={onSubmit} noValidate>
         <label className="field">
           {POINTS_ADDRESS_LABEL}
@@ -193,6 +249,72 @@ export function Points({ client }: { client?: PointsClient }) {
   );
 }
 
+function PointsBoard({
+  board,
+  example,
+  onPick,
+}: {
+  board: Board;
+  example: boolean;
+  onPick: (wallet: string) => void;
+}) {
+  return (
+    <section className="points-how" id="most-points" data-testid="points-board">
+      <h2>
+        {example ? <ExampleLabel /> : null}
+        {POINTS_BOARD_HEADING}
+      </h2>
+      <p>{POINTS_BOARD_NOTE}</p>
+      {board.kind === "loading" ? (
+        <p role="status" data-testid="points-board-loading">
+          {POINTS_BOARD_LOADING}
+        </p>
+      ) : null}
+      {board.kind === "error" ? (
+        <p className="danger" role="alert" data-testid="points-board-error">
+          {POINTS_BOARD_ERROR}
+        </p>
+      ) : null}
+      {board.kind === "ready" && board.rows.length === 0 ? (
+        <p role="status" data-testid="points-board-empty">
+          {POINTS_BOARD_EMPTY}
+        </p>
+      ) : null}
+      {board.kind === "ready" && board.rows.length > 0 ? (
+        <ol className="points-board">
+          {board.rows.map((row, index) => (
+            <li className="points-board-row" data-testid="points-board-row" key={row.wallet}>
+              <span className="points-place">{String(index + 1)}</span>
+              <button
+                type="button"
+                className="points-board-wallet mono"
+                data-testid="points-board-wallet"
+                onClick={() => onPick(row.wallet)}
+              >
+                {shortenAddress(row.wallet)}
+              </button>
+              <span data-testid="points-board-points">{String(row.total)}</span>
+              <RescueBadgeView count={row.rescues} />
+            </li>
+          ))}
+        </ol>
+      ) : null}
+    </section>
+  );
+}
+
+function RescueBadgeView({ count }: { count: number }) {
+  const badge = rescueBadge(count);
+  if (!badge) return null;
+  return (
+    <span className={"rescue-badge rescue-badge-" + badge.id} data-testid="rescue-badge">
+      <span className="rescue-mark" aria-hidden="true" />
+      <span>{badge.name}</span>
+      <span className="rescue-count">{rescueCountLabel(count)}</span>
+    </span>
+  );
+}
+
 function ExampleLabel() {
   return (
     <strong className="points-example-mark" data-testid="points-result-example">
@@ -226,6 +348,7 @@ function Loaded({ result, example }: { result: WalletPoints; example: boolean })
               {example ? <ExampleLabel /> : null}
               <span>{actionLabel(category.action)}</span>
               <span>{String(category.points)}</span>
+              {category.action === "rescue" ? <RescueBadgeView count={listedRescueCount(result)} /> : null}
             </li>
           ))}
         </ul>

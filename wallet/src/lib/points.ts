@@ -38,6 +38,7 @@ export type WalletPoints = {
 export type LeaderboardRow = {
   wallet: string;
   total: number;
+  rescues: number;
 };
 
 export type PointsLeaderboard = {
@@ -118,8 +119,8 @@ const EXAMPLE_WALLETS: Record<string, WalletPoints> = {
 
 const EXAMPLE_LEADERBOARD: PointsLeaderboard = {
   rows: [
-    { wallet: EXAMPLE_POINTS_HIGHER_ADDRESS, total: 200 },
-    { wallet: EXAMPLE_POINTS_ADDRESS, total: 140 },
+    { wallet: EXAMPLE_POINTS_HIGHER_ADDRESS, total: 200, rescues: 5 },
+    { wallet: EXAMPLE_POINTS_ADDRESS, total: 140, rescues: 1 },
   ],
 };
 
@@ -175,6 +176,11 @@ function readChainId(value: unknown): number | null {
   return value;
 }
 
+function readRescues(value: unknown): number {
+  if (value == null) return 0;
+  return readPoints(value);
+}
+
 function readWallet(value: unknown, expected: string): string {
   if (typeof value !== "string") throw invalidBody();
   const normalised = normaliseWalletAddress(value);
@@ -215,7 +221,7 @@ export function parseLeaderboard(value: unknown): PointsLeaderboard {
       if (!isRecord(item)) throw invalidBody();
       const wallet = normaliseWalletAddress(typeof item.wallet === "string" ? item.wallet : "");
       if (!wallet) throw invalidBody();
-      return { wallet, total: readPoints(item.total) };
+      return { wallet, total: readPoints(item.total), rescues: readRescues(item.rescues) };
     }),
   };
 }

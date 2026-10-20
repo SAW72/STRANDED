@@ -120,11 +120,13 @@ export const LEADERBOARD_LIMIT = 100;
 export async function leaderboardTotals(
   db: D1Database,
   limit = LEADERBOARD_LIMIT,
-): Promise<Array<{ wallet: string; total: number }>> {
+): Promise<Array<{ wallet: string; total: number; rescues: number }>> {
   const cap = Number.isInteger(limit) && limit > 0 && limit <= LEADERBOARD_LIMIT ? limit : LEADERBOARD_LIMIT;
   const result = await db
     .prepare(
-      `SELECT wallet, SUM(points) AS total
+      `SELECT wallet,
+              SUM(points) AS total,
+              SUM(CASE WHEN action = 'rescue_completed' THEN 1 ELSE 0 END) AS rescues
        FROM points_ledger
        WHERE action NOT IN (${HIDDEN_SQL})
        GROUP BY wallet
@@ -132,8 +134,12 @@ export async function leaderboardTotals(
        ORDER BY SUM(points) DESC, wallet ASC
        LIMIT ${cap}`,
     )
-    .all<{ wallet: string; total: number }>();
-  return (result.results || []).map((row) => ({ wallet: row.wallet, total: Number(row.total) }));
+    .all<{ wallet: string; total: number; rescues: number }>();
+  return (result.results || []).map((row) => ({
+    wallet: row.wallet,
+    total: Number(row.total),
+    rescues: Number(row.rescues),
+  }));
 }
 
 export function chainIdFromMetadata(metadata: string | null): number | null {
