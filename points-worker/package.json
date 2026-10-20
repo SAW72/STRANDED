@@ -1,0 +1,17 @@
+{
+  "name": "stranded-points-worker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run && node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "viem": "^2.37.8"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "^1.4.4",
+    "@cloudflare/workers-types": "^5.20261018.1",
+    "vitest": "^4.1.0",
+    "wrangler": "4.151.1"
+  }
+}

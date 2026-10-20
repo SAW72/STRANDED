@@ -17,8 +17,10 @@
 -- Bug reports and security findings are not scored. Rows already stored are
 -- left in place: this file does not delete or rewrite them and does not
 -- rebuild the table. CREATE TABLE IF NOT EXISTS leaves an older action CHECK.
--- BEFORE INSERT and BEFORE UPDATE triggers reject bug_report, security,
--- security_finding, and finding. Reads omit those actions.
+-- wallet_session is not an action in this table. The CHECK and the insert
+-- trigger reject it. BEFORE INSERT and BEFORE UPDATE triggers reject
+-- bug_report, security, security_finding, finding, and wallet_session.
+-- Reads omit those actions.
 -- The on-chain unique index is created on open without rewriting rows.
 -- UPDATE and DELETE triggers raise 'append-only'.
 -- BEFORE INSERT raises 'duplicate' when the id, (wallet, action, tx_hash),
@@ -51,10 +53,10 @@ CREATE TABLE IF NOT EXISTS points_ledger (
       'rescue_completed',
       'relayer_job',
       'registry_find_posted',
-      'registry_find_claimed',
-      'wallet_session'
+      'registry_find_claimed'
     )
   ),
+  CHECK (action <> 'wallet_session'),
   CHECK (typeof(points) = 'integer' AND points > 0 AND points <= 500),
   CHECK (
     (
@@ -103,7 +105,7 @@ END;
 DROP TRIGGER IF EXISTS points_ledger_no_excluded_insert;
 CREATE TRIGGER points_ledger_no_excluded_insert
 BEFORE INSERT ON points_ledger
-WHEN NEW.action IN ('bug_report', 'security', 'security_finding', 'finding')
+WHEN NEW.action IN ('bug_report', 'security', 'security_finding', 'finding', 'wallet_session')
 BEGIN
   SELECT RAISE(ABORT, 'excluded_action');
 END;
@@ -111,8 +113,8 @@ END;
 DROP TRIGGER IF EXISTS points_ledger_no_excluded_update;
 CREATE TRIGGER points_ledger_no_excluded_update
 BEFORE UPDATE ON points_ledger
-WHEN NEW.action IN ('bug_report', 'security', 'security_finding', 'finding')
-  OR OLD.action IN ('bug_report', 'security', 'security_finding', 'finding')
+WHEN NEW.action IN ('bug_report', 'security', 'security_finding', 'finding', 'wallet_session')
+  OR OLD.action IN ('bug_report', 'security', 'security_finding', 'finding', 'wallet_session')
 BEGIN
   SELECT RAISE(ABORT, 'excluded_action');
 END;

@@ -24,6 +24,8 @@ node_modules/
 wallet/dist/
 relayer/node_modules/
 relayer/data/
+.wrangler/
+.dev.vars
 *.sqlite*
 # Points panel renders are cloud artifacts, not repo files.
 /artifacts/

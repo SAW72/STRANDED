@@ -13,7 +13,10 @@ import {
 } from "viem";
 import {
   backoffMs,
+  isAlreadyKnownError,
+  isNonceRetryError,
   isTransientBroadcastError,
+  isUnderpricedError,
   withBroadcastRetry,
 } from "../retry.mjs";
 
@@ -105,6 +108,11 @@ describe("broadcast retry bounds", () => {
     assert.equal(isTransientBroadcastError(new BaseError("nonce too low")), true);
     assert.equal(isTransientBroadcastError(nonce), true);
     assert.equal(isTransientBroadcastError(wrapped), true);
+    assert.equal(isNonceRetryError(wrapped), true);
+    assert.equal(isAlreadyKnownError({ message: "already known" }), true);
+    assert.equal(isAlreadyKnownError(wrapped), false);
+    assert.equal(isUnderpricedError({ shortMessage: "replacement transaction underpriced" }), true);
+    assert.equal(isNonceRetryError({ message: "nonce too low" }), true);
 
     const replacementRpc = new RpcRequestError({
       body: {},

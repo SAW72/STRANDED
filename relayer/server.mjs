@@ -1,4 +1,4 @@
-import { createPublicClient, createWalletClient, http as viemHttp, keccak256 } from "viem";
+import { createPublicClient, createWalletClient, encodeFunctionData, http as viemHttp, keccak256, parseTransaction } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { arbitrumSepolia } from "viem/chains";
 import { createRelayerApp } from "./app.mjs";
@@ -17,9 +17,23 @@ import { createKillSwitch, parseEnvFlag } from "./killSwitch.mjs";
 import { createNonceStore } from "./nonceStore.mjs";
 import { createBuildQuote, encodeSwapData } from "./quote.mjs";
 import { rescueAbi } from "./rescueAbi.mjs";
+import {
+  findTxAtNonce,
+  notePointsReceiptReplacement,
+  pointsMinConfirmations,
+  schedulePointsNotify,
+  schedulePointsRetry,
+} from "./points/notify.mjs";
 import { createRescueLog, orderLogSummary } from "./rescueLog.mjs";
 import { createRescueLimiter, parseRescueLimitConfig } from "./rescueLimit.mjs";
-import { DEFAULT_BASE_DELAY_MS, DEFAULT_MAX_ATTEMPTS, withBroadcastRetry } from "./retry.mjs";
+import {
+  DEFAULT_BASE_DELAY_MS,
+  DEFAULT_MAX_ATTEMPTS,
+  isAlreadyKnownError,
+  isNonceRetryError,
+  isUnderpricedError,
+  withBroadcastRetry,
+} from "./retry.mjs";
 
 if (process.env.RELAYER_KEY_FILE || process.env.RELAYER_PRIVATE_KEY_FILE) {
   console.error("Key files are forbidden. Export RELAYER_PRIVATE_KEY in the process environment only.");
@@ -177,6 +191,113 @@ function asOrder(raw) {
   }
 }
 
+async function readSentBlock() {
+  for (let i = 0; i < 3; i += 1) {
+    try {
+      const head = await publicClient.getBlockNumber();
+      if (typeof head === "bigint" && head > 0n) return head.toString();
+    } catch {
+      /* the next try, or leave the block unset */
+    }
+  }
+  return "";
+}
+
+async function signRescue(txData) {
+  const request = await walletClient.prepareTransactionRequest({
+    account,
+    to: /** @type {`0x${string}`} */ (SWAP),
+    data: txData,
+  });
+  const serialized = await walletClient.signTransaction(request);
+  const parsed = parseTransaction(serialized);
+  return { serialized, parsed, hash: keccak256(serialized) };
+}
+
+function simulateRescue(args) {
+  return publicClient.simulateContract({
+    account,
+    address: /** @type {`0x${string}`} */ (SWAP),
+    abi: rescueAbi,
+    functionName: "rescueWithPermit",
+    args,
+  });
+}
+
+function isReceiptNotFound(err) {
+  const parts = [];
+  const visit = (inner) => {
+    if (!inner || typeof inner !== "object") return;
+    for (const key of ["name", "shortMessage", "details", "message"]) {
+      const value = inner[key];
+      if (typeof value === "string" && value) parts.push(value);
+    }
+  };
+  if (err && typeof err.walk === "function") {
+    try {
+      err.walk((inner) => {
+        visit(inner);
+        return false;
+      });
+    } catch {
+      visit(err);
+    }
+  } else {
+    visit(err);
+  }
+  const text = parts.join(" ").toLowerCase();
+  return (
+    text.includes("transactionreceiptnotfounderror") ||
+    (text.includes("transaction receipt") && text.includes("could not be found"))
+  );
+}
+
+function receiptSucceeded(receipt) {
+  if (!receipt || typeof receipt !== "object") return false;
+  const status = receipt.status;
+  return status === "success" || status === "0x1" || status === 1;
+}
+
+/** A timed-out send can still be the tx that mined. Credit that hash instead of signing another. */
+async function minedSignedRescue(signedForRequest) {
+  for (const item of signedForRequest) {
+    if (!item || typeof item.hash !== "string") continue;
+    let receipt;
+    try {
+      receipt = await publicClient.getTransactionReceipt({
+        hash: /** @type {`0x${string}`} */ (item.hash),
+      });
+    } catch (err) {
+      if (isReceiptNotFound(err)) continue;
+      throw err;
+    }
+    if (receiptSucceeded(receipt)) return item;
+  }
+  return null;
+}
+
+async function permitNonceConsumed(user, nonce) {
+  try {
+    const used = await publicClient.readContract({
+      address: /** @type {`0x${string}`} */ (SWAP),
+      abi: usedNoncesAbi,
+      functionName: "usedNonces",
+      args: [/** @type {`0x${string}`} */ (user), nonce],
+    });
+    return used === true;
+  } catch {
+    return false;
+  }
+}
+
+function callDigest(txData, user) {
+  return {
+    txSelector: txData.slice(0, 10),
+    txInputHash: keccak256(txData),
+    txUser: String(user || "").toLowerCase(),
+  };
+}
+
 function retryLog(info) {
   console.error(
     "broadcast_retry",
@@ -210,26 +331,54 @@ async function submitRescue(body) {
       swapData,
     ];
     try {
-      await publicClient.simulateContract({
-        account,
-        address: /** @type {`0x${string}`} */ (SWAP),
-        abi: rescueAbi,
-        functionName: "rescueWithPermit",
-        args,
-      });
+      await simulateRescue(args);
     } catch (err) {
       logSimulationFailure(err);
       throw simulationFailure(err);
     }
+    const sentBlock = await readSentBlock();
+    const txData = encodeFunctionData({ abi: rescueAbi, functionName: "rescueWithPermit", args });
+    const signedForRequest = [];
+    let signed = null;
     const txHash = await withBroadcastRetry(
       async (attempt) => {
         attempts = attempt;
-        return walletClient.writeContract({
-          address: /** @type {`0x${string}`} */ (SWAP),
-          abi: rescueAbi,
-          functionName: "rescueWithPermit",
-          args,
-        });
+        if (!signed) {
+          if (signedForRequest.length > 0) {
+            const mined = await minedSignedRescue(signedForRequest);
+            if (mined) {
+              signed = mined;
+              return mined.hash;
+            }
+            if (await permitNonceConsumed(order.user, order.nonce)) {
+              const used = { errorName: "UsedNonce", shortMessage: "UsedNonce" };
+              logSimulationFailure(used);
+              throw simulationFailure(used);
+            }
+            try {
+              await simulateRescue(args);
+            } catch (err) {
+              logSimulationFailure(err);
+              throw simulationFailure(err);
+            }
+          }
+          signed = await signRescue(txData);
+          signedForRequest.push(signed);
+        }
+        try {
+          return await walletClient.sendRawTransaction({ serializedTransaction: signed.serialized });
+        } catch (err) {
+          if (isAlreadyKnownError(err)) return signed.hash;
+          if (isNonceRetryError(err) || isUnderpricedError(err)) {
+            const mined = await minedSignedRescue(signedForRequest);
+            if (mined) {
+              signed = mined;
+              return mined.hash;
+            }
+            signed = null;
+          }
+          throw err;
+        }
       },
       {
         maxAttempts: BROADCAST_MAX_ATTEMPTS,
@@ -238,13 +387,44 @@ async function submitRescue(body) {
       },
     );
     nonceStore.markConsumed(order.user, order.nonce);
+    const parsed = signed.parsed;
+    const txFrom = String(parsed.from || account.address);
+    const txNonce = parsed.nonce === undefined || parsed.nonce === null ? undefined : parsed.nonce.toString();
+    const txTo = parsed.to ? String(parsed.to) : String(SWAP);
+    const call = callDigest(txData, order.user);
     await rescueLog.append({
       event: "rescue_ok",
       ...summary,
       txHash,
+      txFrom,
+      txNonce,
+      txTo,
+      ...call,
+      ...(sentBlock ? { sentBlock } : {}),
       attempts,
       ms: Date.now() - started,
     });
+    // The queued job waits for a mined receipt before it posts.
+    // The broadcast retry callback above must not call this.
+    try {
+      const queued = schedulePointsNotify({
+        chainId: CHAIN_ID,
+        txHash,
+        txFrom,
+        txNonce,
+        txTo,
+        ...call,
+        ...(sentBlock ? { sentBlock } : {}),
+        dataDir: DATA_DIR,
+        env: process.env,
+        confirmReceipt: confirmPointsReceipt,
+        lookupNonce: lookupPointsNonce,
+        getTx: readPointsTx,
+      });
+      if (queued.durable) await queued.durable;
+    } catch {
+      console.error("points_notify", "error");
+    }
     return { ok: true, txHash, stubRpc: false, attempts };
   } catch (err) {
     const raw = `${err && err.error ? err.error : ""} ${err && err.revert ? err.revert : ""} ${err && err.shortMessage ? err.shortMessage : ""} ${err && err.message ? err.message : ""}`;
@@ -289,7 +469,56 @@ const server = createRelayerApp({
   trustedProxyHops: TRUSTED_PROXY_HOPS,
 });
 
+function lookupPointsNonce(from, nonce, item) {
+  return findTxAtNonce(publicClient, from, nonce, item || {});
+}
+
+function readPointsTx(hash) {
+  return publicClient.getTransaction({ hash });
+}
+
+function confirmPointsReceipt(hash) {
+  const depth = pointsMinConfirmations(process.env, hash);
+  const budget = 20_000;
+  const started = Date.now();
+  const first = publicClient.waitForTransactionReceipt({
+    hash,
+    confirmations: 1,
+    timeout: budget,
+    onReplaced(response) {
+      const job = notePointsReceiptReplacement(
+        { chainId: CHAIN_ID, txHash: hash, dataDir: DATA_DIR },
+        response,
+      );
+      void Promise.resolve(job).catch(() => {
+        console.error("points_notify", "error");
+      });
+    },
+  });
+  if (depth <= 1) return first;
+  return first.then((receipt) => {
+    const left = budget - (Date.now() - started);
+    const nextHash = receipt && receipt.transactionHash ? receipt.transactionHash : hash;
+    return publicClient.waitForTransactionReceipt({
+      hash: nextHash,
+      confirmations: pointsMinConfirmations(process.env, hash),
+      timeout: left > 0 ? left : 1,
+    });
+  });
+}
+
 await rescueLimiter.ready;
+try {
+  schedulePointsRetry({
+    dataDir: DATA_DIR,
+    env: process.env,
+    confirmReceipt: confirmPointsReceipt,
+    lookupNonce: lookupPointsNonce,
+    getTx: readPointsTx,
+  });
+} catch {
+  console.error("points_notify", "error");
+}
 const limitLabel = (value) => (value == null ? "off" : String(value));
 server.listen(PORT, HOST, () => {
   console.log(

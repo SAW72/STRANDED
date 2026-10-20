@@ -39,7 +39,7 @@ describe("example points client", () => {
     expect(client.source).toBe("example");
     const wallet = await client.getWallet(EXAMPLE_POINTS_ADDRESS);
     expect(wallet.total).toBe(140);
-    expect(wallet.rank).toBe(2);
+    expect(wallet).not.toHaveProperty("rank");
     expect(wallet.categories.map((category) => category.action)).toEqual([
       "rescue",
       "registry_find",
@@ -51,19 +51,24 @@ describe("example points client", () => {
 
     const higher = await client.getWallet(EXAMPLE_POINTS_HIGHER_ADDRESS.toUpperCase().replace("0X", "0x"));
     expect(higher.wallet).toBe(EXAMPLE_POINTS_HIGHER_ADDRESS);
-    expect(higher.rank).toBe(1);
+    expect(higher.total).toBe(200);
+    expect(higher).not.toHaveProperty("rank");
 
     const empty = await client.getWallet("0x3333333333333333333333333333333333333333");
     expect(empty).toEqual({
       wallet: "0x3333333333333333333333333333333333333333",
       total: 0,
-      rank: null,
       categories: [],
       entries: [],
     });
+    expect(empty).not.toHaveProperty("rank");
 
     const board = await client.getLeaderboard();
-    expect(board.rows.map((row) => row.rank)).toEqual([1, 2]);
+    expect(board.rows.map((row) => [row.wallet, row.total])).toEqual([
+      [EXAMPLE_POINTS_HIGHER_ADDRESS, 200],
+      [EXAMPLE_POINTS_ADDRESS, 140],
+    ]);
+    expect(board.rows.every((row) => !Object.hasOwn(row, "rank"))).toBe(true);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
@@ -112,7 +117,6 @@ describe("http points client", () => {
     expect(wallet).toEqual({
       wallet: EXAMPLE_POINTS_ADDRESS,
       total: 100,
-      rank: 4,
       categories: [{ action: "rescue", points: 100, count: 1 }],
       entries: [
         {
@@ -123,9 +127,51 @@ describe("http points client", () => {
         },
       ],
     });
+    expect(wallet).not.toHaveProperty("rank");
     expect(JSON.stringify(wallet).toLowerCase()).not.toContain("token value");
     expect(JSON.stringify(wallet)).not.toContain("$");
-    expect(board.rows).toEqual([{ rank: 1, wallet: EXAMPLE_POINTS_ADDRESS, total: 140 }]);
+    expect(board.rows).toEqual([{ wallet: EXAMPLE_POINTS_ADDRESS, total: 140 }]);
+    expect(board.rows[0]).not.toHaveProperty("rank");
+  });
+
+  it("reads a wallet body that has no rank field", async () => {
+    const fetchImpl: PointsFetch = async (input) => {
+      if (input.endsWith("/points/leaderboard")) {
+        return new Response(
+          JSON.stringify({
+            rows: [
+              { wallet: EXAMPLE_POINTS_HIGHER_ADDRESS, total: 200 },
+              { wallet: EXAMPLE_POINTS_ADDRESS, total: 140 },
+            ],
+          }),
+          { status: 200 },
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          wallet: EXAMPLE_POINTS_ADDRESS,
+          total: 100,
+          categories: [{ action: "rescue", points: 100, count: 1 }],
+          entries: [
+            {
+              action: "rescue",
+              points: 100,
+              txHash: `0x${"ab".repeat(32)}`,
+              chainId: ARB_SEPOLIA_CHAIN_ID,
+            },
+          ],
+        }),
+        { status: 200 },
+      );
+    };
+    const client = createHttpPointsClient("https://points.example", fetchImpl);
+    const wallet = await client.getWallet(EXAMPLE_POINTS_ADDRESS);
+    const board = await client.getLeaderboard();
+    expect(wallet.categories[0]?.action).toBe("rescue");
+    expect(wallet.entries[0]?.points).toBe(100);
+    expect(wallet).not.toHaveProperty("rank");
+    expect(board.rows.map((row) => row.total)).toEqual([200, 140]);
+    expect(JSON.stringify(board)).not.toContain('"rank"');
   });
 
   it("treats 404 as an empty wallet and rejects a non-ok response", async () => {
