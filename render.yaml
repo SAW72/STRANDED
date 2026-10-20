@@ -8,7 +8,15 @@ services:
     runtime: static
     buildCommand: npm ci --prefix wallet && npm run build --prefix wallet
     staticPublishPath: wallet/dist
+    # SPA fallback. Render ignores wallet/public/_redirects.
+    # The wallet build also publishes points/index.html so /points is a real file.
     routes:
+      - type: rewrite
+        source: /points
+        destination: /index.html
+      - type: rewrite
+        source: /points/*
+        destination: /index.html
       - type: rewrite
         source: /*
         destination: /index.html
@@ -77,8 +85,9 @@ services:
         value: "421614"
       - key: RPC_URL
         value: "https://sepolia-rollup.arbitrum.io/rpc"
-      # After the static site is live, set this to:
-      # https://stranded.onrender.com,https://YOUR.DOMAIN,http://localhost:5173
+      # Set in the dashboard, not here. Live value:
+      # https://strandedtoken.trade,http://localhost:5173,http://127.0.0.1:5173
+      # This service's onrender.com host is gas-rescue.onrender.com, not stranded.onrender.com.
       - key: CORS_ORIGINS
         sync: false
       # Relayer-side pause. Health stays 200 with paused=true.

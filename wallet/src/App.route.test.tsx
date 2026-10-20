@@ -1,0 +1,419 @@
+// @vitest-environment jsdom
+import { act, type ReactElement } from "react";
+
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { createRoot, type Root } from "react-dom/client";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { WagmiProvider } from "wagmi";
+import { App } from "./App";
+import { ARB_SEPOLIA_CHAIN_ID, BASE_SEPOLIA_CHAIN_ID } from "./lib/chains";
+import { sampleFixtureRaw } from "./lib/fixture";
+import { QUOTE_ERROR, SAMPLE_BADGE } from "./copy";
+import { liveSymbolUnreadText, UNKNOWN_DEMO_BANNER } from "./lib/tokenDisclosure";
+import { wagmiConfig } from "./wagmi";
+
+const WALLET = "0x1111111111111111111111111111111111111111" as const;
+
+const accountState = vi.hoisted(() => ({
+  address: undefined as `0x${string}` | undefined,
+  isConnected: false,
+  chainId: undefined as number | undefined,
+}));
+
+const readState = vi.hoisted(() => ({
+  symbol: undefined as unknown,
+  symbolPending: false,
+  symbolError: false,
+}));
+
+vi.mock("./lib/holdings", () => ({
+  readLiveHoldings: async () => ({ tokenBalance: 10n ** 24n, nativeBalance: 0n }),
+  readLivePermitAuth: async () => ({ tokenName: "Sample", permitNonce: 0n }),
+}));
+
+vi.mock("wagmi", async () => {
+  const actual = await vi.importActual<typeof import("wagmi")>("wagmi");
+  return {
+    ...actual,
+    useAccount: () => ({
+      address: accountState.address,
+      isConnected: accountState.isConnected,
+      chainId: accountState.chainId,
+      addresses: accountState.address ? [accountState.address] : undefined,
+      status: accountState.isConnected ? "connected" : "disconnected",
+      connector: undefined,
+      isConnecting: false,
+      isReconnecting: false,
+      isDisconnected: !accountState.isConnected,
+    }),
+    useReadContract: ((params?: { functionName?: string }) => {
+      if (params?.functionName === "symbol") {
+        if (readState.symbolPending) {
+          return { data: undefined, isPending: true, isLoading: true, isError: false, status: "pending", fetchStatus: "fetching" };
+        }
+        if (readState.symbolError) {
+          return { data: undefined, isPending: false, isLoading: false, isError: true, status: "error", error: new Error("The symbol read failed.") };
+        }
+        return { data: readState.symbol, isPending: false, isLoading: false, isError: false, status: "success" };
+      }
+      return { data: undefined, isPending: false, isError: false, status: "success" };
+    }) as unknown as typeof actual.useReadContract,
+  };
+});
+
+function button(container: HTMLElement, testId: string): HTMLButtonElement {
+  const node = container.querySelector(`[data-testid='${testId}']`);
+  if (!(node instanceof HTMLButtonElement)) throw new Error(`missing ${testId}`);
+  return node;
+}
+
+async function renderAt(pathname: string, ui: ReactElement) {
+  window.history.pushState({}, "", pathname);
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root: Root = createRoot(container);
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  await act(async () => {
+    root.render(
+      <WagmiProvider config={wagmiConfig} reconnectOnMount={false}>
+        <QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>
+      </WagmiProvider>,
+    );
+  });
+  return {
+    container,
+    async unmount() {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+    },
+  };
+}
+
+afterEach(() => {
+  accountState.address = undefined;
+  accountState.isConnected = false;
+  accountState.chainId = undefined;
+  readState.symbol = undefined;
+  readState.symbolPending = false;
+  readState.symbolError = false;
+  vi.unstubAllEnvs();
+  window.history.pushState({}, "", "/");
+});
+
+describe("App routes", () => {
+  it("renders Points at /points", async () => {
+    const view = await renderAt("/points", <App />);
+    expect(view.container.querySelector("[data-testid='points-address']")).not.toBeNull();
+    const how = view.container.querySelector("[data-testid='points-how']");
+    expect(how?.id).toBe("how-points-are-recorded");
+    expect(how?.textContent).toMatch(/How points are recorded/);
+    expect(view.container.querySelector("[data-testid='points-home']")?.getAttribute("href")).toBe("/");
+    expect(view.container.querySelector("[data-testid='rescue-quote-fields']")).toBeNull();
+    await view.unmount();
+  });
+
+  it("hides the quote and keeps confirm and sign locked when no wallet is connected", async () => {
+    const view = await renderAt("/", <App />);
+    expect(view.container.querySelector("[data-testid='points-address']")).toBeNull();
+    expect(view.container.querySelector("[data-testid='rescue-quote-fields']")).toBeNull();
+    expect(view.container.querySelector(".review-row")).toBeNull();
+    expect(view.container.querySelector("[data-testid='rescue-quote-collapsed']")?.textContent).toBe(
+      "Connect a wallet to see the rescue quote.",
+    );
+    expect(button(view.container, "confirm-details").disabled).toBe(true);
+    expect(button(view.container, "sign-order").disabled).toBe(true);
+    expect(view.container.textContent).not.toContain("Details confirmed. You can sign next.");
+    const disclosures = view.container.querySelectorAll("[data-testid='token-disclosure']");
+    expect(disclosures).toHaveLength(1);
+    expect(disclosures[0]?.textContent?.includes("GRTT")).toBe(false);
+    const banner = view.container.querySelector("[data-testid='demo-banner']")?.textContent ?? "";
+    expect(banner).toBe(UNKNOWN_DEMO_BANNER);
+    expect(banner.includes("GRTT")).toBe(false);
+    expect(banner).not.toMatch(/this token/i);
+    await view.unmount();
+  });
+
+  it("hides quote rows and locks confirm when a wallet is connected without a quote", async () => {
+    vi.stubEnv("VITE_RELAYER_URL_ARB_SEPOLIA", "local-sample-off");
+    accountState.address = WALLET;
+    accountState.isConnected = true;
+    accountState.chainId = ARB_SEPOLIA_CHAIN_ID;
+    const view = await renderAt("/", <App />);
+    expect(view.container.querySelector("[data-testid='rescue-quote-fields']")).toBeNull();
+    expect(view.container.querySelector(".review-row")).toBeNull();
+    expect(view.container.querySelector("[data-testid='rescue-quote-collapsed']")?.textContent).toBe(
+      "Enter an amount to see a quote.",
+    );
+    expect(button(view.container, "confirm-details").disabled).toBe(true);
+    expect(button(view.container, "sign-order").disabled).toBe(true);
+    await act(async () => {
+      button(view.container, "confirm-details").click();
+    });
+    expect(view.container.textContent).not.toContain("Details confirmed. You can sign next.");
+    expect(button(view.container, "sign-order").disabled).toBe(true);
+    await view.unmount();
+  });
+
+  it("shows the quote and unlocks confirm only after a wallet is connected", async () => {
+    accountState.address = WALLET;
+    accountState.isConnected = true;
+    accountState.chainId = ARB_SEPOLIA_CHAIN_ID;
+    const view = await renderAt("/", <App />);
+    expect(view.container.querySelector("[data-testid='rescue-quote-fields']")).not.toBeNull();
+    const rows = [...view.container.querySelectorAll(".review-row")];
+    expect(rows.length).toBeGreaterThan(0);
+    expect(view.container.querySelector("[data-testid='rescue-quote-collapsed']")).toBeNull();
+    const values = rows.map((row) => row.querySelector(".review-figure")?.textContent ?? "").join("\n");
+    expect(values).toMatch(/SDEMO/);
+    expect(values.includes("GRTT")).toBe(false);
+    for (const row of rows) {
+      expect(row.querySelector(".review-figure")?.textContent).not.toBe("—");
+    }
+    const confirm = button(view.container, "confirm-details");
+    const sign = button(view.container, "sign-order");
+    expect(confirm.disabled).toBe(false);
+    expect(sign.disabled).toBe(true);
+    await act(async () => {
+      confirm.click();
+    });
+    expect(view.container.textContent).toContain("Details confirmed. You can sign next.");
+    expect(button(view.container, "sign-order").disabled).toBe(false);
+    expect(view.container.querySelector("[data-testid='demo-banner']")?.textContent).toBe(
+      UNKNOWN_DEMO_BANNER,
+    );
+    expect(view.container.querySelector("[data-testid='sample-banner']")?.textContent).toContain(
+      SAMPLE_BADGE,
+    );
+    await view.unmount();
+  });
+
+  it("renders SDEMO when the on-chain symbol is empty", async () => {
+    readState.symbol = "";
+    accountState.address = WALLET;
+    accountState.isConnected = true;
+    accountState.chainId = ARB_SEPOLIA_CHAIN_ID;
+    const view = await renderAt("/", <App />);
+    expect(view.container.querySelector("[data-testid='rescue-quote-fields']")?.textContent).toMatch(/SDEMO/);
+    expect(view.container.textContent?.includes("GRTT")).toBe(false);
+    expect(view.container.querySelector("[data-testid='sample-banner']")?.textContent).toContain(
+      SAMPLE_BADGE,
+    );
+    await view.unmount();
+  });
+
+  it("renders SDEMO when the chain reports GRTT or gMOCK", async () => {
+    readState.symbol = "GRTT";
+    accountState.address = WALLET;
+    accountState.isConnected = true;
+    accountState.chainId = ARB_SEPOLIA_CHAIN_ID;
+    const grtt = await renderAt("/", <App />);
+    const grttRows = grtt.container.querySelector("[data-testid='rescue-quote-fields']")?.textContent ?? "";
+    expect(grttRows).toMatch(/SDEMO/);
+    expect(grtt.container.textContent?.includes("GRTT")).toBe(false);
+    expect(grtt.container.querySelector("[data-testid='sample-banner']")?.textContent).toContain(SAMPLE_BADGE);
+    expect(grtt.container.querySelector("[data-testid='demo-banner']")?.textContent).toBe(UNKNOWN_DEMO_BANNER);
+    await grtt.unmount();
+
+    readState.symbol = "gMOCK";
+    const gmock = await renderAt("/", <App />);
+    expect(gmock.container.querySelector("[data-testid='rescue-quote-fields']")?.textContent).toMatch(/SDEMO/);
+    expect(gmock.container.textContent?.includes("gMOCK")).toBe(false);
+    expect(gmock.container.textContent?.includes("GRTT")).toBe(false);
+    expect(gmock.container.querySelector("[data-testid='sample-banner']")?.textContent).toContain(SAMPLE_BADGE);
+    await gmock.unmount();
+  });
+
+  it("shows SDEMO on the token row when a token is configured", async () => {
+    vi.stubEnv("VITE_TOKEN_ADDRESS_ARB_SEPOLIA", WALLET);
+
+    function tokenRow(container: HTMLElement): string {
+      const dt = [...container.querySelectorAll("dt")].find((node) => node.textContent === "Token");
+      const dd = dt?.nextElementSibling;
+      if (!(dd instanceof HTMLElement)) throw new Error("missing token row");
+      return dd.textContent ?? "";
+    }
+
+    readState.symbol = "GRTT";
+    const grtt = await renderAt("/", <App />);
+    const grttToken = tokenRow(grtt.container);
+    expect(grttToken).toMatch(/SDEMO/);
+    expect(grttToken.includes("GRTT")).toBe(false);
+    expect(grttToken).not.toBe("not configured");
+    await grtt.unmount();
+
+    readState.symbol = "";
+    const empty = await renderAt("/", <App />);
+    const emptyToken = tokenRow(empty.container);
+    expect(emptyToken).toMatch(/SDEMO/);
+    expect(emptyToken).not.toMatch(/\bToken\b/);
+    expect(emptyToken).not.toBe("not configured");
+    await empty.unmount();
+  });
+
+  it("rejects an empty on-chain symbol outside sample mode", async () => {
+    vi.stubEnv("VITE_RELAYER_URL_ARB_SEPOLIA", "https://relayer.example.invalid");
+    vi.stubEnv("VITE_TOKEN_ADDRESS_ARB_SEPOLIA", WALLET);
+    readState.symbol = "";
+    accountState.address = WALLET;
+    accountState.isConnected = true;
+    accountState.chainId = ARB_SEPOLIA_CHAIN_ID;
+
+    function tokenRow(container: HTMLElement): string {
+      const dt = [...container.querySelectorAll("dt")].find((node) => node.textContent === "Token");
+      const dd = dt?.nextElementSibling;
+      if (!(dd instanceof HTMLElement)) throw new Error("missing token row");
+      return dd.textContent ?? "";
+    }
+
+    const view = await renderAt("/", <App />);
+    expect(tokenRow(view.container)).toBe(QUOTE_ERROR);
+    expect(tokenRow(view.container)).not.toMatch(/\u00b7/);
+    const banner = view.container.querySelector("[data-testid='demo-banner']")?.textContent ?? "";
+    const review = [...view.container.querySelectorAll("section")].find((node) =>
+      /^4\./.test(node.querySelector("h2")?.textContent ?? ""),
+    );
+    const reviewText = review?.textContent ?? "";
+    expect(banner.includes("GRTT")).toBe(false);
+    expect(reviewText.includes("GRTT")).toBe(false);
+    expect(reviewText).not.toMatch(/\u00b7\s*0x/i);
+    expect(button(view.container, "confirm-details").disabled).toBe(true);
+    expect(button(view.container, "sign-order").disabled).toBe(true);
+    await view.unmount();
+
+    const body = sampleFixtureRaw({
+      chainId: ARB_SEPOLIA_CHAIN_ID,
+      user: WALLET,
+      tokenIn: WALLET,
+      tokenSymbol: "GRTT",
+    });
+    vi.stubGlobal(
+      "fetch",
+      async () =>
+        new Response(JSON.stringify(body), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+    );
+    readState.symbol = "   ";
+    const quoted = await renderAt("/", <App />);
+    const input = quoted.container.querySelector("input[inputmode='decimal']");
+    if (!(input instanceof HTMLInputElement)) throw new Error("missing amount");
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(input, "1");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    for (let i = 0; i < 8; i += 1) {
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      });
+    }
+    const quotedBanner = quoted.container.querySelector("[data-testid='demo-banner']")?.textContent ?? "";
+    const quotedReview = [...quoted.container.querySelectorAll("section")].find((node) =>
+      /^4\./.test(node.querySelector("h2")?.textContent ?? ""),
+    );
+    const quotedReviewText = quotedReview?.textContent ?? "";
+    expect(quotedBanner.includes("GRTT")).toBe(false);
+    expect(quotedReviewText.includes("GRTT")).toBe(false);
+    expect(quoted.container.textContent?.includes("GRTT")).toBe(false);
+    expect(tokenRow(quoted.container)).toBe(QUOTE_ERROR);
+    expect(button(quoted.container, "confirm-details").disabled).toBe(true);
+    expect(button(quoted.container, "sign-order").disabled).toBe(true);
+    vi.unstubAllGlobals();
+    await quoted.unmount();
+
+    readState.symbolPending = true;
+    readState.symbol = undefined;
+    const loading = await renderAt("/", <App />);
+    const loadingRow = tokenRow(loading.container);
+    expect(loadingRow).toContain("Reading");
+    expect(loadingRow).toContain("0x1111");
+    expect(loadingRow).not.toBe(QUOTE_ERROR);
+    expect(button(loading.container, "confirm-details").disabled).toBe(true);
+    expect(button(loading.container, "sign-order").disabled).toBe(true);
+    await loading.unmount();
+
+    readState.symbolPending = false;
+    readState.symbolError = true;
+    const failed = await renderAt("/", <App />);
+    const failedRow = tokenRow(failed.container);
+    expect(failedRow).toContain(QUOTE_ERROR);
+    expect(failedRow).toContain("0x1111");
+    expect(failed.container.textContent?.includes("GRTT")).toBe(false);
+    expect(button(failed.container, "confirm-details").disabled).toBe(true);
+    expect(button(failed.container, "sign-order").disabled).toBe(true);
+    await failed.unmount();
+  });
+
+  it("uses one neutral sentence when the live symbol is loading or unread", async () => {
+    vi.stubEnv("VITE_RELAYER_URL_ARB_SEPOLIA", "https://relayer.example.invalid");
+    vi.stubEnv("VITE_TOKEN_ADDRESS_ARB_SEPOLIA", WALLET);
+    accountState.address = WALLET;
+    accountState.isConnected = true;
+    accountState.chainId = ARB_SEPOLIA_CHAIN_ID;
+    const expected = liveSymbolUnreadText(ARB_SEPOLIA_CHAIN_ID);
+
+    async function expectUnread(pending: boolean) {
+      readState.symbolPending = pending;
+      readState.symbolError = false;
+      readState.symbol = pending ? undefined : "";
+      const view = await renderAt("/", <App />);
+      const banner = view.container.querySelector("[data-testid='demo-banner']")?.textContent ?? "";
+      const disclosure = view.container.querySelector("[data-testid='token-disclosure']")?.textContent ?? "";
+      expect(banner).toBe(expected);
+      expect(disclosure).toBe(expected);
+      expect(banner.includes("SDEMO")).toBe(false);
+      expect(disclosure.includes("SDEMO")).toBe(false);
+      expect(banner.toLowerCase().includes("testnet demo token")).toBe(false);
+      expect(disclosure.toLowerCase().includes("testnet demo token")).toBe(false);
+      expect(button(view.container, "confirm-details").disabled).toBe(true);
+      expect(button(view.container, "sign-order").disabled).toBe(true);
+      await view.unmount();
+    }
+
+    await expectUnread(true);
+    await expectUnread(false);
+  });
+
+  it("names Base Sepolia in the disclosure when that network is selected", async () => {
+    const view = await renderAt("/", <App />);
+    const disclosure = () => view.container.querySelector("[data-testid='token-disclosure']")?.textContent ?? "";
+    expect(disclosure()).toContain("Arbitrum Sepolia");
+    const base = [...view.container.querySelectorAll("button")].find((button) => button.textContent === "Base Sepolia");
+    if (!(base instanceof HTMLButtonElement)) throw new Error("missing Base Sepolia");
+    await act(async () => {
+      base.click();
+    });
+    expect(disclosure()).toContain("Base Sepolia");
+    expect(disclosure()).not.toContain("Arbitrum");
+    await view.unmount();
+  });
+
+  it("shows the unread sentence for Base Sepolia", async () => {
+    vi.stubEnv("VITE_RELAYER_URL", "https://relayer.example.invalid");
+    vi.stubEnv("VITE_RELAYER_URL_ARB_SEPOLIA", "");
+    vi.stubEnv("VITE_RELAYER_BASE_URL", "");
+    vi.stubEnv("RELAYER_BASE_URL", "");
+    vi.stubEnv("VITE_TOKEN_ADDRESS", WALLET);
+    readState.symbolPending = true;
+    readState.symbol = undefined;
+    readState.symbolError = false;
+    const view = await renderAt("/", <App />);
+    const base = [...view.container.querySelectorAll("button")].find((node) => node.textContent === "Base Sepolia");
+    if (!(base instanceof HTMLButtonElement)) throw new Error("missing Base Sepolia");
+    await act(async () => {
+      base.click();
+    });
+    const expected = liveSymbolUnreadText(BASE_SEPOLIA_CHAIN_ID);
+    const banner = view.container.querySelector("[data-testid='demo-banner']")?.textContent ?? "";
+    const disclosure = view.container.querySelector("[data-testid='token-disclosure']")?.textContent ?? "";
+    expect(banner).toBe(expected);
+    expect(disclosure).toBe(expected);
+    expect(banner).not.toContain("Arbitrum");
+    await view.unmount();
+  });
+});

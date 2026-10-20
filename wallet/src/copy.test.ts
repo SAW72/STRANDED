@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import * as copy from "./copy";
+import * as relayerError from "./lib/relayerError";
+import * as tokenDisclosure from "./lib/tokenDisclosure";
 import copySource from "./copy.ts?raw";
 import {
   AMOUNT_HELPER,
@@ -82,18 +84,33 @@ describe("review-screen copy", () => {
 });
 
 describe("points copy", () => {
-  const pointsCopy = Object.entries(copy)
-    .filter(([key, value]) => key.startsWith("POINTS_") && typeof value === "string")
-    .map(([, value]) => value);
+  const pointsCopy = Object.entries(copy).filter(
+    ([key, value]) => key.startsWith("POINTS_") && typeof value === "string",
+  );
 
   it("fails if points copy contains $, reward, or token value", () => {
     expect(pointsCopy.length).toBeGreaterThan(0);
-    for (const line of pointsCopy) {
+    for (const [, line] of pointsCopy) {
+      if (typeof line !== "string") continue;
       expect(line).not.toMatch(/\$/);
       expect(line.toLowerCase()).not.toContain("reward");
       expect(line.toLowerCase()).not.toContain("token value");
       expect(line.toLowerCase()).not.toContain("airdrop");
-      expect(line.toLowerCase()).not.toMatch(/\bearn\b/);
+      expect(line).not.toMatch(/\bearn/i);
+    }
+  });
+
+  it("rejects earn in every exported user-facing copy string", () => {
+    const modules = [copy, tokenDisclosure, relayerError];
+    const lines: Array<[string, string]> = [];
+    for (const mod of modules) {
+      for (const [key, value] of Object.entries(mod)) {
+        if (typeof value === "string") lines.push([key, value]);
+      }
+    }
+    expect(lines.length).toBeGreaterThan(pointsCopy.length);
+    for (const [key, line] of lines) {
+      expect(line, key).not.toMatch(/\bearn/i);
     }
   });
 
@@ -105,6 +122,18 @@ describe("points copy", () => {
 
   it("introduces recorded activity by category", () => {
     expect(copy.POINTS_INTRO).toBe("Enter a wallet address to see recorded activity by category.");
+  });
+
+  it("describes how points are recorded without a final rescue number", () => {
+    expect(copy.POINTS_HOW_HEADING).toBe("How points are recorded");
+    expect(copy.POINTS_HOW_BODY).toBe(
+      "Points are recorded for completed rescues, relayer jobs, and registry finds posted or claimed.",
+    );
+    expect(copy.POINTS_HOW_BODY).not.toMatch(/\b100\b/);
+    expect(copy.POINTS_HOW_STATUS).toBe(
+      "Points are an off-chain activity record. They have no value, are not a token, and can't be transferred.",
+    );
+    expect(copy.POINTS_BACK_LABEL).toBe("Back to home");
   });
 
   it("keeps the registry claim label", () => {

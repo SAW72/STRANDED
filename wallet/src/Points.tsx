@@ -16,6 +16,9 @@ import {
   POINTS_ENTRIES_LABEL,
   POINTS_EXAMPLE_BADGE,
   POINTS_EXAMPLE_NOTE,
+  POINTS_HOW_BODY,
+  POINTS_HOW_HEADING,
+  POINTS_HOW_STATUS,
   POINTS_INTRO,
   POINTS_INVALID_ADDRESS,
   POINTS_LOAD_ERROR,
@@ -42,6 +45,7 @@ const ACTION_LABELS: Record<string, string> = {
   registry_find: POINTS_ACTION_REGISTRY_FIND,
   registry_claim: POINTS_ACTION_REGISTRY_CLAIM,
   session: POINTS_ACTION_SESSION,
+  wallet_session: POINTS_ACTION_SESSION,
 };
 
 /** Bug reports and security findings are not points actions and are not shown. */
@@ -84,6 +88,19 @@ export function Points({ client }: { client?: PointsClient }) {
     document.title = "Stranded · " + POINTS_TITLE;
   }, []);
 
+  useEffect(() => {
+    if (window.location.hash !== "#how-points-are-recorded") return;
+    const node = document.getElementById("how-points-are-recorded");
+    if (!node) return;
+    let reduce = false;
+    try {
+      reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    } catch {
+      reduce = false;
+    }
+    node.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
+  }, []);
+
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const wallet = normaliseWalletAddress(input);
@@ -108,13 +125,20 @@ export function Points({ client }: { client?: PointsClient }) {
   return (
     <main className="app">
       <p className="points-nav">
-        <a href="/">{POINTS_BACK_LABEL}</a>
+        <a href="/" data-testid="points-home">
+          {POINTS_BACK_LABEL}
+        </a>
       </p>
       <h1>{POINTS_TITLE}</h1>
       <p className="lede">{POINTS_INTRO}</p>
       <p className="points-disclaimer" role="note" data-testid="points-disclaimer">
         {POINTS_DISCLAIMER}
       </p>
+      <section className="points-how" id="how-points-are-recorded" data-testid="points-how">
+        <h2>{POINTS_HOW_HEADING}</h2>
+        <p>{POINTS_HOW_BODY}</p>
+        <p>{POINTS_HOW_STATUS}</p>
+      </section>
       {api.source === "example" ? (
         <div className="banner banner-sample" role="status" data-testid="points-example">
           <strong>{POINTS_EXAMPLE_BADGE}</strong>

@@ -49,7 +49,7 @@ export function SdemoFaucetCard() {
       <h2>Get test SDEMO</h2>
       <p className="muted">
         2 SDEMO per wallet each 24 hours. The faucet cannot mint. It only sends tokens already held by the contract.
-        SDEMO has no monetary value.
+        SDEMO has no value.
       </p>
       {!onArb && (
         <button

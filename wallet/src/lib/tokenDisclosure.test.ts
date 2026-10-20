@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { bannedWordsIn, hitsInAppCode } from "./bannedWords";
+import { ARB_SEPOLIA_CHAIN_ID, BASE_SEPOLIA_CHAIN_ID } from "./chains";
 import appSource from "../App.tsx?raw";
 import pointsSource from "../Points.tsx?raw";
 import copySource from "../copy.ts?raw";
@@ -23,6 +25,7 @@ import {
 import disclosureSource from "./tokenDisclosure.ts?raw";
 import {
   demoBannerText,
+  liveSymbolUnreadText,
   tokenDisclosure,
   UNKNOWN_DEMO_BANNER,
   UNKNOWN_TOKEN_DISCLOSURE,
@@ -34,20 +37,6 @@ const GRTT_DISCLOSURE =
   "GRTT is a testnet demo token on Arbitrum Sepolia. It has no value and is not for sale. This is experimental, unaudited demo software.";
 const SDEMO_BANNER = "Testnet demo. SDEMO has no value and isn't for sale.";
 const GRTT_BANNER = "Testnet demo. GRTT has no value and isn't for sale.";
-
-const BANNED = [
-  "invest",
-  "earn",
-  "reward",
-  "airdrop",
-  "presale",
-  "price",
-  "listing",
-  "apy",
-  "profit",
-  "trade",
-  "value",
-] as const;
 
 /** User-visible sources. Code identifiers in other modules are not included. */
 const COPY_SOURCES = [
@@ -62,11 +51,6 @@ const COPY_SOURCES = [
   indexHtml,
 ];
 
-function bannedWordsIn(text: string): string[] {
-  const stripped = text.replace(/\bno value\b/gi, " ").replace(/\bno cash value\b/gi, " ");
-  return BANNED.filter((word) => new RegExp(`\\b${word}\\b`, "i").test(stripped));
-}
-
 function stringLiterals(source: string): string[] {
   const found: string[] = [];
   const pattern = /"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'|`((?:[^`\\]|\\.)*)`/g;
@@ -77,12 +61,23 @@ function stringLiterals(source: string): string[] {
   return found;
 }
 
+/** Text nodes in JSX, separate from quoted source strings. */
+function jsxText(source: string): string[] {
+  const withoutComments = source.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:])\/\/.*$/gm, "$1");
+  const found: string[] = [];
+  for (const match of withoutComments.matchAll(/>([^<>{}]+)</g)) {
+    const text = (match[1] ?? "").replace(/\s+/g, " ").trim();
+    if (text) found.push(text);
+  }
+  return found;
+}
+
 /** Sentences and short labels. Skips class names, paths, and other non-copy literals. */
 function isUserCopy(text: string): boolean {
   const trimmed = text.trim();
   if (!trimmed) return false;
   if (trimmed.includes(" ")) return true;
-  return /^[A-Za-z][A-Za-z'’?!]{0,40}$/.test(trimmed);
+  return /^[A-Za-z][A-Za-z'’?!:]{0,40}$/.test(trimmed);
 }
 
 describe("token disclosure", () => {
@@ -101,6 +96,31 @@ describe("token disclosure", () => {
     expect(demoBannerText("GRTT")).toBe(GRTT_BANNER);
     expect(demoBannerText(null)).toBe(UNKNOWN_DEMO_BANNER);
     expect(demoBannerText("")).toBe(UNKNOWN_DEMO_BANNER);
+    expect(UNKNOWN_DEMO_BANNER).toBe(SDEMO_BANNER);
+    expect(UNKNOWN_DEMO_BANNER).not.toMatch(/this token/i);
+  });
+
+  it("uses one unread sentence that does not name the sample ticker", () => {
+    const arb = liveSymbolUnreadText(ARB_SEPOLIA_CHAIN_ID);
+    const base = liveSymbolUnreadText(BASE_SEPOLIA_CHAIN_ID);
+    expect(arb).toBe(liveSymbolUnreadText());
+    expect(arb.includes("SDEMO")).toBe(false);
+    expect(base.includes("SDEMO")).toBe(false);
+    expect(arb.toLowerCase().includes("testnet demo token")).toBe(false);
+    expect(base).toContain("Base Sepolia");
+    expect(arb).toContain("Token loading or unread");
+    expect(bannedWordsIn(arb)).toEqual([]);
+    expect(bannedWordsIn(base)).toEqual([]);
+  });
+
+  it("names Base Sepolia when that chain is selected", () => {
+    expect(tokenDisclosure("SDEMO", BASE_SEPOLIA_CHAIN_ID)).toBe(
+      "SDEMO is a testnet demo token on Base Sepolia. It has no value and is not for sale. This is experimental, unaudited demo software.",
+    );
+    expect(tokenDisclosure(null, BASE_SEPOLIA_CHAIN_ID)).toContain("on Base Sepolia");
+    expect(tokenDisclosure(null, BASE_SEPOLIA_CHAIN_ID)).not.toContain("Arbitrum");
+    expect(tokenDisclosure("SDEMO", ARB_SEPOLIA_CHAIN_ID)).toBe(SDEMO_DISCLOSURE);
+    expect(tokenDisclosure(null)).toBe(UNKNOWN_TOKEN_DISCLOSURE);
   });
 });
 
@@ -115,7 +135,10 @@ describe("banned words in user-visible copy", () => {
     demoBannerText("SDEMO"),
     demoBannerText("GRTT"),
     demoBannerText(null),
+    liveSymbolUnreadText(),
+    liveSymbolUnreadText(BASE_SEPOLIA_CHAIN_ID),
     ...COPY_SOURCES.flatMap((source) => stringLiterals(source).filter(isUserCopy)),
+    ...COPY_SOURCES.flatMap((source) => jsxText(source).filter(isUserCopy)),
   ];
 
   it("allows the phrase no value and rejects the banned list", () => {
@@ -128,6 +151,27 @@ describe("banned words in user-visible copy", () => {
     expect(bannedWordsIn("high value")).toEqual(["value"]);
     expect(bannedWordsIn("They have no cash value, and nothing is promised.")).toEqual([]);
     expect(bannedWordsIn("high cash value")).toEqual(["value"]);
+    expect(bannedWordsIn(["re", "wards"].join(""))).toEqual(["reward"]);
+    expect(bannedWordsIn(["air", "drop", "ped"].join(""))).toEqual(["airdrop"]);
+    expect(bannedWordsIn(["earn", "ed"].join(""))).toEqual(["earn"]);
+    expect(bannedWordsIn(["earn", "ings"].join(""))).toEqual(["earn"]);
+    expect(bannedWordsIn(["in", "vestment"].join(""))).toEqual(["invest"]);
+    expect(bannedWordsIn(["in", "vestors"].join(""))).toEqual(["invest"]);
+    expect(bannedWordsIn(["trad", "er"].join(""))).toEqual(["trade"]);
+    expect(bannedWordsIn(["trad", "able"].join(""))).toEqual(["trade"]);
+    expect(bannedWordsIn(["valu", "able"].join(""))).toEqual(["value"]);
+    expect(bannedWordsIn(["profit", "able"].join(""))).toEqual(["profit"]);
+    expect(bannedWordsIn(["list", "ed"].join(""))).toEqual(["listing"]);
+    expect(bannedWordsIn("pre-sale")).toEqual(["presale"]);
+    expect(bannedWordsIn("pre sale")).toEqual(["presale"]);
+    expect(bannedWordsIn("learn yearn earnest unearned valuation tradeoff")).toEqual([]);
+    expect(isUserCopy(["Pri", "ce", ":"].join(""))).toBe(true);
+    expect(isUserCopy(["Re", "wards", "!"].join(""))).toBe(true);
+    expect(isUserCopy(["AP", "Y", ":"].join(""))).toBe(true);
+    expect(bannedWordsIn(["Pri", "ce", ":"].join(""))).toEqual(["price"]);
+    expect(bannedWordsIn(["Re", "wards", "!"].join(""))).toEqual(["reward"]);
+    expect(bannedWordsIn(["AP", "Y", ":"].join(""))).toEqual(["apy"]);
+    expect(bannedWordsIn(`(${["ea", "rn"].join("")})`)).toEqual(["earn"]);
   });
 
   it("finds none of the banned words in the disclosure, banner, copy module, or UI text", () => {
@@ -135,6 +179,11 @@ describe("banned words in user-visible copy", () => {
       bannedWordsIn(text).map((word) => `${word}: ${text}`),
     );
     expect(hits).toEqual([]);
+    const literalHits = COPY_SOURCES.flatMap((source, index) => hitsInAppCode(source, `copy-source-${index}`));
+    expect(literalHits, literalHits.map((hit) => `${hit.file}: "${hit.excerpt}"`).join("\n")).toEqual([]);
+    const jsx = COPY_SOURCES.flatMap((source) => jsxText(source));
+    expect(jsx.some((line) => line.includes("What happens to your tokens"))).toBe(true);
+    for (const line of jsx) expect(line).not.toMatch(/\bearn/i);
   });
 
   it("error mappers never return Relayer POST, HTTP status, snake_case codes, viem@, or Details:", async () => {

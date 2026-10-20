@@ -1,6 +1,18 @@
 # Points Program — Public Announcement (Draft)
 
-> **Draft. Not for publication until Spencer approves the final text and the ledger and dashboard are live.** Publish only after the ledger is mounted on a relayer route and the dashboard is live.
+> **Do not publish until reviewed by counsel.** The public points announcement needs Lawyer review before it goes out.
+
+No public points announcement goes out until all of the following are done:
+
+(a) Lawyer reviews the exact final text for every channel, plus a screenshot of the live /points page.
+
+(b) The full POINTS_DISCLAIMER, or a link to it, sits next to any points mention.
+
+(c) Banned words and phrases: airdrop; token (except 'not a token'); reward/earn; value; early/early-adopter; 'points may matter later'; conversion; snapshot; eligibility; leaderboard-for-prizes; and any hint of a future distribution. The required POINTS_DISCLAIMER is exempt from this list: that text contains 'token' and 'value' and must still appear in full.
+
+(d) Spencer gives an explicit GO after Lawyer's sign-off.
+
+The strandedtoken.trade domain must never be paired with points wording in announcements.
 
 ---
 

@@ -369,6 +369,106 @@ describe("Points page", () => {
     expect(points).not.toMatch(/\b(winner|1st|2nd|3rd)\b/i);
   });
 
+  it("hides a ledger wallet_session", async () => {
+    const view = await render(
+      <Points
+        client={client({
+          getWallet: () =>
+            Promise.resolve({
+              wallet: EXAMPLE_POINTS_ADDRESS,
+              total: 10,
+              categories: [{ action: "wallet_session", points: 10, count: 1 }],
+              entries: [{ action: "wallet_session", points: 10, txHash: null, chainId: null }],
+            }),
+        })}
+      />,
+    );
+    await lookup(view.container, EXAMPLE_POINTS_ADDRESS);
+    expect(view.container.querySelector("[data-testid='points-loaded']")).toBeNull();
+    expect(view.container.querySelector("[data-testid='points-empty']")?.textContent).toMatch(/no points/i);
+    expect(view.container.textContent).not.toContain("wallet_session");
+    expect(view.container.textContent).not.toContain("Session");
+    await view.unmount();
+  });
+
+  it("explains how points are recorded and links back home", async () => {
+    const view = await render(<Points />);
+    const how = view.container.querySelector("[data-testid='points-how']");
+    expect(how?.id).toBe("how-points-are-recorded");
+    expect(how?.textContent).toMatch(/How points are recorded/);
+    expect(how?.textContent).toMatch(/completed rescues/);
+    expect(how?.textContent).toMatch(/relayer jobs/);
+    expect(how?.textContent).toMatch(/registry finds posted or claimed/);
+    expect(how?.textContent).toMatch(/completed rescues, relayer jobs, and registry finds/);
+    expect(how?.textContent).not.toMatch(/10 per week/);
+    expect(how?.textContent).toMatch(/off-chain/);
+    expect(how?.textContent).toMatch(/no value/);
+    expect(how?.textContent).toMatch(/not a token/);
+    expect(how?.textContent).toMatch(/can't be transferred/);
+    expect(how?.textContent).not.toMatch(/\b100\b/);
+    expect(how?.textContent).not.toMatch(/placeholder/i);
+    const home = view.container.querySelector("[data-testid='points-home']");
+    expect(home?.getAttribute("href")).toBe("/");
+    expect(home?.textContent).toBe("Back to home");
+    await view.unmount();
+  });
+
+  it("scrolls to the how section when that hash is opened", async () => {
+    const calls: Array<ScrollIntoViewOptions | boolean | undefined> = [];
+    const previous = HTMLElement.prototype.scrollIntoView;
+    HTMLElement.prototype.scrollIntoView = function scrollIntoView(arg) {
+      if (this.id === "how-points-are-recorded") calls.push(arg);
+    };
+    const previousMedia = window.matchMedia;
+    window.matchMedia = ((query: string) => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addEventListener() {},
+      removeEventListener() {},
+      addListener() {},
+      removeListener() {},
+      dispatchEvent() {
+        return false;
+      },
+    })) as typeof window.matchMedia;
+    window.location.hash = "#how-points-are-recorded";
+    const view = await render(<Points />);
+    expect(calls).toEqual([{ behavior: "smooth", block: "start" }]);
+    await view.unmount();
+    HTMLElement.prototype.scrollIntoView = previous;
+    window.matchMedia = previousMedia;
+    window.location.hash = "";
+  });
+
+  it("scrolls to the how section without motion when reduced motion is set", async () => {
+    const calls: Array<ScrollIntoViewOptions | boolean | undefined> = [];
+    const previous = HTMLElement.prototype.scrollIntoView;
+    HTMLElement.prototype.scrollIntoView = function scrollIntoView(arg) {
+      if (this.id === "how-points-are-recorded") calls.push(arg);
+    };
+    const previousMedia = window.matchMedia;
+    window.matchMedia = ((query: string) => ({
+      matches: query.includes("prefers-reduced-motion"),
+      media: query,
+      onchange: null,
+      addEventListener() {},
+      removeEventListener() {},
+      addListener() {},
+      removeListener() {},
+      dispatchEvent() {
+        return false;
+      },
+    })) as typeof window.matchMedia;
+    window.location.hash = "#how-points-are-recorded";
+    const view = await render(<Points />);
+    expect(calls).toEqual([{ behavior: "auto", block: "start" }]);
+    await view.unmount();
+    HTMLElement.prototype.scrollIntoView = previous;
+    window.matchMedia = previousMedia;
+    window.location.hash = "";
+  });
+
   it("uses the example client from the page default without a baked URL", async () => {
     expect(createPointsClient().source).toBe("example");
     const view = await render(<Points />);

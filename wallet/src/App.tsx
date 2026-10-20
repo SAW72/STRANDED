@@ -24,6 +24,9 @@ import {
   CONNECT_LABEL,
   CONNECTING_LABEL,
   POINTS_NAV_LABEL,
+  QUOTE_CONNECT_TO_REVIEW,
+  QUOTE_ENTER_AMOUNT,
+  QUOTE_ERROR,
   DEADLINE_HELPER,
   DEADLINE_LABEL,
   FEE_HELPER,
@@ -116,7 +119,13 @@ import { receiptFromSubmit, type RescueReceiptView } from "./lib/receipt";
 import { submitRescue } from "./lib/rescues";
 import { isPointsRoute, Points } from "./Points";
 import { RescueReceipt } from "./RescueReceipt";
-import { demoBannerText, tokenDisclosure } from "./lib/tokenDisclosure";
+import {
+  DEMO_FALLBACK_TICKER,
+  demoBannerText,
+  demoTicker,
+  liveSymbolUnreadText,
+  tokenDisclosure,
+} from "./lib/tokenDisclosure";
 import {
   StrandedCelebration,
   StrandedHero,
@@ -139,7 +148,7 @@ function ReviewRow({
   return (
     <div className="review-row">
       <div className="review-label">{label}</div>
-      <div className="review-value">{value}</div>
+      <div className="review-figure">{value}</div>
       <p className="review-help">{help}</p>
     </div>
   );
@@ -151,6 +160,9 @@ function dashOr(value: ReactNode, ready: boolean): ReactNode {
 
 function RescueApp() {
   const [selectedChainId, setSelectedChainId] = useState<SupportedChainId>(ARB_SEPOLIA_CHAIN_ID);
+  const selectedChainRef = useRef(selectedChainId);
+  selectedChainRef.current = selectedChainId;
+  const signEntry = useRef(false);
   const relayer = relayerUrl(selectedChainId);
   const useFixture = !relayer;
 
@@ -235,7 +247,8 @@ function RescueApp() {
     | { kind: "ok"; txHash: Hex | null }
     | { kind: "error"; message: string; relayerMessage?: boolean }
   >({ kind: "idle" });
-  const [receipt, setReceipt] = useState<RescueReceiptView | null>(null);
+  const [storedReceipt, setReceipt] = useState<RescueReceiptView | null>(null);
+  const receipt = storedReceipt && storedReceipt.chainId === selectedChainId ? storedReceipt : null;
   const [celebration, setCelebration] = useState<CelebrationKind>(null);
   const [awaitingFreshHoldings, setAwaitingFreshHoldings] = useState(false);
   const queryClient = useQueryClient();
@@ -246,13 +259,16 @@ function RescueApp() {
     else if (play === "1" || play === "rescue") setCelebration("rescue");
   }, []);
 
-  const { data: tokenSymbol } = useReadContract({
+  const symbolQuery = useReadContract({
     address: token ?? undefined,
     abi: erc20PermitAbi,
     functionName: "symbol",
     chainId: selectedChainId,
     query: { enabled: Boolean(token) },
   });
+  const tokenSymbol = symbolQuery.data;
+  const symbolPending = Boolean(symbolQuery.isPending || symbolQuery.isLoading);
+  const symbolFailed = Boolean(symbolQuery.isError);
 
   const { data: tokenDecimals } = useReadContract({
     address: token ?? undefined,
@@ -329,9 +345,9 @@ function RescueApp() {
       chainId: selectedChainId,
       user: address,
       tokenIn: token ?? undefined,
-      tokenSymbol: typeof tokenSymbol === "string" ? tokenSymbol : undefined,
+      tokenSymbol: DEMO_FALLBACK_TICKER,
     });
-  }, [useFixture, selectedChainId, address, token, tokenSymbol]);
+  }, [useFixture, selectedChainId, address, token]);
 
   const quote: RescueQuote | null = useFixture ? fixtureQuote : liveQuote;
   const quoteSource: QuoteSource | null = quote ? (useFixture ? "fixture" : "relayer") : null;
@@ -353,11 +369,14 @@ function RescueApp() {
     errorMessage: quoteUserMessage,
   });
 
-  const demoSymbol =
-    (typeof tokenSymbol === "string" ? tokenSymbol : null) ??
-    quote?.tokenSymbol ??
-    receipt?.tokenSymbol ??
-    null;
+  const liveTicker = demoTicker(typeof tokenSymbol === "string" ? tokenSymbol : null);
+  // Sample mode never shows the on-chain symbol. An empty read and a live
+  // ticker such as GRTT or gMOCK both render as SDEMO.
+  const demoSymbol = useFixture ? DEMO_FALLBACK_TICKER : liveTicker;
+  const liveSymbolReady = useFixture || (Boolean(liveTicker) && !symbolPending && !symbolFailed);
+  const unreadCopy = !useFixture && !liveSymbolReady ? liveSymbolUnreadText(selectedChainId) : null;
+
+  const reviewVisible = isConnected && quoteReady && liveSymbolReady;
 
   const phase = rescuePhase({
     quote: quoteReady ? quote : null,
@@ -377,6 +396,10 @@ function RescueApp() {
     setSignError(null);
     setSubmitState({ kind: "idle" });
   }, [humanAmount, selectedChainId, token, receipt]);
+
+  useEffect(() => {
+    if (!reviewVisible) setDetailsConfirmed(false);
+  }, [reviewVisible]);
 
   const reviewDecimals = quote?.tokenDecimals ?? displayDecimals;
   const reviewSymbol = quote?.tokenSymbol;
@@ -399,6 +422,7 @@ function RescueApp() {
   }, [refreshHoldings, displayDecimals]);
 
   function selectChain(next: SupportedChainId) {
+    if (next !== selectedChainId) setReceipt(null);
     setSelectedChainId(next);
     if (isConnected && chainId !== next) {
       switchChain({ chainId: next });
@@ -434,7 +458,7 @@ function RescueApp() {
   }
 
   async function onSign() {
-    if (signing || awaitingFreshHoldings || submitState.kind === "posting") return;
+    if (signEntry.current || signing || awaitingFreshHoldings || submitState.kind === "posting") return;
     if (!canPromptSignatures(phase) || !quoteReady || !quote || !address || !token || !rescue) return;
     setSubmitState((current) => quoteSessionOnNewAttempt(current));
     if (!onSelectedChain) {
@@ -462,6 +486,7 @@ function RescueApp() {
     }
 
     const order = buildOrder({ quote });
+    signEntry.current = true;
     setSigning(true);
     setSignError(null);
     let rescuePostAttempted = false;
@@ -509,7 +534,7 @@ function RescueApp() {
         });
         if (submitted.ok) {
           const nextReceipt = receiptFromSubmit(quote, submitted);
-          if (nextReceipt) setReceipt(nextReceipt);
+          if (nextReceipt && nextReceipt.chainId === selectedChainRef.current) setReceipt(nextReceipt);
           postedOk = true;
           console.info("[rescue] submit ok", submitted.txHash);
           // Spent Order (nonce/sig/minOut/deadline) must not linger — UsedNonce on replay.
@@ -560,6 +585,7 @@ function RescueApp() {
         setSigned(outcome.signed);
       }
     } finally {
+      signEntry.current = false;
       setSigning(false);
       setAwaitingFreshHoldings(false);
     }
@@ -582,8 +608,8 @@ function RescueApp() {
       <p className="points-nav">
         <a href="/points">{POINTS_NAV_LABEL}</a>
       </p>
-      <p className="demo-banner" role="note">
-        {demoBannerText(demoSymbol)}
+      <p className="demo-banner" role="note" data-testid="demo-banner">
+        {unreadCopy ?? demoBannerText(demoSymbol)}
       </p>
       <StrandedCelebration kind={celebration} onDone={() => setCelebration(null)} />
       <StrandedHero onPlay={() => setCelebration("rescue")} />
@@ -672,7 +698,19 @@ function RescueApp() {
         <h2>3. Stranded token</h2>
         <dl className="kv">
           <dt>Token</dt>
-          <dd>{token ? `${tokenSymbol ?? "Token"} · ${shortenAddress(token)}` : "not configured"}</dd>
+          <dd>
+            {!token
+              ? "not configured"
+              : useFixture
+                ? `${DEMO_FALLBACK_TICKER} · ${shortenAddress(token)}`
+                : symbolPending
+                  ? `Reading… · ${shortenAddress(token)}`
+                  : symbolFailed
+                    ? `${QUOTE_ERROR} · ${shortenAddress(token)}`
+                    : liveTicker
+                      ? `${liveTicker} · ${shortenAddress(token)}`
+                      : QUOTE_ERROR}
+          </dd>
           <dt>Balance</dt>
           <dd>
             {tokenBalance !== undefined
@@ -696,7 +734,9 @@ function RescueApp() {
         <button className="btn" type="button" disabled={tokenBalance === undefined || useFixture} onClick={() => void fillMax()}>
           Use full balance
         </button>
-        <p className="token-disclosure">{tokenDisclosure(demoSymbol)}</p>
+        <p className="token-disclosure" data-testid="token-disclosure">
+          {unreadCopy ?? tokenDisclosure(demoSymbol, selectedChainId)}
+        </p>
       </section>
 
       {receipt ? (
@@ -709,15 +749,16 @@ function RescueApp() {
       <section className="card">
         <h2>4. {REVIEW_TITLE}</h2>
         <p className="subtitle">{REVIEW_SUBTITLE}</p>
-        <p className="token-disclosure">{tokenDisclosure(demoSymbol)}</p>
 
         {quoteSource === "fixture" && (
-          <div className="banner banner-sample" role="status">
+          <div className="banner banner-sample" role="status" data-testid="sample-banner">
             <strong>{SAMPLE_BADGE}</strong>
             <p>{FIXTURE_BANNER}</p>
           </div>
         )}
 
+        {reviewVisible ? (
+        <div data-testid="rescue-quote-fields">
         <h3 className="review-heading">What happens to your tokens</h3>
         <div className="review-list">
           <ReviewRow
@@ -784,7 +825,7 @@ function RescueApp() {
           <ReviewRow
             label={TOKEN_LABEL}
             value={dashOr(
-              quote ? `${quote.tokenSymbol} · ${quote.tokenDecimals} decimals` : null,
+              quote ? `${reviewSymbol} · ${quote.tokenDecimals} decimals` : null,
               quoteReady,
             )}
             help={TOKEN_HELPER}
@@ -838,6 +879,12 @@ function RescueApp() {
             help={NONCE_HELPER}
           />
         </div>
+        </div>
+        ) : isConnected && (quoteStatus.kind === "loading" || quoteStatus.kind === "error") ? null : (
+          <p className="muted" data-testid="rescue-quote-collapsed">
+            {isConnected ? QUOTE_ENTER_AMOUNT : QUOTE_CONNECT_TO_REVIEW}
+          </p>
+        )}
 
         {quoteStatus.kind === "loading" && (
           <div className="banner" role="status">
@@ -854,7 +901,9 @@ function RescueApp() {
             </div>
           </div>
         )}
-        {quoteStatus.kind === "idle" && <p className="muted">{quoteStatus.message}</p>}
+        {quoteStatus.kind === "idle" && reviewVisible && (
+          <p className="muted">{quoteStatus.message}</p>
+        )}
 
         <p className="trust-line">{REVIEW_TRUST_LINE}</p>
 
@@ -862,7 +911,8 @@ function RescueApp() {
           <button
             className="btn btn-primary"
             type="button"
-            disabled={phase !== "review"}
+            data-testid="confirm-details"
+            disabled={!reviewVisible || phase !== "review"}
             onClick={() => {
               setDetailsConfirmed(true);
               setSubmitState((current) => quoteSessionOnNewAttempt(current));
@@ -882,7 +932,7 @@ function RescueApp() {
           {phase === "confirmed" || phase === "signing" || phase === "signed" ? (
             <span className="ok">{CONFIRMED_HINT}</span>
           ) : (
-            <span className="muted">{quoteReady ? CONFIRM_HINT : SIGN_LOCKED_MISSING}</span>
+            <span className="muted">{reviewVisible ? CONFIRM_HINT : SIGN_LOCKED_MISSING}</span>
           )}
         </div>
       </section>
@@ -901,7 +951,9 @@ function RescueApp() {
         <button
           className="btn btn-primary"
           type="button"
+          data-testid="sign-order"
           disabled={
+            !reviewVisible ||
             !canPromptSignatures(phase) ||
             signing ||
             !quoteReady ||
@@ -919,7 +971,9 @@ function RescueApp() {
                 : "Sign Order and permit"}
         </button>
         {!canPromptSignatures(phase) && (
-          <div className="banner banner-block">{quoteReady ? SIGN_LOCKED : SIGN_LOCKED_MISSING}</div>
+          <div className="banner banner-block">
+            {reviewVisible ? SIGN_LOCKED : SIGN_LOCKED_MISSING}
+          </div>
         )}
         {signError && <p className="danger">{signError}</p>}
         {signed && (

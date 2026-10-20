@@ -129,6 +129,9 @@ jobs:
           grep -F "10 passed; 0 failed; 0 skipped" fork-summary.txt
 
   # Wallet UX (Vite + vitest). No Relayer key. Fixtures when Relayer URL unset.
+  # The copy scanner masks TMPDIR only. Test and build set it to the runner
+  # temp dir so a bare /tmp path in shipped copy is still a failure. The runner
+  # context is not allowed on the job env.
   wallet:
     name: Wallet build + test
     runs-on: ubuntu-latest
@@ -153,9 +156,13 @@ jobs:
         run: npm ci
 
       - name: Test
+        env:
+          TMPDIR: ${{ runner.temp }}
         run: npm test
 
       - name: Build
+        env:
+          TMPDIR: ${{ runner.temp }}
         run: |
           set -euo pipefail
           # Runtime canaries only. Generated here, never printed, never committed.
