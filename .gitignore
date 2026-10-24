@@ -29,3 +29,5 @@ relayer/data/
 *.sqlite*
 # Points panel renders are cloud artifacts, not repo files.
 /artifacts/
+# Vite prebundle cache. Hashes only. Do not commit.
+wallet/.vite/
