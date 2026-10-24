@@ -45,18 +45,23 @@ The relayer hot wallet `0x8240124dc78a27c80354Ca813Df12aa2888A9AF6` receives ETH
 
 ## Base order
 
-Run **B4, then B1, then B2, then B3, then B5**. Delist before deploy. Fund last, and only after the new token and router are allowlisted.
+B4 is done. Run **B1, then B2, then B3, then B5**. Fund last, and only after the new token and router are allowlisted.
 
 ### B4 — delist stale allowlist
 
-`B4_DelistStaleAllowlist`. Two calls on `0x21A1ADf810e64B5bd1d530D31abA6856b8DEf688`, the same two as `docs/BASE-SEPOLIA-DELIST-STEPS.md`. `setTokenAllowed(token, false)` also sets `eip2612Tokens[token]` to false. There is no second token transaction.
+Done on Base Sepolia on Oct 24, 2026. `cast call` on `https://sepolia.base.org` after these blocks: `allowedRouters(SwapRouter02)` is false, and gMOCK `allowedTokens` and `eip2612Tokens` are both false.
+
+1. Block 49778731, tx `0x46339f7fa2873b7b37f4172697077ab2a3e81cd9fd253a5c11ab52d63db968c7`. `setRouterAllowed(0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4, false)`.
+2. Block 49779077, tx `0x04150b45ed14097abf0fafe7809a0a9aec473be23911cde8f8a048ab47e36a3b`. `setTokenAllowed(0xE36c35cbF0373D77D00732f7B92dB4fB8fd37166, false)`, which also cleared `eip2612Tokens`.
+
+`B4_DelistStaleAllowlist`. Two calls on `0x21A1ADf810e64B5bd1d530D31abA6856b8DEf688`, the same two as `docs/BASE-SEPOLIA-DELIST-STEPS.md`. `setTokenAllowed(token, false)` also sets `eip2612Tokens[token]` to false. There is no second token transaction. The list below is the script order. The mined order was router, then token.
 
 1. `setTokenAllowed(0xE36c35cbF0373D77D00732f7B92dB4fB8fd37166, false)`
    calldata `0x15f69012000000000000000000000000e36c35cbf0373d77d00732f7b92db4fb8fd371660000000000000000000000000000000000000000000000000000000000000000`
 2. `setRouterAllowed(0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4, false)`
    calldata `0x6cc88edb00000000000000000000000094cc0aac535ccdb3c01d6787d6413c739ae12bc40000000000000000000000000000000000000000000000000000000000000000`
 
-gMOCK has public `mint`. Router `0x94cC…2bc4` is the Uniswap V3 SwapRouter02 on Base Sepolia. B4 delists it so the tDEMO allowlist contains only the locked demo router. It holds 0 ETH and is not the capped router. Do not fund it. After step 1, `allowedTokens` and `eip2612Tokens` for gMOCK are both false.
+gMOCK has public `mint`. Router `0x94cC…2bc4` is the Uniswap V3 SwapRouter02 on Base Sepolia. B4 delisted it. It holds 0 ETH and is not the capped router. Do not fund it. Do not broadcast this step again. The command below is the dry-run record. In the script order, after the token call, `allowedTokens` and `eip2612Tokens` for gMOCK are both false.
 
 ```bash
 forge script script/TestDemoSupply.s.sol:B4_DelistStaleAllowlist \
@@ -244,7 +249,7 @@ Read-only. Run these after the owner signs a step. They match the `require` line
 
 ### B4
 
-On Base swap `0x21A1ADf810e64B5bd1d530D31abA6856b8DEf688`. Each call returns `false`.
+Done. On Base swap `0x21A1ADf810e64B5bd1d530D31abA6856b8DEf688`, each call returned `false` after block 49779077. Tx hashes are in the B4 section above.
 
 ```bash
 cast call 0x21A1ADf810e64B5bd1d530D31abA6856b8DEf688 \

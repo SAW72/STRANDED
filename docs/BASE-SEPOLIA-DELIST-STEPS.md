@@ -1,18 +1,22 @@
-# Base Sepolia delist steps (unsigned)
+# Base Sepolia delist steps
 
-Testnet only. Each call needs the owner's explicit approval to sign.
+Testnet only. B4 is signed and on chain (Oct 24, 2026). Do not sign these two calls again.
 
-The owner signs these two calls from `0x30466A210961c0C2C13AF0A9d35dfC6E8858bA9D`. Chain id `84532` (Base Sepolia). Target is `GasRescueSwap` `0x21A1ADf810e64B5bd1d530D31abA6856b8DEf688`.
+Block 49778731, tx `0x46339f7fa2873b7b37f4172697077ab2a3e81cd9fd253a5c11ab52d63db968c7`: `allowedRouters(0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4)` is false.
+
+Block 49779077, tx `0x04150b45ed14097abf0fafe7809a0a9aec473be23911cde8f8a048ab47e36a3b`: gMOCK `0xE36c35cbF0373D77D00732f7B92dB4fB8fd37166` `allowedTokens` and `eip2612Tokens` are both false.
+
+The owner signed these two calls from `0x30466A210961c0C2C13AF0A9d35dfC6E8858bA9D`. Chain id `84532` (Base Sepolia). Target is `GasRescueSwap` `0x21A1ADf810e64B5bd1d530D31abA6856b8DEf688`.
 
 That owner is a 7702-delegated EOA. At block `48,077,171` its code is `0xef010063c0c19a282a1b52b07dd5a65b58948a07dae32b`, so the delegate is `0x63c0c19a282a1B52b07dD5a65b58948A07DAE32B`.
 
-No key is in this repo. These steps are not signed here and are not broadcast. `test/fork/BaseSepoliaDelistSteps.t.sol` impersonates the owner with `vm.prank` and sends the exact calldata bytes below through `LIVE_SWAP.call`.
+No key is in this repo. The calls below are the record of the signed B4 transactions. `test/fork/BaseSepoliaDelistSteps.t.sol` impersonates the owner with `vm.prank` and sends the exact calldata bytes below through `LIVE_SWAP.call`.
 
 ## Facts the steps rely on
 
 `src/GasRescueSwap.sol` exposes `setTokenAllowed(address,bool)`. `cast sig "setTokenAllowed(address,bool)"` is `0x15f69012`. `cast sig "setAllowedToken(address,bool)"` is `0x8aaa2284`, and that name is not a function in the source.
 
-gMOCK `0xE36c35cbF0373D77D00732f7B92dB4fB8fd37166` is publicly mintable (`mint(address,uint256)` succeeds from a non-owner) and allowlisted. At block `48,077,171` its supply is `10**39 + 10**19 + 1000` wei, about `1e39`.
+gMOCK `0xE36c35cbF0373D77D00732f7B92dB4fB8fd37166` is publicly mintable (`mint(address,uint256)` succeeds from a non-owner). It was allowlisted until B4. At block `48,077,171` its supply is `10**39 + 10**19 + 1000` wei, about `1e39`.
 
 `0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4` is Uniswap SwapRouter02. At that block `WETH9()` returns `0x4200000000000000000000000000000000000006`. It holds `0` ETH and it is not the capped router. The function that removes it from `allowedRouters` is `setRouterAllowed(address,bool)`. That is the only write to `allowedRouters`.
 
