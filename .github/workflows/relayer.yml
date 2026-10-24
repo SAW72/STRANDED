@@ -1,4 +1,4 @@
-# Relayer — testnet only (Base Sepolia 84532, Arb Sepolia 421614).
+# Relayer. Testnet only (Base Sepolia 84532, Arb Sepolia 421614).
 #
 # RELAYER_PRIVATE_KEY is consumed only at runtime from the repository secret
 # named RELAYER_PRIVATE_KEY. It is never written to a tracked or generated
@@ -37,7 +37,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Assert testnet-only stub (no secret, no RPC, no broadcast)
         shell: bash
@@ -62,6 +64,11 @@ jobs:
             echo "runtime step must reference secrets.RELAYER_PRIVATE_KEY"
             exit 1
           fi
+          req='.github/workflows/relayer-eth-account.txt'
+          if ! grep -F -- "--require-hashes -r ${req}" .github/workflows/relayer.yml >/dev/null; then
+            echo "runtime install must use the hashed requirements file"
+            exit 1
+          fi
           echo "stub_ok: no live RPC, no broadcast, no key in this job"
 
   # Offline unit tests for nonce reserve / kill switch / retry / rescue log.
@@ -74,10 +81,12 @@ jobs:
         working-directory: relayer
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "22"
           cache: npm
@@ -107,12 +116,22 @@ jobs:
       STUB_RPC: ${{ github.event.inputs.stub_rpc == 'false' && '0' || '1' }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Install Foundry
-        uses: foundry-rs/foundry-toolchain@v1
+        uses: foundry-rs/foundry-toolchain@908c540300062bd5a7e473851cdb4282204cee09 # v1.9.1
         with:
-          version: stable
+          version: v1.8.5
+
+      - name: Setup Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
+
+      - name: Install pinned eth-account
+        run: python -m pip install --quiet --require-hashes -r .github/workflows/relayer-eth-account.txt
 
       - name: Consume RELAYER_PRIVATE_KEY at runtime
         shell: bash
@@ -129,10 +148,10 @@ jobs:
           fi
           echo "relayer_secret=present"
 
-          # Derive address from process env only — key must not appear on argv
+          # Derive address from process env only. Key must not appear on argv
           # (not printf, not echo, not cast --private-key, not positional).
-          python3 -m pip install --quiet eth-account
-          ADDR=$(python3 -c 'import os; from eth_account import Account; print(Account.from_key(os.environ["RELAYER_PRIVATE_KEY"]).address)')
+          # eth-account is installed in the previous step, without this secret.
+          ADDR=$(python -c 'import os; from eth_account import Account; print(Account.from_key(os.environ["RELAYER_PRIVATE_KEY"]).address)')
           if [ -z "$ADDR" ]; then
             echo "failed to derive address from RELAYER_PRIVATE_KEY via env read"
             exit 1

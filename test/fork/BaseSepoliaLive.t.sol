@@ -15,6 +15,9 @@ contract BaseSepoliaLiveTest is Test {
     address internal constant LIVE_WETH = 0x4200000000000000000000000000000000000006;
     address internal constant LIVE_TOKEN = 0xE36c35cbF0373D77D00732f7B92dB4fB8fd37166;
     address internal constant LIVE_ROUTER = 0x94cC0AaC535CCDB3C01d6787D6413C739ae12bc4;
+    /// Pre-B4 snapshot. gMOCK and SwapRouter02 are still allowlisted here.
+    /// Forking latest fails after the owner signs B4.
+    uint256 internal constant PRE_B4_BLOCK = 49_702_128;
 
     IGasRescueSwapViews internal swap;
     bool internal forked;
@@ -24,7 +27,7 @@ contract BaseSepoliaLiveTest is Test {
         if (bytes(rpc).length == 0) {
             return;
         }
-        vm.createSelectFork(rpc);
+        vm.createSelectFork(rpc, PRE_B4_BLOCK);
         swap = IGasRescueSwapViews(LIVE_SWAP);
         forked = true;
     }
@@ -38,6 +41,7 @@ contract BaseSepoliaLiveTest is Test {
 
     function test_liveBase_immutablesAndPolicy() public onlyFork {
         assertEq(block.chainid, BASE_SEPOLIA_CHAIN_ID);
+        assertEq(block.number, PRE_B4_BLOCK);
         assertEq(swap.owner(), LIVE_OWNER);
         assertFalse(swap.paused());
         assertEq(swap.weth(), LIVE_WETH);
