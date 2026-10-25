@@ -227,7 +227,7 @@ function walkFiles(dir) {
     findings.push({ file: dir, line: 1, column: 1, rule: "symlink" });
     return { files: [], findings };
   }
-  if (!fs.statSync(root).isDirectory()) return { files: [], findings };
+  if (!fs.statSync(root).isDirectory()) return { files: [], findings, root };
   const files = [];
   const seen = new Set();
   const stack = [root];
@@ -272,7 +272,7 @@ function walkFiles(dir) {
       }
     }
   }
-  return { files, findings };
+  return { files, findings, root };
 }
 
 function readText(file) {
@@ -619,12 +619,13 @@ export function scanDist(distDir, options = {}) {
   const secrets = secretMaterial(env, options);
   const names = namesToFind(env, options);
   const walked = walkFiles(distDir);
+  const reportRoot = walked.root ?? distDir;
   for (const finding of walked.findings) {
-    pushFinding(findings, seen, { ...finding, file: relTo(distDir, finding.file) });
+    pushFinding(findings, seen, { ...finding, file: relTo(reportRoot, finding.file) });
   }
   const loaded = walked.files.map((file) => ({
     file,
-    rel: relTo(distDir, file),
+    rel: relTo(reportRoot, file),
     text: readText(file),
   }));
 

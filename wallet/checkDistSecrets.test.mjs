@@ -441,6 +441,17 @@ test("treats mnemonic, seed, phrase, and an embedded name fragment as secret", (
   assert.equal(rendered(findings).includes(seed), false);
 });
 
+test("reports a dist-relative path when dist is reached through a symlink", () => {
+  const dir = writeDist({
+    "assets/app.js": "const RELAYER_FETCH_TIMEOUT_MS = 1;\n",
+  });
+  const parent = tempDir();
+  const link = path.join(parent, "dist");
+  fs.symlinkSync(dir, link);
+  const findings = scanDist(link, { knownRoots: [], env: {} });
+  assert.equal(formatFinding(findings[0]), "assets/app.js:1:7 relayer-env-key");
+});
+
 test("flags any RELAYER_ name in built JS and not in a source map", () => {
   const dir = writeDist({
     "assets/app.js": "const RELAYER_FETCH_TIMEOUT_MS = 1;\n",
