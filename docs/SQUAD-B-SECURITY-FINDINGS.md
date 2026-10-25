@@ -16,14 +16,14 @@ The live Arb/Base Sepolia contracts are untouched. `GasRescueLens.LIVE_OWNER` (`
 
 | Contract | Change |
 | --- | --- |
-| `StrandedRegistry` | `whenNotPaused` on `depositBond`, `withdrawBond`, `reclaimExpired`, and on value-bearing `receive`. `claimFind` rejects a zero bounty recipient before the ETH call. |
+| `StrandedRegistry` | `whenNotPaused` on `depositBond` and on value-bearing `receive`. `withdrawBond` and `reclaimExpired` stay open while paused. `claimFind` rejects a zero bounty recipient before the ETH call. |
 | `GasRescueSwap` | Value-bearing `receive` reverts while paused. Zero-value `receive` stays a no-op and does not read storage, so it cannot break the WETH9 2300-gas unwrap. |
 | `GasRescue` | No behavior change. It already had the stack and it neither holds nor pays ETH. |
 | `GasRescueLens` | Not modified. |
 
 `setFinderFeeBps`, `setMinBond`, and the rescue allowlist setters stay callable while paused so the owner can tighten policy before unpausing. They do not move ETH.
 
-`reclaimExpired` used to succeed while paused (`test_M4_reclaimExpired_worksWhilePaused`). It now reverts `EnforcedPause`. Posters cannot pull a bond out during the kill switch. The owner must `unpause` before withdraw or reclaim.
+`withdrawBond` and `reclaimExpired` stay open while paused (`test_M4_reclaimExpired_worksWhilePaused`, `test_pause_depositsRevert_exitsStayOpen`). A poster can take unused bond out, and can reclaim an expired find, without waiting for `unpause`. New bond (`depositBond`, value-bearing `receive`, `registerFind`) and `claimFind` still revert `EnforcedPause`.
 
 ## GasRescueLens
 
@@ -94,10 +94,10 @@ There is no owner function that withdraws ETH. `setPermit2(address,bool)` always
 
 | Outflow | Who triggers it | Limit |
 | --- | --- | --- |
-| `withdrawBond(amount)` to `msg.sender` | That poster, contract not paused | `amount <= availableBond(poster)` which is `posterBond - lockedBond`. Cannot spend a find's locked bond. `amount == 0` transfers nothing. |
+| `withdrawBond(amount)` to `msg.sender` | That poster, including while paused | `amount <= availableBond(poster)` which is `posterBond - lockedBond`. Cannot spend a find's locked bond. `amount == 0` transfers nothing. |
 | `claimFind` bounty to `msg.sender` | The relayer on the matching `GasRescueSwap` receipt, contract not paused, same chain, before the find deadline | `bounty` wei from **this find's** `findBond` only. `bounty` was capped by the bond at register. Zero bounty skips the call. Other finds and unlocked deposits stay. |
 | `claimFind` refund to `find.poster` | Same claim | `findBond - bounty` of that find. |
-| `reclaimExpired` to `find.poster` | The poster, after `deadline`, contract not paused, same chain, not already claimed | The full remaining `findBond` for that find. Marks the find claimed so a late receipt cannot pay it. |
+| `reclaimExpired` to `find.poster` | The poster, after `deadline`, including while paused, same chain, not already claimed | The full remaining `findBond` for that find. Marks the find claimed so a late receipt cannot pay it. |
 
 The owner cannot withdraw bonds. `setFinderFeeBps` only changes an off-chain token-unit figure on `FindClaimed` (max 10%). It never sends ETH.
 
@@ -118,7 +118,7 @@ The live router inventory (0.0195 ETH at `0xFE22f32eF7a8f64B6c9E1CCAe31817B54184
 Pause authority is the `Ownable2Step` owner of **each** contract. There is no shared pause flag and no agent key. `renounceOwnership` reverts. Ownership moves only through `transferOwnership` then `acceptOwnership` on that contract.
 
 1. From the owner account, call `pause()` on each deployed instance that must stop: `GasRescueSwap` (the product), `StrandedRegistry` if that deployment exists, and the `GasRescue` harness if one is in use. One transaction per contract.
-2. While paused, rescues, registry registration, claims, bond deposits, bond withdraws, expired reclaims, and value-bearing `receive` revert `EnforcedPause`. Allowlist and fee setters still work. Use them to delist a token, router, or relayer, or to turn `permit2Enabled` off, before unpausing.
+2. While paused, rescues, registry registration, claims, bond deposits, and value-bearing `receive` revert `EnforcedPause`. `withdrawBond` and `reclaimExpired` stay open. Allowlist and fee setters still work. Use them to delist a token, router, or relayer, or to turn `permit2Enabled` off, before unpausing.
 3. Confirm with `paused() == true`. `GasRescueLens.status().paused` reads the swap it was constructed against.
 4. To resume, the same owner calls `unpause()` on that contract. A second `pause` while paused reverts `EnforcedPause`. A second `unpause` while running reverts `ExpectedPause`.
 5. This repo does not watch balances or pause automatically. Pause is a manual owner transaction.

@@ -247,6 +247,53 @@ contract StrandedRegistryTest is Test {
         registry.registerFind{value: BOND}(holder, address(token), FIND_AMOUNT, 0, ARB_SEPOLIA, block.timestamp + 1 days);
     }
 
+    /// @dev Deposits and new finds revert while paused. Unused-bond withdraw and
+    ///      expired reclaim still pay the poster.
+    function test_pause_depositsRevert_exitsStayOpen() public {
+        vm.prank(poster);
+        registry.depositBond{value: BOND}();
+        bytes32 key = _register(FIND_AMOUNT, 0);
+
+        vm.prank(owner);
+        registry.pause();
+
+        uint256 unusedBefore = poster.balance;
+        vm.prank(poster);
+        registry.withdrawBond(BOND);
+        assertEq(poster.balance, unusedBefore + BOND);
+        assertEq(registry.availableBond(poster), 0);
+        assertEq(registry.findBond(key), BOND);
+
+        vm.prank(poster);
+        vm.expectRevert(Pausable.EnforcedPause.selector);
+        registry.depositBond{value: BOND}();
+
+        uint256 credited = registry.posterBond(poster);
+        vm.prank(poster);
+        (bool paid,) = address(registry).call{value: BOND}("");
+        assertFalse(paid);
+        assertEq(registry.posterBond(poster), credited);
+
+        vm.prank(poster);
+        (bool zeroOk,) = address(registry).call{value: 0}("");
+        assertTrue(zeroOk);
+
+        vm.prank(poster);
+        vm.expectRevert(Pausable.EnforcedPause.selector);
+        registry.registerFind{value: BOND}(
+            holder, address(token), FIND_AMOUNT, 0, ARB_SEPOLIA, block.timestamp + 1 days
+        );
+
+        vm.warp(block.timestamp + 2 days);
+        uint256 reclaimBefore = poster.balance;
+        vm.prank(poster);
+        registry.reclaimExpired(key);
+        assertEq(poster.balance, reclaimBefore + BOND);
+        assertEq(registry.findBond(key), 0);
+        assertTrue(registry.claimed(key));
+        assertEq(address(registry).balance, 0);
+    }
+
     // --- H-1 withdrawBond must respect findBond locks --------------------------------
 
     function test_H1_withdrawBond_revertsWhenFindBondLocked() public {
@@ -437,7 +484,7 @@ contract StrandedRegistryTest is Test {
         registry.reclaimExpired(key);
     }
 
-    function test_M4_reclaimExpired_revertsWhilePaused() public {
+    function test_M4_reclaimExpired_worksWhilePaused() public {
         bytes32 key = _register(FIND_AMOUNT, 0);
         vm.prank(owner);
         registry.pause();
@@ -445,16 +492,10 @@ contract StrandedRegistryTest is Test {
 
         uint256 posterBefore = poster.balance;
         vm.prank(poster);
-        vm.expectRevert(Pausable.EnforcedPause.selector);
-        registry.reclaimExpired(key);
-        assertEq(poster.balance, posterBefore);
-        assertEq(registry.findBond(key), BOND);
-
-        vm.prank(owner);
-        registry.unpause();
-        vm.prank(poster);
         registry.reclaimExpired(key);
         assertEq(poster.balance, posterBefore + BOND);
+        assertEq(registry.findBond(key), 0);
+        assertTrue(registry.claimed(key));
     }
 
     // --- L-4 claimFind requires find.chainId == block.chainid ------------------------

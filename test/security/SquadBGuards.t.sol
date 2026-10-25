@@ -479,35 +479,36 @@ contract SquadBGuardsTest is Test {
         registry.depositBond{value: amount}();
 
         vm.prank(poster);
-        vm.expectRevert(Pausable.EnforcedPause.selector);
         registry.withdrawBond(0);
         vm.prank(poster);
-        vm.expectRevert(Pausable.EnforcedPause.selector);
+        vm.expectRevert(StrandedRegistry.InsufficientBond.selector);
         registry.withdrawBond(type(uint256).max);
 
+        uint256 credited = registry.posterBond(caller);
         vm.deal(caller, amount);
         vm.prank(caller);
         (bool ok,) = address(registry).call{value: amount}("");
         assertFalse(ok);
-        assertEq(registry.posterBond(caller), 0);
-
-        vm.warp(block.timestamp + 2 days);
-        vm.prank(poster);
-        vm.expectRevert(Pausable.EnforcedPause.selector);
-        registry.reclaimExpired(key);
+        assertEq(registry.posterBond(caller), credited);
 
         vm.prank(relayer);
         vm.expectRevert(Pausable.EnforcedPause.selector);
         registry.claimFind(key, 1);
+
+        vm.warp(block.timestamp + 2 days);
+        uint256 posterBefore = poster.balance;
+        vm.prank(poster);
+        registry.reclaimExpired(key);
+        assertEq(poster.balance, posterBefore + BOND);
+        assertEq(registry.findBond(key), 0);
+        assertTrue(registry.claimed(key));
 
         vm.deal(poster, BOND);
         vm.prank(poster);
         vm.expectRevert(Pausable.EnforcedPause.selector);
         registry.registerFind{value: BOND}(holder, address(token), 1, 0, ARB_SEPOLIA, block.timestamp + 1 days);
 
-        assertEq(registry.findBond(key), BOND);
-        assertEq(address(registry).balance, BOND);
-        assertFalse(registry.claimed(key));
+        assertEq(address(registry).balance, 0);
     }
 
     function testFuzz_registry_reclaim_unauthorized(

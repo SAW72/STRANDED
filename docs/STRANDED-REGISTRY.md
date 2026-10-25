@@ -48,7 +48,7 @@ Exact `amountIn == find.amount` is required. Partial rescues do not claim (follo
 availableBond(poster) = posterBond[poster] - lockedBond[poster]
 ```
 
-`withdrawBond` pays only `availableBond`. Active find locks cannot be withdrawn. That keeps `claimFind` solvent: the ETH for bounty + leftover refund stays in the contract until claim or reclaim.
+`withdrawBond` pays only `availableBond`. Active find locks cannot be withdrawn. That keeps `claimFind` solvent: the ETH for bounty + leftover refund stays in the contract until claim or reclaim. `withdrawBond` stays open while the registry is paused.
 
 On a valid claim the contract pays bounty (if any) and refunds the leftover **from that find's bond only**, then drops that amount from `lockedBond` and `posterBond`. Other finds and unused `depositBond` / `receive` balances stay.
 
@@ -68,7 +68,7 @@ On a valid claim the contract pays bounty (if any) and refunds the leftover **fr
 
 ## Expired reclaim (M-4)
 
-`reclaimExpired(findKey)` — **poster only**, and only while the registry is not paused:
+`reclaimExpired(findKey)` — **poster only**, any pause state:
 
 1. Find exists, caller is `find.poster`, not yet claimed, `find.chainId == block.chainid`, `block.timestamp > deadline`.
 2. Clears `findBond`, marks `claimed`, releases the lock, refunds the full find bond to the poster.
