@@ -31,7 +31,7 @@ jobs:
         run: forge --version
 
       - name: Run tests
-        run: forge test -vv --no-match-path test/fork/TestDemoSupplyFork.t.sol
+        run: forge test -vv --no-match-path test/fork/TestDemoSupplyFork.t.sol --no-match-contract ArbSepoliaH1Test
 
   # Public RPC. A missing URL must fail the test (MissingRpc), not vm.skip.
   fork-base:
@@ -89,6 +89,13 @@ jobs:
           forge test --match-path test/fork/TestDemoSupplyFork.t.sol --match-test test_arb_simulatesDeployAllowlistAndRecommendedCap -vv \
             2>&1 | tee fork-summary.txt
           grep -F "1 passed; 0 failed; 0 skipped" fork-summary.txt
+
+      - name: Assert post-H1 Arb state
+        run: |
+          set -euo pipefail
+          forge test --match-path test/fork/ArbSepoliaH1.t.sol -vv \
+            2>&1 | tee h1-summary.txt
+          grep -F "15 passed; 0 failed; 0 skipped" h1-summary.txt
 
   # Base Sepolia fork proof for the delist steps. No key and no broadcast.
   # This workflow never sets BASE_SEPOLIA_RPC_URL. The job always uses the
