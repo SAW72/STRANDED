@@ -1,0 +1,30 @@
+version: 2
+updates:
+  # First-party npm. main had no dependabot.yml. Security updates were
+  # already opening npm PRs for these three apps. Weekly version updates
+  # keep that ecosystem. Vendored lib/** is configured below and ignored.
+  - package-ecosystem: "npm"
+    directories:
+      - "/wallet"
+      - "/relayer"
+      - "/points-worker"
+    schedule:
+      interval: "weekly"
+
+  # Vendored tree committed under lib/ (there is no .gitmodules). Each
+  # path is a directory that contains a package.json. dependency-name "*"
+  # ignores every dependency for version updates and for security updates.
+  # exclude-paths is version-updates only, so it would not stop the grouped
+  # security PRs that edit lib/openzeppelin-contracts.
+  - package-ecosystem: "npm"
+    directories:
+      - "/lib/forge-std"
+      - "/lib/openzeppelin-contracts"
+      - "/lib/openzeppelin-contracts/contracts"
+      - "/lib/openzeppelin-contracts/lib/forge-std"
+      - "/lib/openzeppelin-contracts/lib/forge-std/lib/ds-test"
+      - "/lib/openzeppelin-contracts/scripts/solhint-custom"
+    schedule:
+      interval: "weekly"
+    ignore:
+      - dependency-name: "*"
