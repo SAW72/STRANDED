@@ -48,7 +48,7 @@ Exact `amountIn == find.amount` is required. Partial rescues do not claim (follo
 availableBond(poster) = posterBond[poster] - lockedBond[poster]
 ```
 
-`withdrawBond` pays only `availableBond`. Active find locks cannot be withdrawn. That keeps `claimFind` solvent: the ETH for bounty + leftover refund stays in the contract until claim or reclaim.
+`withdrawBond` pays only `availableBond`. Active find locks cannot be withdrawn. That keeps `claimFind` solvent: the ETH for bounty + leftover refund stays in the contract until claim or reclaim. `withdrawBond` stays open while the registry is paused.
 
 On a valid claim the contract pays bounty (if any) and refunds the leftover **from that find's bond only**, then drops that amount from `lockedBond` and `posterBond`. Other finds and unused `depositBond` / `receive` balances stay.
 
@@ -64,7 +64,7 @@ On a valid claim the contract pays bounty (if any) and refunds the leftover **fr
 
 ## Receive (M-3)
 
-`receive()` credits `posterBond[msg.sender]` and emits `BondDeposited`. Naked ETH is not left unaccounted. The credit is unlocked (`lockedBond` unchanged) and can be withdrawn. `receive` is not `nonReentrant` so a refund recipient that forwards value back cannot brick `claimFind` / `withdrawBond`.
+`receive()` credits `posterBond[msg.sender]` and emits `BondDeposited`. Naked ETH is not left unaccounted. The credit is unlocked (`lockedBond` unchanged) and can be withdrawn. `receive` is not `nonReentrant` so a refund recipient that forwards value back cannot brick `claimFind` / `withdrawBond`. A value-bearing `receive` reverts while the registry is paused. A zero-value call stays a no-op.
 
 ## Expired reclaim (M-4)
 

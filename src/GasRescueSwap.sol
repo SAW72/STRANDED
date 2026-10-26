@@ -20,8 +20,9 @@ import {IWETH} from "./interfaces/IWETH.sol";
 /// @notice Scout #1 product: swap a slice of stranded `tokenIn` for native gas and
 ///         same-chain move-out of the remainder to `to`. Non-proxy. Testnet only.
 ///         Never treats `msg.sender` as a user/fee/native/remainder substitute.
-///         Owner is `Ownable2Step`; `renounceOwnership` is disabled. Mainnet must
-///         use a multisig or timelock for the owner role (docs-only; not deployed here).
+///         Owner is `Ownable2Step`; `renounceOwnership` is disabled. The same
+///         owner pauses and unpauses. Mainnet must use a multisig or timelock
+///         for the owner role (docs-only; not deployed here).
 contract GasRescueSwap is IGasRescueSwap, IGasRescueSwapProof, Ownable2Step, Pausable, ReentrancyGuard, EIP712 {
     using SafeERC20 for IERC20;
 
@@ -122,7 +123,18 @@ contract GasRescueSwap is IGasRescueSwap, IGasRescueSwapProof, Ownable2Step, Pau
         }
     }
 
-    receive() external payable {}
+    /// @dev Accepts WETH9 unwraps (`withdraw` uses a 2300-gas `transfer`) and
+    ///      donations. Donations are wrap-swept to the owner on the next rescue.
+    ///      The pause flag is read here only after `rescueWithPermit` /
+    ///      `rescueWithPermit2` have already warmed it via `whenNotPaused`, so
+    ///      the unwrap still fits in the stipend. A cold 2300-gas `transfer`
+    ///      from outside a rescue cannot pay this contract; wallets use a full
+    ///      call. Value-bearing calls revert while paused. Zero-value calls
+    ///      stay a no-op and do not touch storage.
+    receive() external payable {
+        if (msg.value == 0) return;
+        _requireNotPaused();
+    }
 
     /// @notice Disabled. Owner remains settable only via two-step transfer.
     function renounceOwnership() public pure override {

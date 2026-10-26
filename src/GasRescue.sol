@@ -18,8 +18,10 @@ import {IGasRescue} from "./interfaces/IGasRescue.sol";
 ///         Not the product. Real rescue is `GasRescueSwap` (swap-for-gas + same-chain move-out).
 ///         Relayer permit-pulls an allowlisted EIP-2612 ERC-20, pays `feeAmount` to `feeTo`,
 ///         and returns the remainder to `order.user`. Kept compiling for harness tests.
-///         Owner is `Ownable2Step`; `renounceOwnership` is disabled. Mainnet must
-///         use a multisig or timelock for the owner role (docs-only; not deployed here).
+///         Owner is `Ownable2Step`; `renounceOwnership` is disabled. The same
+///         owner pauses and unpauses. This contract holds and pays no ETH.
+///         Mainnet must use a multisig or timelock for the owner role
+///         (docs-only; not deployed here).
 contract GasRescue is IGasRescue, Ownable2Step, Pausable, ReentrancyGuard, EIP712 {
     using SafeERC20 for IERC20;
 
