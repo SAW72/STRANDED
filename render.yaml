@@ -21,6 +21,14 @@ services:
       - type: rewrite
         source: /*
         destination: /index.html
+    # Declared only. A git push does not apply this block, and Render does not
+    # read a _headers file. These rules go live only after a Blueprint sync
+    # or the same rules in Dashboard > Settings > Headers. See DEPLOY.md.
+    # Live: nosniff on strandedtoken.trade and on gas-rescue.onrender.com.
+    # HSTS is only on gas-rescue.onrender.com, and it is Render's default
+    # (max-age=315360000; includeSubdomains; preload), not the value below.
+    # strandedtoken.trade sends no HSTS, CSP, X-Frame-Options, or Referrer-Policy.
+    # Spencer's step. HSTS for that hostname belongs at Cloudflare.
     headers:
       - path: /*
         name: X-Content-Type-Options
@@ -31,7 +39,6 @@ services:
       - path: /*
         name: Referrer-Policy
         value: strict-origin-when-cross-origin
-      # Not live until the Blueprint is synced. See DEPLOY.md. Spencer's step.
       - path: /*
         name: Content-Security-Policy
         value: "frame-ancestors 'none'"

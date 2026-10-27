@@ -27,9 +27,9 @@ The wallet must be used at https://strandedtoken.trade. https://gas-rescue.onren
 
 ### Response headers
 
-`render.yaml` lists these headers for the static site `stranded` on `path: /*`:
+`render.yaml` declares these headers for the static site `stranded` on `path: /*`. A git push does not apply them. Render static sites do not read a Netlify-style `_headers` file ([Static site headers](https://render.com/docs/static-site-headers), [Blueprint spec `headers`](https://render.com/docs/blueprint-spec)). The rules below are applied only when someone syncs the Blueprint, or sets the same rules on the static site under **Settings → Headers**.
 
-| Header | Value |
+| Header | Declared value |
 |---|---|
 | `X-Content-Type-Options` | `nosniff` |
 | `X-Frame-Options` | `DENY` |
@@ -39,7 +39,43 @@ The wallet must be used at https://strandedtoken.trade. https://gas-rescue.onren
 
 `Content-Security-Policy` in that file is only `frame-ancestors 'none'`. It does not set `default-src` or any other directive.
 
-These `render.yaml` headers are not live until the Render Blueprint is synced. The live host https://gas-rescue.onrender.com currently serves `X-Content-Type-Options: nosniff` and `Strict-Transport-Security: max-age=315360000; includeSubdomains; preload`. That HSTS value is the host edge policy, not the blueprint's `max-age=31536000; includeSubDomains`. `X-Frame-Options`, `Referrer-Policy`, and `Content-Security-Policy` are still absent until Spencer syncs the Blueprint. Syncing the Blueprint, or adding the headers on the static site in the dashboard, is Spencer's step. A git push does not apply them.
+Checked with HEAD on 2026-10-27. `strandedtoken.trade` is Cloudflare in front of `gas-rescue.onrender.com`. None of the clickjacking headers or the referrer header are on the wire. HSTS is live only on the Render origin, and that value is Render's default for `*.onrender.com`, not the blueprint value.
+
+| URL | Status | Security headers on that response |
+|---|---|---|
+| `https://strandedtoken.trade/` (also `/points` and `/points/`) | 200 | `X-Content-Type-Options: nosniff` only. No `Strict-Transport-Security`, no `Content-Security-Policy`, no `X-Frame-Options`, no `Referrer-Policy`. |
+| `https://www.strandedtoken.trade/` | 301 to the apex | None of those headers. The redirect itself does not send `nosniff`. |
+| `https://gas-rescue.onrender.com/` | 200 | `Strict-Transport-Security: max-age=315360000; includeSubdomains; preload` and `X-Content-Type-Options: nosniff`. No `Content-Security-Policy`, no `X-Frame-Options`, no `Referrer-Policy`. |
+
+Applying the declared response headers takes one of these. This repository change does none of them.
+
+1. Spencer syncs the Render Blueprint for `SAW72/STRANDED`, so the `headers` field is applied. Render matches those paths on every custom domain attached to the site. A git auto-deploy does not sync the Blueprint. Confirm with the curl below after the sync.
+2. Spencer adds the same rules in the Render Dashboard: **stranded → Settings → Headers**.
+3. A Cloudflare response-header Transform Rule on `strandedtoken.trade` and `www.strandedtoken.trade`. HSTS for the public hostname belongs here. Cloudflare fronts that name and currently sends no HSTS on it. The Render-default HSTS exists only on `gas-rescue.onrender.com`.
+
+`frame-ancestors`, `X-Frame-Options`, and `Strict-Transport-Security` cannot be set from HTML. Browsers ignore them in `<meta>`.
+
+The wallet shell does set the document referrer policy, which a meta tag can set:
+
+```html
+<meta name="referrer" content="strict-origin-when-cross-origin" />
+```
+
+That tag is in `wallet/index.html`. The build copies the shell to `wallet/dist/points/index.html`, so `/` and `/points` both get it. It applies after the browser parses the HTML. It is not a `Referrer-Policy` response header, and it does not cover the `www` redirect.
+
+Check the response headers:
+
+```
+curl -sSI https://strandedtoken.trade/ https://www.strandedtoken.trade/ https://gas-rescue.onrender.com/
+```
+
+Until one of the three steps above, expect `strict-transport-security` only on `gas-rescue.onrender.com`, with `max-age=315360000; includeSubdomains; preload`. Expect no `content-security-policy`, `x-frame-options`, or `referrer-policy` on any of the three. After this wallet change is on `main`, the document policy is in the HTML:
+
+```
+curl -sS https://strandedtoken.trade/ https://strandedtoken.trade/points/ | grep -F 'name="referrer"'
+```
+
+Expect one match per URL, each with `content="strict-origin-when-cross-origin"`.
 
 ## 3. Secrets (dashboard only)
 
