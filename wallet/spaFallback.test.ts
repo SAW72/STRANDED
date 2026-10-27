@@ -64,6 +64,7 @@ describe("seo shell", () => {
     expect(html).toContain(`property="og:description"`);
     expect(html).toContain(`property="og:image" content="https://strandedtoken.trade/stranded/idle.webp"`);
     expect(html).toContain('name="description"');
+    expect(html).toContain('<meta name="referrer" content="strict-origin-when-cross-origin" />');
     expect(html.indexOf(HEADLINE)).toBeLessThan(html.indexOf("<script"));
   });
 });
