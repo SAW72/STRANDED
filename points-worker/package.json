@@ -6,7 +6,7 @@
     "test": "vitest run && node --test test/*.test.mjs"
   },
   "dependencies": {
-    "viem": "^2.37.8"
+    "viem": "^2.57.11"
   },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "^1.4.4",
