@@ -1,8 +1,17 @@
 version: 2
 updates:
-  # First-party npm. main had no dependabot.yml. Security updates were
-  # already opening npm PRs for these three apps. Weekly version updates
-  # keep that ecosystem. Vendored lib/** is configured below and ignored.
+  # First-party npm only. Vendored Foundry trees under lib/** are a
+  # committed snapshot (lib is a normal tree, and there is no root
+  # .gitmodules). Do not add an updates entry for them.
+  #
+  # PR #71 listed those directories and ignored dependency-name "*".
+  # Dependabot still queued a version job for /lib/forge-std and
+  # /lib/openzeppelin-contracts. The grouped security job then set
+  # source.directories to /lib/openzeppelin-contracts and /points-worker
+  # with ignore-conditions and exclude-paths both empty, so the ignore
+  # never applied. exclude-paths is a version-updates option and would
+  # not have been copied into that security job. Leaving lib/** unlisted
+  # is what keeps those paths off both jobs.
   - package-ecosystem: "npm"
     directories:
       - "/wallet"
@@ -10,21 +19,3 @@ updates:
       - "/points-worker"
     schedule:
       interval: "weekly"
-
-  # Vendored tree committed under lib/ (there is no .gitmodules). Each
-  # path is a directory that contains a package.json. dependency-name "*"
-  # ignores every dependency for version updates and for security updates.
-  # exclude-paths is version-updates only, so it would not stop the grouped
-  # security PRs that edit lib/openzeppelin-contracts.
-  - package-ecosystem: "npm"
-    directories:
-      - "/lib/forge-std"
-      - "/lib/openzeppelin-contracts"
-      - "/lib/openzeppelin-contracts/contracts"
-      - "/lib/openzeppelin-contracts/lib/forge-std"
-      - "/lib/openzeppelin-contracts/lib/forge-std/lib/ds-test"
-      - "/lib/openzeppelin-contracts/scripts/solhint-custom"
-    schedule:
-      interval: "weekly"
-    ignore:
-      - dependency-name: "*"
