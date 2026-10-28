@@ -11,6 +11,6 @@
   },
   "dependencies": {
     "better-sqlite3": "^12.11.1",
-    "viem": "^2.21.0"
+    "viem": "^2.57.11"
   }
 }
