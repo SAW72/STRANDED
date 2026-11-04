@@ -1,0 +1,34 @@
+name: Tester sign-up
+description: PENDING LAWYER REVIEW. Sign up to test Stranded. GitHub issues are public.
+title: "[Tester] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        # PENDING LAWYER REVIEW
+
+        **GitHub issues are public. Your email and wallet address will be visible to anyone.** Do not submit this form if that information must stay private.
+
+        Test now. An airdrop may come later; amount TBD.
+
+        Eligibility is subject to terms, jurisdiction restrictions, and sanctions screening.
+
+        We only use this to contact you about testing. Never share private keys or seed phrases.
+
+        Stranded is testnet only: Base Sepolia and Arb Sepolia. This form asks for an email and, if you want, a public wallet address. It does not ask for a private key or a seed phrase. Do not put either in the fields below.
+  - type: input
+    id: email
+    attributes:
+      label: Email
+      description: Required. We only use this to contact you about testing. Never share private keys or seed phrases.
+      placeholder: you@example.com
+    validations:
+      required: true
+  - type: input
+    id: wallet-address
+    attributes:
+      label: Wallet address (optional)
+      description: Optional public address only. We only use this to contact you about testing. Never share private keys or seed phrases.
+      placeholder: Public address only
+    validations:
+      required: false

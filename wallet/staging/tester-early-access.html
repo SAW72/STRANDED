@@ -1,0 +1,155 @@
+<!doctype html>
+<!--
+  UNPUBLISHED STAGING PAGE. PENDING LAWYER REVIEW.
+  Unpublished until Spencer approves.
+  This file is not in wallet/public, is not imported by the app, and is not
+  copied to wallet/dist. render.yaml publishes wallet/dist only. The live host
+  rewrites every path to /index.html. Do not link this page from navigation,
+  do not add it to render.yaml, and do not move it into wallet/public.
+  robots is noindex so a mistaken copy is not listed as a public page.
+  When Spencer approves publication, remove the noindex tag and only then
+  give the page a strandedtoken.trade canonical URL.
+  og:url and canonical point at this source file, not at the live site.
+-->
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="referrer" content="strict-origin-when-cross-origin" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>Stranded: swap a slice for gas on testnet</title>
+    <meta
+      name="description"
+      content="Test Stranded on Base Sepolia and Arb Sepolia. A stranded token can swap a slice for native gas and move the rest on the same chain. Test now. An airdrop may come later; amount TBD."
+    />
+    <meta property="og:title" content="Stranded: swap a slice for gas on testnet" />
+    <meta
+      property="og:description"
+      content="Test Stranded on Base Sepolia and Arb Sepolia. A stranded token can swap a slice for native gas and move the rest on the same chain. Test now. An airdrop may come later; amount TBD."
+    />
+    <meta property="og:image" content="https://strandedtoken.trade/stranded/idle.webp" />
+    <meta
+      property="og:url"
+      content="https://github.com/SAW72/STRANDED/blob/grok/stranded-tester-early-access/wallet/staging/tester-early-access.html"
+    />
+    <meta property="og:type" content="website" />
+    <link
+      rel="canonical"
+      href="https://github.com/SAW72/STRANDED/blob/grok/stranded-tester-early-access/wallet/staging/tester-early-access.html"
+    />
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #fff4e8;
+        --panel: #fffaf3;
+        --line: #f0c9b0;
+        --text: #3d2c29;
+        --muted: #8a6e68;
+        --accent: #ff8a65;
+        --warn: #e0912a;
+        --danger: #d4524a;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        color: var(--text);
+        font-family: ui-rounded, "Trebuchet MS", "Avenir Next", "Segoe UI", sans-serif;
+        background:
+          radial-gradient(900px 480px at 90% -10%, #ffe0c2 0%, transparent 55%),
+          radial-gradient(700px 420px at -10% 0%, #ccefff 0%, transparent 50%),
+          var(--bg);
+        line-height: 1.5;
+      }
+      main { max-width: 42rem; margin: 0 auto; padding: 1.5rem 1.25rem 3rem; }
+      img { width: 4.5rem; height: auto; }
+      h1 { font-size: 2rem; line-height: 1.15; margin: 0.5rem 0; }
+      h2 { font-size: 1.25rem; margin: 2rem 0 0.5rem; }
+      p, li { font-size: 1rem; }
+      a { color: #8a3d28; }
+      .banner, .callout, .danger {
+        border: 1px solid var(--line);
+        background: var(--panel);
+        border-radius: 12px;
+        padding: 0.85rem 1rem;
+      }
+      .banner { border-color: var(--warn); }
+      .danger { border-color: var(--danger); }
+      .muted { color: var(--muted); }
+      .cta {
+        display: inline-block;
+        margin: 0.4rem 0;
+        padding: 0.65rem 0.9rem;
+        background: var(--accent);
+        color: var(--text);
+        text-decoration: none;
+        border-radius: 999px;
+        font-weight: 700;
+      }
+      ul { padding-left: 1.2rem; }
+      footer { margin-top: 2rem; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <p class="banner"><strong>PENDING LAWYER REVIEW.</strong> This page is a draft. It is not on the live site. Unpublished until Spencer approves.</p>
+      <img src="../public/stranded/idle.webp" alt="Stranded" />
+      <h1>Test Stranded</h1>
+      <p>Early access here means a place on the tester list for the testnet wallet. Nothing on this page is a sale.</p>
+      <p class="callout"><strong>Test now. An airdrop may come later; amount TBD.</strong></p>
+      <p>Eligibility is subject to terms, jurisdiction restrictions, and sanctions screening. Terms are not published on this draft. An airdrop is not promised.</p>
+
+      <h2>What Stranded is</h2>
+      <p>Tokens with no ETH can't move. Stranded finds them, swaps a slice for gas, and carries the rest home.</p>
+      <p>The product is GasRescueSwap. The holder signs once. An allowlisted relayer pays the gas. A slice of the token is swapped for native gas, and the remainder is sent to a wallet the holder chooses on the same chain. If any step fails, nothing moves.</p>
+      <p>Testnet only: Base Sepolia (84532) and Arb Sepolia, also called Arbitrum Sepolia (421614). Arb Sepolia is the primary testnet. Base Sepolia is secondary. There is no mainnet code path and no bridge in v1.</p>
+      <p>The wallet you actually test is the existing site at <a href="https://strandedtoken.trade">https://strandedtoken.trade</a>. This draft is not that site. STRANDED is experimental, unaudited software provided as is, without warranties. It is a project of Steward of the King LLC.</p>
+
+      <h2>What to try</h2>
+      <ol>
+        <li>Open the wallet and pick Base Sepolia or Arb Sepolia. Mainnet is not offered.</li>
+        <li>Connect an injected wallet. If it is on another network, switch to the testnet you picked. Use a wallet that does not hold mainnet funds.</li>
+        <li>The wallet reads your token balance on that testnet. It does not invent a balance.</li>
+        <li>Review every order field the wallet shows. Confirm the details. Only then does it ask you to sign. Cancel signs nothing.</li>
+        <li>On Arb Sepolia, a connected wallet can request a tDEMO drip. tDEMO is the Stranded test demo token. The faucet cannot mint. It only sends tokens it already holds.</li>
+      </ol>
+      <p>The rescue path is for a token holder who has no native ETH. The relayer pays that gas. If you still need testnet ETH for something else, use a public faucet below.</p>
+
+      <h2>Testnet ETH faucets</h2>
+      <p>These faucets send testnet ETH. They do not send mainnet ETH. Pick the faucet for the testnet you selected in the wallet.</p>
+      <ul>
+        <li><a href="https://docs.base.org/get-started/get-funds">Base docs: Get funds</a> (Base Sepolia)</li>
+        <li><a href="https://www.alchemy.com/faucets/base-sepolia">Alchemy Base Sepolia faucet</a></li>
+        <li><a href="https://faucet.quicknode.com/base/sepolia">QuickNode Base Sepolia faucet</a></li>
+        <li><a href="https://www.alchemy.com/faucets/arbitrum-sepolia">Alchemy Arbitrum Sepolia faucet</a></li>
+        <li><a href="https://faucet.quicknode.com/arbitrum/sepolia">QuickNode Arbitrum Sepolia faucet</a></li>
+      </ul>
+
+      <h2>Sign up to test</h2>
+      <div class="danger">
+        <p><strong>GitHub issues are public. Your email and wallet address will be visible to anyone.</strong> Do not use this form if that information must stay private.</p>
+      </div>
+      <p><a class="cta" href="https://github.com/SAW72/STRANDED/issues/new?template=tester-signup.yml">Sign up to test</a></p>
+      <p>We only use this to contact you about testing. Never share private keys or seed phrases.</p>
+      <p>The form asks for an email, which is required, and a wallet address, which is optional. It does not ask for a private key or a seed phrase.</p>
+
+      <h2>Report what you find</h2>
+      <p>A bug report does not need your email. Open a normal issue and include what you did, what you expected, what happened, and the transaction hash if you have one.</p>
+      <p><a class="cta" href="https://github.com/SAW72/STRANDED/issues/new">Report a bug</a></p>
+      <p>We only use this to contact you about testing. Never share private keys or seed phrases.</p>
+
+      <h2>Official links</h2>
+      <ul>
+        <li>Wallet: <a href="https://strandedtoken.trade">https://strandedtoken.trade</a></li>
+        <li>Code: <a href="https://github.com/SAW72/STRANDED">https://github.com/SAW72/STRANDED</a></li>
+        <li>Issues: <a href="https://github.com/SAW72/STRANDED/issues">https://github.com/SAW72/STRANDED/issues</a></li>
+        <li>Arb Sepolia relayer: <a href="https://stranded-relayer-arb.onrender.com">https://stranded-relayer-arb.onrender.com</a></li>
+      </ul>
+      <p>No other site or account is an official sign-up. We never ask for a private key, a seed phrase, or a transfer of funds.</p>
+      <p>We only use this to contact you about testing. Never share private keys or seed phrases.</p>
+
+      <footer>
+        <p class="muted">PENDING LAWYER REVIEW. Eligibility is subject to terms, jurisdiction restrictions, and sanctions screening. Test now. An airdrop may come later; amount TBD.</p>
+      </footer>
+    </main>
+  </body>
+</html>
