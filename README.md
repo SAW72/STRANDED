@@ -256,15 +256,13 @@ See [wallet/README.md](wallet/README.md). Copy `wallet/.env.example` to `wallet/
 
 **PENDING LAWYER REVIEW.** This section is a draft. Unpublished until Spencer approves. The tester page is not on the live site and is not linked from the wallet navigation.
 
-Stranded runs on production smart contracts that use real funds.
+Stranded runs on testnet only (Base Sepolia 84532 and Arb Sepolia 421614). Test tokens have no monetary value. Use a wallet that holds no real funds.
 
 Testing is optional and at your own risk. You may lose any funds you use, and we do not ask you to deposit funds. Testers can earn points for testing. Points have no cash or monetary value, are not transferable, cannot be sold or exchanged, and are not tokens, securities or a promise of any future token, airdrop or payment. Points are not earned by depositing funds or by the amount of funds used. We may change or end the points program at any time.
 
 Points are per task or per bug reported, never per amount or volume. There are no leaderboards, ranks, or prizes.
 
 Nothing here is an offer of tokens, value or any investment.
-
-Testers may be considered for future recognition, subject to terms, eligibility and sanctions screening. Recognition does not depend on depositing or using funds, and nothing here is an offer of tokens or value.
 
 Eligibility is subject to terms, jurisdiction restrictions, and sanctions screening.
 
@@ -288,19 +286,25 @@ The page source is [`wallet/staging/tester-early-access.html`](wallet/staging/te
 
 We only use this to contact you about testing. Never share private keys or seed phrases.
 
-GitHub issues are public. Your email and wallet address will be visible to anyone.
+Do not post your email, wallet address or any key here. GitHub issues are public. We will reply in this issue with a link to a private form for contact details. Official contact: [TBD by Spencer].
 
-The form asks for an email (required) and a wallet address (optional). It also requires a sanctions and terms attestation. It does not ask for a private key or a seed phrase. A bug report can be a normal issue and does not need an email: https://github.com/SAW72/STRANDED/issues/new
+This sign-up collects only your GitHub handle, which is the account that opens this issue. It also requires a sanctions and terms attestation. Do not add any other personal details. A bug report can be a normal issue: https://github.com/SAW72/STRANDED/issues/new
 
 ## Airdrop interest (draft, unpublished) — PENDING LAWYER REVIEW
 
-**PENDING LAWYER REVIEW.** This section is a separate draft from the tester page. Unpublished until Spencer approves. It is not on the live site and is not linked from the wallet navigation.
+**PENDING LAWYER REVIEW.** This section is a separate draft from the tester page. Unpublished until Spencer approves. It is not on the live site and is not linked from the wallet navigation. The airdrop page does not link to the tester page.
 
-Test now. An airdrop may come later; amount TBD.
+We have not decided whether any airdrop will happen. No airdrop is promised, and there is no amount, date or schedule.
 
-An airdrop is not promised. Eligibility is subject to terms, jurisdiction restrictions, and sanctions screening.
+Registering interest does not make you eligible for anything and does not reserve anything for you.
+
+Testing, points and any use of the app have no bearing on this page.
 
 Nothing here is an offer of tokens, value or any investment.
+
+You may not take part if you are in a jurisdiction subject to comprehensive U.S. sanctions, or if you are on a U.S. sanctions list, including OFAC's SDN List.
+
+See the Tester Terms, Privacy Notice and Sanctioned Jurisdictions pages. Airdrop Interest Terms are a separate draft, linked from the airdrop page: [`wallet/staging/airdrop-terms.html`](wallet/staging/airdrop-terms.html).
 
 The page source is [`wallet/staging/airdrop-interest.html`](wallet/staging/airdrop-interest.html). It is not in `wallet/public` or `wallet/dist`. `render.yaml` still publishes `wallet/dist` only.
 
