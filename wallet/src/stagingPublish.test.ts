@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import page from "../staging/tester-early-access.html?raw";
 import sitemap from "../staging/sitemap.xml?raw";
+import terms from "../staging/tester-terms.html?raw";
+import privacy from "../staging/privacy-notice.html?raw";
+import sanctions from "../staging/sanctions.html?raw";
 import signup from "../../.github/ISSUE_TEMPLATE/tester-signup.yml?raw";
 import readme from "../../README.md?raw";
 import indexHtml from "../index.html?raw";
@@ -18,6 +21,16 @@ const ELIGIBILITY =
 const PUBLIC_NOTE = "GitHub issues are public. Your email and wallet address will be visible to anyone.";
 const SIGNUP = "https://github.com/SAW72/STRANDED/issues/new?template=tester-signup.yml";
 const MARKER = "PENDING LAWYER REVIEW";
+const RISK_BOX =
+  "Stranded runs on production smart contracts that use real funds. Testing is optional and at your own risk. You may lose any funds you use. We do not ask you to deposit funds, and testing does not earn rewards or value.";
+const NO_OFFER = "Nothing here is an offer of tokens, value or any investment.";
+const RECOGNITION =
+  "Testers may be considered for future recognition, subject to terms, eligibility and sanctions screening. Recognition does not depend on depositing or using funds, and nothing here is an offer of tokens or value.";
+const TESTNET_DISCLAIMER =
+  "Nothing here is an offer of tokens, value or securities, and testnet activity does not earn tokens.";
+const SANCTIONS_ATTESTATION =
+  "I am not located in, ordinarily resident in, or organized in a jurisdiction subject to comprehensive U.S. sanctions, and I am not on, or owned or controlled by anyone on, a U.S. sanctions list, including OFAC's SDN List. I agree to the Tester Terms and Privacy Notice:";
+const FORM_DESCRIPTION = "Volunteer to test. No payment, token or value is promised.";
 const KEPT_FAUCETS = [
   "https://docs.base.org/get-started/get-funds",
   "https://www.alchemy.com/faucets/base-sepolia",
@@ -34,7 +47,13 @@ const DROPPED_FAUCETS = [
 ];
 
 const leakedPublic = import.meta.glob(
-  ["../public/sitemap.xml", "../public/tester-early-access.html"],
+  [
+    "../public/sitemap.xml",
+    "../public/tester-early-access.html",
+    "../public/tester-terms.html",
+    "../public/privacy-notice.html",
+    "../public/sanctions.html",
+  ],
   { eager: true },
 );
 
@@ -46,6 +65,20 @@ describe("unpublished tester page", () => {
     expect(page).toContain(ELIGIBILITY);
     expect(page).toContain(PUBLIC_NOTE);
     expect(page).toContain(SIGNUP);
+    expect(page).toContain(RISK_BOX);
+    expect(page).toContain(NO_OFFER);
+    expect(page).toContain(RECOGNITION);
+    expect(page).toContain(TESTNET_DISCLAIMER);
+    expect(page).toContain('href="tester-terms.html"');
+    expect(page).toContain('href="privacy-notice.html"');
+    expect(page).toContain('href="sanctions.html"');
+    expect(page).not.toContain("use small amounts");
+    expect(page).not.toContain("No guaranteed value");
+    for (const draft of [terms, privacy, sanctions]) {
+      expect(draft).toContain(MARKER);
+      expect(draft).toContain("DRAFT");
+      expect(draft).toContain('name="robots" content="noindex, nofollow"');
+    }
     expect(page).toContain("<title>Stranded: swap a slice for gas on testnet</title>");
     expect(page).toContain('name="description"');
     expect(page).toContain('property="og:title"');
@@ -73,6 +106,9 @@ describe("unpublished tester page", () => {
     ]) {
       expect(text).not.toContain("tester-early-access");
       expect(text).not.toContain("tester-signup");
+      expect(text).not.toContain("tester-terms");
+      expect(text).not.toContain("privacy-notice");
+      expect(text).not.toContain("sanctions.html");
     }
     expect(renderSource).toContain("staticPublishPath: wallet/dist");
   });
@@ -83,12 +119,23 @@ describe("unpublished tester page", () => {
     expect(signup).toContain(PRIVACY);
     expect(signup).toContain(ELIGIBILITY);
     expect(signup).toContain(PUBLIC_NOTE);
+    expect(signup).toContain(RISK_BOX);
+    expect(signup).toContain(NO_OFFER);
+    expect(signup).toContain(RECOGNITION);
+    expect(signup).toContain(TESTNET_DISCLAIMER);
+    expect(signup).toContain(SANCTIONS_ATTESTATION);
+    expect(signup).toContain(FORM_DESCRIPTION);
+    expect(signup).toContain("wallet/staging/tester-terms.html");
+    expect(signup).toContain("wallet/staging/privacy-notice.html");
+    expect(signup).toContain("wallet/staging/sanctions.html");
     expect(signup).not.toMatch(/0x[a-fA-F0-9]{40}/);
-    expect(signup).not.toMatch(/type: (textarea|dropdown|checkboxes)/);
+    expect(signup).not.toMatch(/type: (textarea|dropdown)\b/);
+    expect(signup.match(/type: checkboxes/g)).toEqual(["type: checkboxes"]);
     const ids = [...signup.matchAll(/^ {4}id: (\S+)/gm)].map((match) => match[1]);
-    expect(ids).toEqual(["email", "wallet-address"]);
+    expect(ids).toEqual(["email", "wallet-address", "sanctions-and-terms"]);
     expect(signup).toMatch(/id: email[\s\S]*required: true/);
     expect(signup).toMatch(/id: wallet-address[\s\S]*required: false/);
+    expect(signup).toMatch(/id: sanctions-and-terms[\s\S]*required: true/);
   });
 
   it("puts the draft notice in the README without a live-site link", () => {
@@ -103,6 +150,13 @@ describe("unpublished tester page", () => {
     expect(section).toContain(ELIGIBILITY);
     expect(section).toContain(PUBLIC_NOTE);
     expect(section).toContain(SIGNUP);
+    expect(section).toContain(RISK_BOX);
+    expect(section).toContain(NO_OFFER);
+    expect(section).toContain(RECOGNITION);
+    expect(section).toContain(TESTNET_DISCLAIMER);
+    expect(section).toContain("wallet/staging/tester-terms.html");
+    expect(section).toContain("wallet/staging/privacy-notice.html");
+    expect(section).toContain("wallet/staging/sanctions.html");
     expect(section).toContain("wallet/staging/tester-early-access.html");
     expect(section).toContain("wallet/staging/sitemap.xml");
     expect(section).not.toContain("strandedtoken.trade/tester");

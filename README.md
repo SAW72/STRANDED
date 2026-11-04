@@ -258,7 +258,17 @@ See [wallet/README.md](wallet/README.md). Copy `wallet/.env.example` to `wallet/
 
 Test now. An airdrop may come later; amount TBD.
 
-Eligibility is subject to terms, jurisdiction restrictions, and sanctions screening. An airdrop is not promised. Terms are not published in this draft.
+Stranded runs on production smart contracts that use real funds. Testing is optional and at your own risk. You may lose any funds you use. We do not ask you to deposit funds, and testing does not earn rewards or value.
+
+Nothing here is an offer of tokens, value or any investment.
+
+Testers may be considered for future recognition, subject to terms, eligibility and sanctions screening. Recognition does not depend on depositing or using funds, and nothing here is an offer of tokens or value.
+
+Nothing here is an offer of tokens, value or securities, and testnet activity does not earn tokens.
+
+Eligibility is subject to terms, jurisdiction restrictions, and sanctions screening. An airdrop is not promised.
+
+Draft notices, not linked from the live wallet: [Tester Terms](wallet/staging/tester-terms.html), [Privacy Notice](wallet/staging/privacy-notice.html), [Sanctioned jurisdictions](wallet/staging/sanctions.html).
 
 The page source is [`wallet/staging/tester-early-access.html`](wallet/staging/tester-early-access.html). Its title, meta description, and Open Graph tags live in that file. The sitemap entry is [`wallet/staging/sitemap.xml`](wallet/staging/sitemap.xml). Neither file is in `wallet/public` or `wallet/dist`. `render.yaml` still publishes `wallet/dist` only. The draft page sends `noindex, nofollow`. Its sitemap does not use a strandedtoken.trade address.
 
@@ -280,7 +290,7 @@ We only use this to contact you about testing. Never share private keys or seed 
 
 GitHub issues are public. Your email and wallet address will be visible to anyone.
 
-The form asks for an email (required) and a wallet address (optional). It does not ask for a private key or a seed phrase. A bug report can be a normal issue and does not need an email: https://github.com/SAW72/STRANDED/issues/new
+The form asks for an email (required) and a wallet address (optional). It also requires a sanctions and terms attestation. It does not ask for a private key or a seed phrase. A bug report can be a normal issue and does not need an email: https://github.com/SAW72/STRANDED/issues/new
 
 ## Phase-2 scaffold: `StrandedRegistry` (non-production)
 

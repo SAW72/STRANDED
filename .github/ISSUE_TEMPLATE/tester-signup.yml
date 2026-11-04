@@ -1,5 +1,5 @@
 name: Tester sign-up
-description: PENDING LAWYER REVIEW. Sign up to test Stranded. GitHub issues are public.
+description: PENDING LAWYER REVIEW. Volunteer to test. No payment, token or value is promised. GitHub issues are public.
 title: "[Tester] "
 body:
   - type: markdown
@@ -11,11 +11,21 @@ body:
 
         Test now. An airdrop may come later; amount TBD.
 
+        Stranded runs on production smart contracts that use real funds. Testing is optional and at your own risk. You may lose any funds you use. We do not ask you to deposit funds, and testing does not earn rewards or value.
+
+        Nothing here is an offer of tokens, value or any investment.
+
+        Testers may be considered for future recognition, subject to terms, eligibility and sanctions screening. Recognition does not depend on depositing or using funds, and nothing here is an offer of tokens or value.
+
+        Nothing here is an offer of tokens, value or securities, and testnet activity does not earn tokens.
+
         Eligibility is subject to terms, jurisdiction restrictions, and sanctions screening.
 
         We only use this to contact you about testing. Never share private keys or seed phrases.
 
-        Stranded is testnet only: Base Sepolia and Arb Sepolia. This form asks for an email and, if you want, a public wallet address. It does not ask for a private key or a seed phrase. Do not put either in the fields below.
+        This form asks for an email and, if you want, a public wallet address. It does not ask for a private key or a seed phrase. Do not put either in the fields below.
+
+        Draft notices (not on the live site): Tester Terms https://github.com/SAW72/STRANDED/blob/grok/stranded-tester-early-access/wallet/staging/tester-terms.html — Privacy Notice https://github.com/SAW72/STRANDED/blob/grok/stranded-tester-early-access/wallet/staging/privacy-notice.html — Sanctioned jurisdictions https://github.com/SAW72/STRANDED/blob/grok/stranded-tester-early-access/wallet/staging/sanctions.html
   - type: input
     id: email
     attributes:
@@ -32,3 +42,11 @@ body:
       placeholder: Public address only
     validations:
       required: false
+  - type: checkboxes
+    id: sanctions-and-terms
+    attributes:
+      label: Sanctions and Tester Terms
+      description: Required. We only use this to contact you about testing. Never share private keys or seed phrases.
+      options:
+        - label: "I am not located in, ordinarily resident in, or organized in a jurisdiction subject to comprehensive U.S. sanctions, and I am not on, or owned or controlled by anyone on, a U.S. sanctions list, including OFAC's SDN List. I agree to the Tester Terms and Privacy Notice: https://github.com/SAW72/STRANDED/blob/grok/stranded-tester-early-access/wallet/staging/tester-terms.html and https://github.com/SAW72/STRANDED/blob/grok/stranded-tester-early-access/wallet/staging/privacy-notice.html"
+          required: true
