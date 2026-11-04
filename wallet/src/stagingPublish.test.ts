@@ -67,7 +67,7 @@ const AIRDROP_SEE_HTML =
 const AIRDROP_META =
   "Draft. No airdrop is promised. No amount, date or schedule. Interest is not eligibility.";
 const SECURITY_REPORT =
-  "A valid report can earn tester points, awarded per report and never by severity payout or funds involved. Points have no cash value, are non-transferable and are not tokens. There is no paid bug bounty. Report security issues privately as described above, not in a public issue.";
+  "A valid report from an eligible tester can earn tester points under the Tester Terms, awarded per report and never by severity payout or funds involved. Points have no cash value, are non-transferable and are not tokens. There is no paid bug bounty. Report security issues privately as described above, not in a public issue.";
 const RETIRED_EARN =
   /does not earn rewards|testing does not earn rewards or value|testnet activity does not earn tokens/;
 const SANCTIONS_ATTESTATION =
