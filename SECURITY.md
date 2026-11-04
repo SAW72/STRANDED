@@ -18,7 +18,7 @@ Report a vulnerability privately on [SAW72/STRANDED](https://github.com/SAW72/ST
 4. Fill in the vulnerability report.
 5. Click **Submit report**.
 
-A valid report can earn tester points, awarded per report and never by severity payout or funds involved. Points have no cash value, are non-transferable and are not tokens. There is no paid bug bounty. Report security issues privately as described above, not in a public issue.
+A valid report from an eligible tester can earn tester points under the Tester Terms, awarded per report and never by severity payout or funds involved. Points have no cash value, are non-transferable and are not tokens. There is no paid bug bounty. Report security issues privately as described above, not in a public issue.
 
 ## What holds
 
