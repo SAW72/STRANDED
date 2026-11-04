@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  STAGING SITEMAP. PENDING LAWYER REVIEW.
+  Unpublished until Spencer approves.
+  This file is not in wallet/public and is not copied to wallet/dist.
+  render.yaml publishes wallet/dist only. The live host rewrites /* to
+  /index.html. Putting this file in wallet/public, or adding a loc on the
+  live wallet host, would publish the tester page. Do not add that loc, and do not move this file into
+  wallet/public, until Spencer approves publication.
+  Entries are unpublished source files at /blob/main/.
+-->
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>https://github.com/SAW72/STRANDED/blob/main/wallet/staging/tester-early-access.html</loc>
+  </url>
+  <url>
+    <loc>https://github.com/SAW72/STRANDED/blob/main/wallet/staging/airdrop-interest.html</loc>
+  </url>
+  <url>
+    <loc>https://github.com/SAW72/STRANDED/blob/main/wallet/staging/airdrop-terms.html</loc>
+  </url>
+  <url>
+    <loc>https://github.com/SAW72/STRANDED/blob/main/wallet/staging/tester-terms.html</loc>
+  </url>
+  <url>
+    <loc>https://github.com/SAW72/STRANDED/blob/main/wallet/staging/privacy-notice.html</loc>
+  </url>
+  <url>
+    <loc>https://github.com/SAW72/STRANDED/blob/main/wallet/staging/sanctions.html</loc>
+  </url>
+</urlset>

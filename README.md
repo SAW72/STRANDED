@@ -252,6 +252,44 @@ Vite + React + wagmi/viem under [`wallet/`](wallet/). Testnets only: Base Sepoli
 
 See [wallet/README.md](wallet/README.md). Copy `wallet/.env.example` to `wallet/.env`. Leave Relayer URL fields empty for fixtures. Live Arb Relayer origin (document-only; do not commit a filled `.env`): `https://stranded-relayer-arb.onrender.com`. Do not point Base at the Arb Relayer or at a dead/old VPS.
 
+## Tester / early access (draft, unpublished) — PENDING LAWYER REVIEW
+
+**PENDING LAWYER REVIEW.** This section is a draft. Unpublished until Spencer approves. The tester page is not on the live site and is not linked from the wallet navigation.
+
+Stranded runs on testnet only (Base Sepolia 84532 and Arb Sepolia 421614). Test tokens have no monetary value.
+
+Testing is optional and at your own risk. Use only free testnet tokens. They have no value. Do not connect a wallet that holds real funds. We do not ask you to deposit funds. Testers can earn points for testing. Points have no cash or monetary value, are not transferable, cannot be sold or exchanged, and are not tokens, securities or a promise of any future token, airdrop or payment. Points are not earned by depositing funds or by the amount of funds used. We may change or end the points program at any time.
+
+Points are per task or per bug reported, never per amount or volume. There are no leaderboards, ranks, or prizes.
+
+Nothing here is an offer of tokens, value or any investment.
+
+Eligibility is subject to terms, jurisdiction restrictions, and sanctions screening.
+
+Draft notices, not linked from the live wallet: [Tester Terms](wallet/staging/tester-terms.html), [Privacy Notice](wallet/staging/privacy-notice.html), [Sanctioned jurisdictions](wallet/staging/sanctions.html).
+
+The page source is [`wallet/staging/tester-early-access.html`](wallet/staging/tester-early-access.html). Its title, meta description, and Open Graph tags live in that file. The sitemap entry is [`wallet/staging/sitemap.xml`](wallet/staging/sitemap.xml). Neither file is in `wallet/public` or `wallet/dist`. `render.yaml` still publishes `wallet/dist` only. The draft page sends `noindex, nofollow`. Its sitemap uses source links at `/blob/main/`.
+
+**Product.** GasRescueSwap: a stranded token swaps a slice for native gas, then the remainder moves on the same chain. The holder signs once. An allowlisted relayer pays the gas. If any step fails, nothing moves. Testnet only: Base Sepolia (84532) and Arb Sepolia (421614). No mainnet code path. No bridge in v1. Arb Sepolia is primary. Base Sepolia is secondary. The wallet under test is the existing testnet wallet. This draft page is not that site. STRANDED is experimental, unaudited software provided as is, without warranties, from Steward of the King LLC.
+
+**What to try.** Open the wallet, pick Base Sepolia or Arb Sepolia, and connect an injected wallet that does not hold mainnet funds. The wallet reads the token balance on that testnet and does not invent one. Review the order, confirm the details, and only then sign. On Arb Sepolia a connected wallet can request a tDEMO drip from a faucet that cannot mint.
+
+**Testnet ETH faucets.** These send testnet ETH, not mainnet ETH.
+
+- Base docs: https://docs.base.org/get-started/get-funds
+- Alchemy Base Sepolia: https://www.alchemy.com/faucets/base-sepolia
+- QuickNode Base Sepolia: https://faucet.quicknode.com/base/sepolia
+- Alchemy Arbitrum Sepolia: https://www.alchemy.com/faucets/arbitrum-sepolia
+- QuickNode Arbitrum Sepolia: https://faucet.quicknode.com/arbitrum/sepolia
+
+**Sign up.** https://github.com/SAW72/STRANDED/issues/new?template=tester-signup.yml
+
+We only use this to contact you about testing. Never share private keys or seed phrases.
+
+Do not post your email, wallet address or any key here. GitHub issues are public. We will reply in this issue with a link to a private form for contact details. Official contact: stranded@stewardoftheking.com.
+
+This sign-up collects only your GitHub handle, which is the account that opens this issue. It also requires a sanctions and terms attestation. Do not add any other personal details. A bug report can be a normal issue: https://github.com/SAW72/STRANDED/issues/new
+
 ## Phase-2 scaffold: `StrandedRegistry` (non-production)
 
 `src/StrandedRegistry.sol` is a **non-production** find index + bounty layer. It is not the product, is not deployed, and must not go to mainnet.
