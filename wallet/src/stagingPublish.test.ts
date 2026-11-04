@@ -40,6 +40,8 @@ const CHANGES =
 const RETENTION =
   "We keep tester data only as long as the program needs it, plus what law requires, then delete it [specific period TBD—attorney].";
 const SANCTIONS_PARTICIPATE = "participate in, sign up for, or receive anything from";
+const SANCTIONS_DISCRETION =
+  "We may screen wallet addresses and participants, block access by geography, and withhold or revoke points or anything else from anyone at our discretion to comply with law.";
 const MAIN_BLOB = "/blob/main/";
 const BRANCH_BLOB = "/blob/grok/stranded-tester-early-access/";
 const POINTS =
@@ -52,6 +54,9 @@ const TERMS_ITEM_6 =
 const NO_OFFER = "Nothing here is an offer of tokens, value or any investment.";
 const AIRDROP_DECISION =
   "We have not decided whether any airdrop will happen. No airdrop is promised, and there is no amount, date or schedule.";
+const AIRDROP_ITEM_1 =
+  "No airdrop, token or other distribution is promised. We make no guarantee that any will ever occur, or of any amount, timing or form.";
+const AIRDROP_ITEM_2 = "Any token or other distribution has no promised monetary value.";
 const AIRDROP_INTEREST =
   "Registering interest does not make you eligible for anything and does not reserve anything for you.";
 const AIRDROP_SEPARATE = "Testing, points and any use of the app have no bearing on this page.";
@@ -144,14 +149,17 @@ describe("unpublished tester page", () => {
     expect(privacy).toContain(RETENTION);
     expect(privacy).not.toContain("any related recognition");
     expect(sanctions).toContain(SANCTIONS_PARTICIPATE);
+    expect(sanctions).toContain(SANCTIONS_DISCRETION);
+    expect(sanctions).not.toContain(["withhold or revoke", "recognition"].join(" "));
     expect(sanctions).not.toContain("receive any recognition from");
     expect(terms).not.toContain("airdrop-interest.html");
     expect(terms).not.toContain("airdrop-terms.html");
     expect(terms).toContain("Testnet ETH and testnet tokens");
     expect(terms).toContain("You must be at least 18 years old");
     expect(airdropTerms).toContain("<h1>Airdrop Interest Terms (DRAFT)</h1>");
-    expect(airdropTerms).toContain(AIRDROP_DECISION);
-    expect(airdropTerms).toContain(AIRDROP_INTEREST);
+    expect(airdropTerms).toContain(AIRDROP_ITEM_1);
+    expect(airdropTerms).toContain(AIRDROP_ITEM_2);
+    expect(airdropTerms).not.toContain(AIRDROP_DECISION);
     expect(airdropTerms).toContain("No monetary value; not an investment.");
     expect(airdropTerms).toContain('href="airdrop-interest.html"');
     expect(airdropTerms).not.toContain("tester-early-access.html");
