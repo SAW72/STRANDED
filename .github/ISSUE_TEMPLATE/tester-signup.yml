@@ -11,7 +11,7 @@ body:
 
         This sign-up collects only your GitHub handle, which is the account that opens this issue. Do not add any other personal details.
 
-        Stranded runs on testnet only (Base Sepolia 84532 and Arb Sepolia 421614). Test tokens have no monetary value. Use a wallet that holds no real funds.
+        Stranded runs on testnet only (Base Sepolia 84532 and Arb Sepolia 421614). Test tokens have no monetary value.
 
         Testing is optional and at your own risk. Use only free testnet tokens. They have no value. Do not connect a wallet that holds real funds. We do not ask you to deposit funds. Testers can earn points for testing. Points have no cash or monetary value, are not transferable, cannot be sold or exchanged, and are not tokens, securities or a promise of any future token, airdrop or payment. Points are not earned by depositing funds or by the amount of funds used. We may change or end the points program at any time.
 
@@ -23,12 +23,12 @@ body:
 
         We only use this to contact you about testing. Never share private keys or seed phrases.
 
-        Draft notices (not on the live site): Tester Terms https://github.com/SAW72/STRANDED/blob/grok/stranded-tester-early-access/wallet/staging/tester-terms.html — Privacy Notice https://github.com/SAW72/STRANDED/blob/grok/stranded-tester-early-access/wallet/staging/privacy-notice.html — Sanctioned jurisdictions https://github.com/SAW72/STRANDED/blob/grok/stranded-tester-early-access/wallet/staging/sanctions.html
+        Draft notices (not on the live site): Tester Terms https://github.com/SAW72/STRANDED/blob/main/wallet/staging/tester-terms.html — Privacy Notice https://github.com/SAW72/STRANDED/blob/main/wallet/staging/privacy-notice.html — Sanctioned jurisdictions https://github.com/SAW72/STRANDED/blob/main/wallet/staging/sanctions.html
   - type: checkboxes
     id: sanctions-and-terms
     attributes:
       label: Sanctions and Tester Terms
       description: Required. We only use this to contact you about testing. Never share private keys or seed phrases.
       options:
-        - label: "I am not located in, ordinarily resident in, or organized in a jurisdiction subject to comprehensive U.S. sanctions, and I am not on, or owned or controlled by anyone on, a U.S. sanctions list, including OFAC's SDN List. I agree to the Tester Terms and Privacy Notice: https://github.com/SAW72/STRANDED/blob/grok/stranded-tester-early-access/wallet/staging/tester-terms.html and https://github.com/SAW72/STRANDED/blob/grok/stranded-tester-early-access/wallet/staging/privacy-notice.html"
+        - label: "I am not located in, ordinarily resident in, or organized in a jurisdiction subject to comprehensive U.S. sanctions, and I am not on, or owned or controlled by anyone on, a U.S. sanctions list, including OFAC's SDN List. I agree to the Tester Terms and Privacy Notice: https://github.com/SAW72/STRANDED/blob/main/wallet/staging/tester-terms.html and https://github.com/SAW72/STRANDED/blob/main/wallet/staging/privacy-notice.html"
           required: true

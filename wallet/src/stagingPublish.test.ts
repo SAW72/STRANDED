@@ -32,8 +32,16 @@ const HANDLE_ONLY =
 const SIGNUP = "https://github.com/SAW72/STRANDED/issues/new?template=tester-signup.yml";
 const MARKER = "PENDING LAWYER REVIEW";
 const TESTNET_ONLY =
-  "Stranded runs on testnet only (Base Sepolia 84532 and Arb Sepolia 421614). Test tokens have no monetary value. Use a wallet that holds no real funds.";
+  "Stranded runs on testnet only (Base Sepolia 84532 and Arb Sepolia 421614). Test tokens have no monetary value.";
+const RETIRED_WALLET_LINE = "Use a wallet that holds no real funds.";
 const RETIRED_PRODUCTION = "Stranded runs on production smart contracts that use real funds.";
+const CHANGES =
+  "We may change, suspend or cancel this program, the points program or these terms at any time without notice or liability.";
+const RETENTION =
+  "We keep tester data only as long as the program needs it, plus what law requires, then delete it [specific period TBD—attorney].";
+const SANCTIONS_PARTICIPATE = "participate in, sign up for, or receive anything from";
+const MAIN_BLOB = "/blob/main/";
+const BRANCH_BLOB = "/blob/grok/stranded-tester-early-access/";
 const POINTS =
   "Testing is optional and at your own risk. Use only free testnet tokens. They have no value. Do not connect a wallet that holds real funds. We do not ask you to deposit funds. Testers can earn points for testing. Points have no cash or monetary value, are not transferable, cannot be sold or exchanged, and are not tokens, securities or a promise of any future token, airdrop or payment. Points are not earned by depositing funds or by the amount of funds used. We may change or end the points program at any time.";
 const POINTS_BASIS = "Points are per task or per bug reported, never per amount or volume.";
@@ -49,7 +57,6 @@ const AIRDROP_INTEREST =
 const AIRDROP_SEPARATE = "Testing, points and any use of the app have no bearing on this page.";
 const AIRDROP_SANCTIONS =
   "You may not take part if you are in a jurisdiction subject to comprehensive U.S. sanctions, or if you are on a U.S. sanctions list, including OFAC's SDN List.";
-const AIRDROP_SEE = "See the Tester Terms, Privacy Notice and Sanctioned Jurisdictions pages.";
 const AIRDROP_SEE_HTML =
   'See the <a href="tester-terms.html">Tester Terms</a>, <a href="privacy-notice.html">Privacy Notice</a> and <a href="sanctions.html">Sanctioned Jurisdictions</a> pages.';
 const AIRDROP_META =
@@ -105,6 +112,10 @@ describe("unpublished tester page", () => {
     expect(page).toContain(HANDLE_ONLY);
     expect(page).toContain(SIGNUP);
     expect(page).toContain(TESTNET_ONLY);
+    expect(page).not.toContain(RETIRED_WALLET_LINE);
+    expect(page).not.toContain(BRANCH_BLOB);
+    expect(page).toContain(MAIN_BLOB);
+    expect(page).not.toContain("/raw/grok/stranded-tester-early-access/");
     expect(page).toContain(POINTS);
     expect(page).toContain(POINTS_BASIS);
     expect(page).toContain(NO_PRIZES);
@@ -128,6 +139,12 @@ describe("unpublished tester page", () => {
     expect(terms).not.toContain("Tester and Airdrop Terms");
     expect(terms).toContain(TERMS_ITEM_2);
     expect(terms).toContain(TERMS_ITEM_6);
+    expect(terms).toContain(CHANGES);
+    expect(terms).not.toContain("these terms or any recognition");
+    expect(privacy).toContain(RETENTION);
+    expect(privacy).not.toContain("any related recognition");
+    expect(sanctions).toContain(SANCTIONS_PARTICIPATE);
+    expect(sanctions).not.toContain("receive any recognition from");
     expect(terms).not.toContain("airdrop-interest.html");
     expect(terms).not.toContain("airdrop-terms.html");
     expect(terms).toContain("Testnet ETH and testnet tokens");
@@ -174,7 +191,12 @@ describe("unpublished tester page", () => {
     expect(airdrop).toContain("DRAFT");
     expect(airdrop).not.toContain("<script");
     expect(airdrop).not.toContain("strandedtoken.trade");
+    expect(airdrop).not.toContain("/raw/grok/stranded-tester-early-access/");
     expect(airdrop).not.toMatch(RETIRED_EARN);
+    for (const source of [page, airdrop, airdropTerms, terms, privacy, sanctions, sitemap]) {
+      expect(source).not.toContain(BRANCH_BLOB);
+      expect(source).toContain(MAIN_BLOB);
+    }
     expect(security).toContain(SECURITY_REPORT);
     expectClean(security);
     expect(sitemap).toContain("wallet/staging/tester-early-access.html");
@@ -213,6 +235,9 @@ describe("unpublished tester page", () => {
     expect(signup).toContain(PUBLIC_NOTE);
     expect(signup).toContain(HANDLE_ONLY);
     expect(signup).toContain(TESTNET_ONLY);
+    expect(signup).not.toContain(RETIRED_WALLET_LINE);
+    expect(signup).not.toContain(BRANCH_BLOB);
+    expect(signup).toContain(MAIN_BLOB);
     expect(signup).toContain(POINTS);
     expect(signup).toContain(POINTS_BASIS);
     expect(signup).toContain(NO_PRIZES);
@@ -238,15 +263,12 @@ describe("unpublished tester page", () => {
 
   it("puts the draft notice in the README without a live-site link", () => {
     const start = readme.indexOf("## Tester / early access");
-    const airdropStart = readme.indexOf("## Airdrop interest");
     const end = readme.indexOf("## Phase-2 scaffold");
     expect(start).toBeGreaterThan(0);
-    expect(airdropStart).toBeGreaterThan(start);
-    expect(end).toBeGreaterThan(airdropStart);
-    const section = readme.slice(start, airdropStart);
-    const airdropSection = readme.slice(airdropStart, end);
+    expect(end).toBeGreaterThan(start);
+    expect(readme).not.toContain("## Airdrop interest");
+    const section = readme.slice(start, end);
     expectClean(section);
-    expectClean(airdropSection);
     expect(section).toContain(MARKER);
     expect(section).toContain(PRIVACY);
     expect(section).toContain(ELIGIBILITY);
@@ -254,6 +276,7 @@ describe("unpublished tester page", () => {
     expect(section).toContain(HANDLE_ONLY);
     expect(section).toContain(SIGNUP);
     expect(section).toContain(TESTNET_ONLY);
+    expect(section).not.toContain(RETIRED_WALLET_LINE);
     expect(section).toContain(POINTS);
     expect(section).toContain(POINTS_BASIS);
     expect(section).toContain(NO_PRIZES);
@@ -262,17 +285,8 @@ describe("unpublished tester page", () => {
     expect(section).not.toContain("strandedtoken.trade");
     expect(section).not.toContain("airdrop-terms.html");
     expect(section).not.toContain("airdrop-interest.html");
-    expect(airdropSection).toContain(MARKER);
-    expect(airdropSection).toContain(AIRDROP_DECISION);
-    expect(airdropSection).toContain(AIRDROP_INTEREST);
-    expect(airdropSection).toContain(AIRDROP_SEPARATE);
-    expect(airdropSection).toContain(AIRDROP_SANCTIONS);
-    expect(airdropSection).toContain(AIRDROP_SEE);
-    expect(airdropSection).toContain(NO_OFFER);
-    expect(airdropSection).toContain("wallet/staging/airdrop-interest.html");
-    expect(airdropSection).toContain("wallet/staging/airdrop-terms.html");
-    expect(airdropSection).not.toContain("tester-early-access.html");
-    expect(airdropSection).not.toContain("strandedtoken.trade");
+    expect(readme).not.toContain("wallet/staging/airdrop-interest.html");
+    expect(readme).not.toContain("wallet/staging/airdrop-terms.html");
     expect(section).toContain("wallet/staging/tester-terms.html");
     expect(section).toContain("wallet/staging/privacy-notice.html");
     expect(section).toContain("wallet/staging/sanctions.html");

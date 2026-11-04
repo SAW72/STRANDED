@@ -7,25 +7,25 @@
   /index.html. Putting this file in wallet/public, or adding a loc on the
   live wallet host, would publish the tester page. Do not add that loc, and do not move this file into
   wallet/public, until Spencer approves publication.
-  Entries are unpublished source files on the draft branch.
+  Entries are unpublished source files at /blob/main/.
 -->
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
-    <loc>https://github.com/SAW72/STRANDED/blob/grok/stranded-tester-early-access/wallet/staging/tester-early-access.html</loc>
+    <loc>https://github.com/SAW72/STRANDED/blob/main/wallet/staging/tester-early-access.html</loc>
   </url>
   <url>
-    <loc>https://github.com/SAW72/STRANDED/blob/grok/stranded-tester-early-access/wallet/staging/airdrop-interest.html</loc>
+    <loc>https://github.com/SAW72/STRANDED/blob/main/wallet/staging/airdrop-interest.html</loc>
   </url>
   <url>
-    <loc>https://github.com/SAW72/STRANDED/blob/grok/stranded-tester-early-access/wallet/staging/airdrop-terms.html</loc>
+    <loc>https://github.com/SAW72/STRANDED/blob/main/wallet/staging/airdrop-terms.html</loc>
   </url>
   <url>
-    <loc>https://github.com/SAW72/STRANDED/blob/grok/stranded-tester-early-access/wallet/staging/tester-terms.html</loc>
+    <loc>https://github.com/SAW72/STRANDED/blob/main/wallet/staging/tester-terms.html</loc>
   </url>
   <url>
-    <loc>https://github.com/SAW72/STRANDED/blob/grok/stranded-tester-early-access/wallet/staging/privacy-notice.html</loc>
+    <loc>https://github.com/SAW72/STRANDED/blob/main/wallet/staging/privacy-notice.html</loc>
   </url>
   <url>
-    <loc>https://github.com/SAW72/STRANDED/blob/grok/stranded-tester-early-access/wallet/staging/sanctions.html</loc>
+    <loc>https://github.com/SAW72/STRANDED/blob/main/wallet/staging/sanctions.html</loc>
   </url>
 </urlset>

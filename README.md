@@ -256,7 +256,7 @@ See [wallet/README.md](wallet/README.md). Copy `wallet/.env.example` to `wallet/
 
 **PENDING LAWYER REVIEW.** This section is a draft. Unpublished until Spencer approves. The tester page is not on the live site and is not linked from the wallet navigation.
 
-Stranded runs on testnet only (Base Sepolia 84532 and Arb Sepolia 421614). Test tokens have no monetary value. Use a wallet that holds no real funds.
+Stranded runs on testnet only (Base Sepolia 84532 and Arb Sepolia 421614). Test tokens have no monetary value.
 
 Testing is optional and at your own risk. Use only free testnet tokens. They have no value. Do not connect a wallet that holds real funds. We do not ask you to deposit funds. Testers can earn points for testing. Points have no cash or monetary value, are not transferable, cannot be sold or exchanged, and are not tokens, securities or a promise of any future token, airdrop or payment. Points are not earned by depositing funds or by the amount of funds used. We may change or end the points program at any time.
 
@@ -268,7 +268,7 @@ Eligibility is subject to terms, jurisdiction restrictions, and sanctions screen
 
 Draft notices, not linked from the live wallet: [Tester Terms](wallet/staging/tester-terms.html), [Privacy Notice](wallet/staging/privacy-notice.html), [Sanctioned jurisdictions](wallet/staging/sanctions.html).
 
-The page source is [`wallet/staging/tester-early-access.html`](wallet/staging/tester-early-access.html). Its title, meta description, and Open Graph tags live in that file. The sitemap entry is [`wallet/staging/sitemap.xml`](wallet/staging/sitemap.xml). Neither file is in `wallet/public` or `wallet/dist`. `render.yaml` still publishes `wallet/dist` only. The draft page sends `noindex, nofollow`. Its sitemap uses source links on the draft branch only.
+The page source is [`wallet/staging/tester-early-access.html`](wallet/staging/tester-early-access.html). Its title, meta description, and Open Graph tags live in that file. The sitemap entry is [`wallet/staging/sitemap.xml`](wallet/staging/sitemap.xml). Neither file is in `wallet/public` or `wallet/dist`. `render.yaml` still publishes `wallet/dist` only. The draft page sends `noindex, nofollow`. Its sitemap uses source links at `/blob/main/`.
 
 **Product.** GasRescueSwap: a stranded token swaps a slice for native gas, then the remainder moves on the same chain. The holder signs once. An allowlisted relayer pays the gas. If any step fails, nothing moves. Testnet only: Base Sepolia (84532) and Arb Sepolia (421614). No mainnet code path. No bridge in v1. Arb Sepolia is primary. Base Sepolia is secondary. The wallet under test is the existing testnet wallet. This draft page is not that site. STRANDED is experimental, unaudited software provided as is, without warranties, from Steward of the King LLC.
 
@@ -289,24 +289,6 @@ We only use this to contact you about testing. Never share private keys or seed 
 Do not post your email, wallet address or any key here. GitHub issues are public. We will reply in this issue with a link to a private form for contact details. Official contact: [TBD by Spencer].
 
 This sign-up collects only your GitHub handle, which is the account that opens this issue. It also requires a sanctions and terms attestation. Do not add any other personal details. A bug report can be a normal issue: https://github.com/SAW72/STRANDED/issues/new
-
-## Airdrop interest (draft, unpublished) — PENDING LAWYER REVIEW
-
-**PENDING LAWYER REVIEW.** This section is a separate draft from the tester page. Unpublished until Spencer approves. It is not on the live site and is not linked from the wallet navigation. The airdrop page does not link to the tester page.
-
-We have not decided whether any airdrop will happen. No airdrop is promised, and there is no amount, date or schedule.
-
-Registering interest does not make you eligible for anything and does not reserve anything for you.
-
-Testing, points and any use of the app have no bearing on this page.
-
-Nothing here is an offer of tokens, value or any investment.
-
-You may not take part if you are in a jurisdiction subject to comprehensive U.S. sanctions, or if you are on a U.S. sanctions list, including OFAC's SDN List.
-
-See the Tester Terms, Privacy Notice and Sanctioned Jurisdictions pages. Airdrop Interest Terms are a separate draft, linked from the airdrop page: [`wallet/staging/airdrop-terms.html`](wallet/staging/airdrop-terms.html).
-
-The page source is [`wallet/staging/airdrop-interest.html`](wallet/staging/airdrop-interest.html). It is not in `wallet/public` or `wallet/dist`. `render.yaml` still publishes `wallet/dist` only.
 
 ## Phase-2 scaffold: `StrandedRegistry` (non-production)
 
