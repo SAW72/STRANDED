@@ -7,11 +7,14 @@
   /index.html. Putting this file in wallet/public, or adding a loc on the
   live wallet host, would publish the tester page. Do not add that loc, and do not move this file into
   wallet/public, until Spencer approves publication.
-  The only entry is the unpublished source file on the draft branch.
+  Entries are unpublished source files on the draft branch.
 -->
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
     <loc>https://github.com/SAW72/STRANDED/blob/grok/stranded-tester-early-access/wallet/staging/tester-early-access.html</loc>
+  </url>
+  <url>
+    <loc>https://github.com/SAW72/STRANDED/blob/grok/stranded-tester-early-access/wallet/staging/airdrop-interest.html</loc>
   </url>
   <url>
     <loc>https://github.com/SAW72/STRANDED/blob/grok/stranded-tester-early-access/wallet/staging/tester-terms.html</loc>

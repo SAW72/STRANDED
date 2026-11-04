@@ -256,23 +256,23 @@ See [wallet/README.md](wallet/README.md). Copy `wallet/.env.example` to `wallet/
 
 **PENDING LAWYER REVIEW.** This section is a draft. Unpublished until Spencer approves. The tester page is not on the live site and is not linked from the wallet navigation.
 
-Test now. An airdrop may come later; amount TBD.
+Stranded runs on production smart contracts that use real funds.
 
-Stranded runs on production smart contracts that use real funds. Testing is optional and at your own risk. You may lose any funds you use. We do not ask you to deposit funds, and testing does not earn rewards or value.
+Testing is optional and at your own risk. You may lose any funds you use, and we do not ask you to deposit funds. Testers can earn points for testing. Points have no cash or monetary value, are not transferable, cannot be sold or exchanged, and are not tokens, securities or a promise of any future token, airdrop or payment. Points are not earned by depositing funds or by the amount of funds used. We may change or end the points program at any time.
+
+Points are per task or per bug reported, never per amount or volume. There are no leaderboards, ranks, or prizes.
 
 Nothing here is an offer of tokens, value or any investment.
 
 Testers may be considered for future recognition, subject to terms, eligibility and sanctions screening. Recognition does not depend on depositing or using funds, and nothing here is an offer of tokens or value.
 
-Nothing here is an offer of tokens, value or securities, and testnet activity does not earn tokens.
-
-Eligibility is subject to terms, jurisdiction restrictions, and sanctions screening. An airdrop is not promised.
+Eligibility is subject to terms, jurisdiction restrictions, and sanctions screening.
 
 Draft notices, not linked from the live wallet: [Tester Terms](wallet/staging/tester-terms.html), [Privacy Notice](wallet/staging/privacy-notice.html), [Sanctioned jurisdictions](wallet/staging/sanctions.html).
 
-The page source is [`wallet/staging/tester-early-access.html`](wallet/staging/tester-early-access.html). Its title, meta description, and Open Graph tags live in that file. The sitemap entry is [`wallet/staging/sitemap.xml`](wallet/staging/sitemap.xml). Neither file is in `wallet/public` or `wallet/dist`. `render.yaml` still publishes `wallet/dist` only. The draft page sends `noindex, nofollow`. Its sitemap does not use a strandedtoken.trade address.
+The page source is [`wallet/staging/tester-early-access.html`](wallet/staging/tester-early-access.html). Its title, meta description, and Open Graph tags live in that file. The sitemap entry is [`wallet/staging/sitemap.xml`](wallet/staging/sitemap.xml). Neither file is in `wallet/public` or `wallet/dist`. `render.yaml` still publishes `wallet/dist` only. The draft page sends `noindex, nofollow`. Its sitemap uses source links on the draft branch only.
 
-**Product.** GasRescueSwap: a stranded token swaps a slice for native gas, then the remainder moves on the same chain. The holder signs once. An allowlisted relayer pays the gas. If any step fails, nothing moves. Testnet only: Base Sepolia (84532) and Arb Sepolia (421614). No mainnet code path. No bridge in v1. Arb Sepolia is primary. Base Sepolia is secondary. The wallet under test is the existing site at https://strandedtoken.trade. This draft page is not that site. STRANDED is experimental, unaudited software provided as is, without warranties, from Steward of the King LLC.
+**Product.** GasRescueSwap: a stranded token swaps a slice for native gas, then the remainder moves on the same chain. The holder signs once. An allowlisted relayer pays the gas. If any step fails, nothing moves. Testnet only: Base Sepolia (84532) and Arb Sepolia (421614). No mainnet code path. No bridge in v1. Arb Sepolia is primary. Base Sepolia is secondary. The wallet under test is the existing testnet wallet. This draft page is not that site. STRANDED is experimental, unaudited software provided as is, without warranties, from Steward of the King LLC.
 
 **What to try.** Open the wallet, pick Base Sepolia or Arb Sepolia, and connect an injected wallet that does not hold mainnet funds. The wallet reads the token balance on that testnet and does not invent one. Review the order, confirm the details, and only then sign. On Arb Sepolia a connected wallet can request a tDEMO drip from a faucet that cannot mint.
 
@@ -291,6 +291,18 @@ We only use this to contact you about testing. Never share private keys or seed 
 GitHub issues are public. Your email and wallet address will be visible to anyone.
 
 The form asks for an email (required) and a wallet address (optional). It also requires a sanctions and terms attestation. It does not ask for a private key or a seed phrase. A bug report can be a normal issue and does not need an email: https://github.com/SAW72/STRANDED/issues/new
+
+## Airdrop interest (draft, unpublished) — PENDING LAWYER REVIEW
+
+**PENDING LAWYER REVIEW.** This section is a separate draft from the tester page. Unpublished until Spencer approves. It is not on the live site and is not linked from the wallet navigation.
+
+Test now. An airdrop may come later; amount TBD.
+
+An airdrop is not promised. Eligibility is subject to terms, jurisdiction restrictions, and sanctions screening.
+
+Nothing here is an offer of tokens, value or any investment.
+
+The page source is [`wallet/staging/airdrop-interest.html`](wallet/staging/airdrop-interest.html). It is not in `wallet/public` or `wallet/dist`. `render.yaml` still publishes `wallet/dist` only.
 
 ## Phase-2 scaffold: `StrandedRegistry` (non-production)
 

@@ -8,7 +8,7 @@
   do not add it to render.yaml, and do not move it into wallet/public.
   robots is noindex so a mistaken copy is not listed as a public page.
   When Spencer approves publication, remove the noindex tag and only then
-  give the page a strandedtoken.trade canonical URL.
+  give the page a live-site canonical URL.
   og:url and canonical point at this source file, not at the live site.
 -->
 <html lang="en">
@@ -20,14 +20,17 @@
     <title>Stranded: swap a slice for gas on testnet</title>
     <meta
       name="description"
-      content="Test Stranded on Base Sepolia and Arb Sepolia. A stranded token can swap a slice for native gas and move the rest on the same chain. Test now. An airdrop may come later; amount TBD."
+      content="Test Stranded on Base Sepolia and Arb Sepolia. A stranded token can swap a slice for native gas and move the rest on the same chain. Testers can earn points for testing. Points have no cash or monetary value and are not a promise of any future token, airdrop or payment."
     />
     <meta property="og:title" content="Stranded: swap a slice for gas on testnet" />
     <meta
       property="og:description"
-      content="Test Stranded on Base Sepolia and Arb Sepolia. A stranded token can swap a slice for native gas and move the rest on the same chain. Test now. An airdrop may come later; amount TBD."
+      content="Test Stranded on Base Sepolia and Arb Sepolia. A stranded token can swap a slice for native gas and move the rest on the same chain. Testers can earn points for testing. Points have no cash or monetary value and are not a promise of any future token, airdrop or payment."
     />
-    <meta property="og:image" content="https://strandedtoken.trade/stranded/idle.webp" />
+    <meta
+      property="og:image"
+      content="https://github.com/SAW72/STRANDED/raw/grok/stranded-tester-early-access/wallet/public/stranded/idle.webp"
+    />
     <meta
       property="og:url"
       content="https://github.com/SAW72/STRANDED/blob/grok/stranded-tester-early-access/wallet/staging/tester-early-access.html"
@@ -95,18 +98,18 @@
       <img src="../public/stranded/idle.webp" alt="Stranded" />
       <h1>Test Stranded</h1>
       <p>Early access here means a place on the tester list for the testnet wallet. Nothing on this page is a sale.</p>
-      <p class="callout"><strong>Test now. An airdrop may come later; amount TBD.</strong></p>
-      <p class="danger">Stranded runs on production smart contracts that use real funds. Testing is optional and at your own risk. You may lose any funds you use. We do not ask you to deposit funds, and testing does not earn rewards or value.</p>
+      <p class="danger">Stranded runs on production smart contracts that use real funds.</p>
+      <p class="danger">Testing is optional and at your own risk. You may lose any funds you use, and we do not ask you to deposit funds. Testers can earn points for testing. Points have no cash or monetary value, are not transferable, cannot be sold or exchanged, and are not tokens, securities or a promise of any future token, airdrop or payment. Points are not earned by depositing funds or by the amount of funds used. We may change or end the points program at any time.</p>
+      <p>Points are per task or per bug reported, never per amount or volume. There are no leaderboards, ranks, or prizes.</p>
       <p>Nothing here is an offer of tokens, value or any investment.</p>
       <p>Testers may be considered for future recognition, subject to terms, eligibility and sanctions screening. Recognition does not depend on depositing or using funds, and nothing here is an offer of tokens or value.</p>
-      <p>Nothing here is an offer of tokens, value or securities, and testnet activity does not earn tokens.</p>
-      <p>Eligibility is subject to terms, jurisdiction restrictions, and sanctions screening. An airdrop is not promised.</p>
+      <p>Eligibility is subject to terms, jurisdiction restrictions, and sanctions screening.</p>
 
       <h2>What Stranded is</h2>
       <p>Tokens with no ETH can't move. Stranded finds them, swaps a slice for gas, and carries the rest home.</p>
       <p>The product is GasRescueSwap. The holder signs once. An allowlisted relayer pays the gas. A slice of the token is swapped for native gas, and the remainder is sent to a wallet the holder chooses on the same chain. If any step fails, nothing moves.</p>
       <p>Testnet only: Base Sepolia (84532) and Arb Sepolia, also called Arbitrum Sepolia (421614). Arb Sepolia is the primary testnet. Base Sepolia is secondary. There is no mainnet code path and no bridge in v1.</p>
-      <p>The wallet you actually test is the existing site at <a href="https://strandedtoken.trade">https://strandedtoken.trade</a>. This draft is not that site. STRANDED is experimental, unaudited software provided as is, without warranties. It is a project of Steward of the King LLC.</p>
+      <p>The wallet you actually test is the existing testnet wallet. This draft is not that site. STRANDED is experimental, unaudited software provided as is, without warranties. It is a project of Steward of the King LLC.</p>
 
       <h2>What to try</h2>
       <ol>
@@ -143,7 +146,6 @@
 
       <h2>Official links</h2>
       <ul>
-        <li>Wallet: <a href="https://strandedtoken.trade">https://strandedtoken.trade</a></li>
         <li>Code: <a href="https://github.com/SAW72/STRANDED">https://github.com/SAW72/STRANDED</a></li>
         <li>Issues: <a href="https://github.com/SAW72/STRANDED/issues">https://github.com/SAW72/STRANDED/issues</a></li>
         <li>Arb Sepolia relayer: <a href="https://stranded-relayer-arb.onrender.com">https://stranded-relayer-arb.onrender.com</a></li>
@@ -158,7 +160,7 @@
           <li><a href="privacy-notice.html">Privacy Notice (DRAFT)</a></li>
           <li><a href="sanctions.html">Sanctioned jurisdictions (DRAFT)</a></li>
         </ul>
-        <p class="muted">Eligibility is subject to terms, jurisdiction restrictions, and sanctions screening. Test now. An airdrop may come later; amount TBD.</p>
+        <p class="muted">Eligibility is subject to terms, jurisdiction restrictions, and sanctions screening.</p>
       </footer>
     </main>
   </body>
