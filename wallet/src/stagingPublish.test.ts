@@ -38,7 +38,8 @@ const POINTS =
   "Testing is optional and at your own risk. You may lose any funds you use, and we do not ask you to deposit funds. Testers can earn points for testing. Points have no cash or monetary value, are not transferable, cannot be sold or exchanged, and are not tokens, securities or a promise of any future token, airdrop or payment. Points are not earned by depositing funds or by the amount of funds used. We may change or end the points program at any time.";
 const POINTS_BASIS = "Points are per task or per bug reported, never per amount or volume.";
 const NO_PRIZES = "There are no leaderboards, ranks, or prizes.";
-const TERMS_ITEM_2 = `${POINTS} ${POINTS_BASIS} There are no leaderboards, ranks or prizes.`;
+const TERMS_ITEM_2 =
+  "Testing is optional and at your own risk. Use only free testnet tokens. They have no value. Do not connect a wallet that holds real funds. We do not ask you to deposit funds. Testers can earn points for testing. Points have no cash or monetary value, are not transferable, cannot be sold or exchanged, and are not tokens, securities or a promise of any future token, airdrop or payment. Points are not earned by depositing funds or by the amount of funds used. We may change or end the points program at any time. Points are per task or per bug reported, never per amount or volume. There are no leaderboards, ranks or prizes.";
 const TERMS_ITEM_6 =
   "Stranded is testnet only. Use only free testnet tokens, which have no value. Do not connect a wallet that holds real funds.";
 const NO_OFFER = "Nothing here is an offer of tokens, value or any investment.";
