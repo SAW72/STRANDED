@@ -39,7 +39,7 @@ const CHANGES =
   "We may change, suspend or cancel this program, the points program or these terms at any time without notice or liability.";
 const RETENTION =
   "We keep tester data while the program runs and for 12 months after it ends or you leave, then delete or anonymize it, unless law requires longer. Anonymized bug reports (handle and wallet removed) may be kept indefinitely. If any airdrop or distribution occurs, wallet and points records are kept as long as tax and sanctions record rules require.";
-const SANCTIONS_PARTICIPATE = "You may not participate if you are on, or owned or controlled by anyone on, the U.S. Treasury OFAC Specially Designated Nationals (SDN) List";
+const SANCTIONS_PARTICIPATE = "You may not participate in, sign up for, or receive anything from this program if you are: (a) located in";
 const SANCTIONS_DISCRETION =
   "We may screen wallet addresses and participants, block access by geography, and withhold or revoke points or anything else from anyone at our discretion to comply with law.";
 const MAIN_BLOB = "/blob/main/";
