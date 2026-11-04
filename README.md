@@ -286,7 +286,7 @@ The page source is [`wallet/staging/tester-early-access.html`](wallet/staging/te
 
 We only use this to contact you about testing. Never share private keys or seed phrases.
 
-Do not post your email, wallet address or any key here. GitHub issues are public. We will reply in this issue with a link to a private form for contact details. Official contact: [TBD by Spencer].
+Do not post your email, wallet address or any key here. GitHub issues are public. We will reply in this issue with a link to a private form for contact details. Official contact: stranded@stewardoftheking.com.
 
 This sign-up collects only your GitHub handle, which is the account that opens this issue. It also requires a sanctions and terms attestation. Do not add any other personal details. A bug report can be a normal issue: https://github.com/SAW72/STRANDED/issues/new
 

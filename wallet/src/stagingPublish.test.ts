@@ -26,7 +26,7 @@ const PRIVACY = "We only use this to contact you about testing. Never share priv
 const ELIGIBILITY =
   "Eligibility is subject to terms, jurisdiction restrictions, and sanctions screening.";
 const PUBLIC_NOTE =
-  "Do not post your email, wallet address or any key here. GitHub issues are public. We will reply in this issue with a link to a private form for contact details. Official contact: [TBD by Spencer].";
+  "Do not post your email, wallet address or any key here. GitHub issues are public. We will reply in this issue with a link to a private form for contact details. Official contact: stranded@stewardoftheking.com.";
 const HANDLE_ONLY =
   "This sign-up collects only your GitHub handle, which is the account that opens this issue.";
 const SIGNUP = "https://github.com/SAW72/STRANDED/issues/new?template=tester-signup.yml";
@@ -38,8 +38,8 @@ const RETIRED_PRODUCTION = "Stranded runs on production smart contracts that use
 const CHANGES =
   "We may change, suspend or cancel this program, the points program or these terms at any time without notice or liability.";
 const RETENTION =
-  "We keep tester data only as long as the program needs it, plus what law requires, then delete it [specific period TBD—attorney].";
-const SANCTIONS_PARTICIPATE = "participate in, sign up for, or receive anything from";
+  "We keep tester data while the program runs and for 12 months after it ends or you leave, then delete or anonymize it, unless law requires longer. Anonymized bug reports (handle and wallet removed) may be kept indefinitely. If any airdrop or distribution occurs, wallet and points records are kept as long as tax and sanctions record rules require.";
+const SANCTIONS_PARTICIPATE = "You may not participate if you are on, or owned or controlled by anyone on, the U.S. Treasury OFAC Specially Designated Nationals (SDN) List";
 const SANCTIONS_DISCRETION =
   "We may screen wallet addresses and participants, block access by geography, and withhold or revoke points or anything else from anyone at our discretion to comply with law.";
 const MAIN_BLOB = "/blob/main/";
